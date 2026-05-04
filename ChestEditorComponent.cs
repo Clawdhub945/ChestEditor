@@ -556,7 +556,10 @@ public class ChestEditorComponent : MonoBehaviour
             Facility = chest.Facility
         };
 
-        Plugin.LogInfo($"更新箱子 {chest.Name} 物品数据: {newItems.Count} 个物品");
+        // 调试输出
+        Plugin.LogInfo($"更新箱子 {chest.Name}: {newItems.Count} 个物品");
+        foreach (var item in newItems)
+            Plugin.LogInfo($"  {item.StuffId} x{item.Count}");
     }
 
     // ====== 反射工具 ======
@@ -790,11 +793,19 @@ public class ChestEditorComponent : MonoBehaviour
         var items = new List<ItemInfo>();
 
         object? bag = GetProp(facility, "bag");
-        if (bag == null) return items;
+        if (bag == null)
+        {
+            Plugin.LogInfo("ReadItemsFromBag: bag is null");
+            return items;
+        }
 
         // 读取 bag.dic (BagDic 类型)
         object? bagDic = GetProp(bag, "dic");
-        if (bagDic == null) return items;
+        if (bagDic == null)
+        {
+            Plugin.LogInfo("ReadItemsFromBag: bagDic is null");
+            return items;
+        }
 
         // 尝试从 BagDic 读取 _key_list_list 和 _value_list_list
         object? keyList = GetProp(bagDic, "_key_list_list");
@@ -804,10 +815,13 @@ public class ChestEditorComponent : MonoBehaviour
         if (keyList == null) keyList = GetProp(bag, "_key_list_list");
         if (valueList == null) valueList = GetProp(bag, "_value_list_list");
 
+        Plugin.LogInfo($"ReadItemsFromBag: keyList={keyList != null}, valueList={valueList != null}");
+
         if (keyList != null && valueList != null)
         {
             int keyCount = GetListCount(keyList);
             int valueCount = GetListCount(valueList);
+            Plugin.LogInfo($"ReadItemsFromBag: keyCount={keyCount}, valueCount={valueCount}");
 
             if (keyCount > 0 && keyCount == valueCount)
             {
@@ -824,6 +838,7 @@ public class ChestEditorComponent : MonoBehaviour
         // 如果上面没读到，尝试直接遍历 BagDic 的属性找 Dictionary
         if (items.Count == 0)
         {
+            Plugin.LogInfo("ReadItemsFromBag: 尝试遍历 BagDic 属性");
             var dicType = bagDic.GetType();
             var t = dicType;
             while (t != null && t != typeof(object))
@@ -837,11 +852,14 @@ public class ChestEditorComponent : MonoBehaviour
                         if (val == null) continue;
 
                         var valType = val.GetType();
+                        Plugin.LogInfo($"ReadItemsFromBag: 属性 {prop.Name} 类型 {valType.FullName}");
+
                         if (valType.IsGenericType)
                         {
                             var args = valType.GetGenericArguments();
                             if (args.Length == 2 && args[0] == typeof(int) && args[1] == typeof(int))
                             {
+                                Plugin.LogInfo($"ReadItemsFromBag: 找到 Dictionary<int,int> 属性 {prop.Name}");
                                 // 找到 Dictionary<int, int>
                                 var ge = valType.GetMethod("GetEnumerator", BF);
                                 if (ge != null)
@@ -861,6 +879,7 @@ public class ChestEditorComponent : MonoBehaviour
                                             items.Add(new ItemInfo { StuffId = key, Count = v });
                                     }
 
+                                    Plugin.LogInfo($"ReadItemsFromBag: 从字典读取 {items.Count} 个物品");
                                     if (items.Count > 0) return items;
                                 }
                             }
