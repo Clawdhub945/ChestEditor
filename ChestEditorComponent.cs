@@ -300,14 +300,16 @@ public class ChestEditorComponent : MonoBehaviour
                 GUILayout.BeginHorizontal();
                 if (GUILayout.Button("-1", _removeButtonStyle, GUILayout.Width(24), GUILayout.Height(18)))
                 {
+                    int chestIndex = _chests.IndexOf(chest);
                     int capturedStuffId = item.StuffId;
-                    _pendingAction = () => RemoveItem(chest.Facility, capturedStuffId, 1);
+                    _pendingAction = () => RemoveAndUpdate(chestIndex, capturedStuffId, 1);
                 }
                 if (GUILayout.Button("-All", _removeButtonStyle, GUILayout.Width(30), GUILayout.Height(18)))
                 {
+                    int chestIndex = _chests.IndexOf(chest);
                     int capturedStuffId = item.StuffId;
                     int capturedCount = item.Count;
-                    _pendingAction = () => RemoveItem(chest.Facility, capturedStuffId, capturedCount);
+                    _pendingAction = () => RemoveAndUpdate(chestIndex, capturedStuffId, capturedCount);
                 }
                 GUILayout.EndHorizontal();
 
@@ -378,9 +380,10 @@ public class ChestEditorComponent : MonoBehaviour
             GUILayout.Label($"{kvp.Value} (ID:{kvp.Key})", _itemCountStyle, GUILayout.ExpandWidth(true));
             if (GUILayout.Button($"添加 {_addItemCount}", _addButtonStyle, GUILayout.Width(70)))
             {
+                int chestIndex = _chests.IndexOf(chest);
                 int capturedStuffId = kvp.Key;
                 int capturedCount = _addItemCount;
-                _pendingAction = () => AddItem(chest.Facility, capturedStuffId, capturedCount);
+                _pendingAction = () => AddAndUpdate(chestIndex, capturedStuffId, capturedCount);
             }
             GUILayout.EndHorizontal();
         }
@@ -453,11 +456,49 @@ public class ChestEditorComponent : MonoBehaviour
         }
     }
 
-    private void AddItem(object facility, int stuffId, int count)
+    private void RemoveAndUpdate(int chestIndex, int stuffId, int count)
     {
+        if (chestIndex < 0 || chestIndex >= _chests.Count) return;
+
+        var chest = _chests[chestIndex];
         try
         {
-            object? bag = GetProp(facility, "bag");
+            object? bag = GetProp(chest.Facility, "bag");
+            if (bag == null)
+            {
+                Plugin.LogError("bag 为 null");
+                return;
+            }
+
+            CacheBagMethods(bag);
+
+            if (_removeStuffMethod != null)
+            {
+                _removeStuffMethod.Invoke(bag, new object[] { stuffId, count, false });
+                Plugin.LogInfo($"删除物品成功: {stuffId} x{count}");
+
+                // 只更新当前箱子的物品数据
+                UpdateChestItems(chestIndex);
+            }
+            else
+            {
+                Plugin.LogError("RemoveStuff 方法未找到");
+            }
+        }
+        catch (Exception ex)
+        {
+            Plugin.LogError($"RemoveAndUpdate 异常: {ex.Message}");
+        }
+    }
+
+    private void AddAndUpdate(int chestIndex, int stuffId, int count)
+    {
+        if (chestIndex < 0 || chestIndex >= _chests.Count) return;
+
+        var chest = _chests[chestIndex];
+        try
+        {
+            object? bag = GetProp(chest.Facility, "bag");
             if (bag == null)
             {
                 Plugin.LogError("bag 为 null");
@@ -471,53 +512,51 @@ public class ChestEditorComponent : MonoBehaviour
             {
                 _addStuffNoNotifyMethod.Invoke(bag, new object[] { stuffId, count });
                 Plugin.LogInfo($"添加物品成功(无回调): {stuffId} x{count}");
-                RefreshChestList();
             }
             else if (_addStuffMethod != null)
             {
                 _addStuffMethod.Invoke(bag, new object[] { stuffId, count, false });
                 Plugin.LogInfo($"添加物品成功: {stuffId} x{count}");
-                RefreshChestList();
             }
             else
             {
                 Plugin.LogError("AddStuff 方法未找到");
-            }
-        }
-        catch (Exception ex)
-        {
-            Plugin.LogError($"AddItem 异常: {ex.Message}");
-        }
-    }
-
-    private void RemoveItem(object facility, int stuffId, int count)
-    {
-        try
-        {
-            object? bag = GetProp(facility, "bag");
-            if (bag == null)
-            {
-                Plugin.LogError("bag 为 null");
                 return;
             }
 
-            CacheBagMethods(bag);
-
-            if (_removeStuffMethod != null)
-            {
-                _removeStuffMethod.Invoke(bag, new object[] { stuffId, count, false });
-                Plugin.LogInfo($"删除物品成功: {stuffId} x{count}");
-                RefreshChestList();
-            }
-            else
-            {
-                Plugin.LogError("RemoveStuff 方法未找到");
-            }
+            // 只更新当前箱子的物品数据
+            UpdateChestItems(chestIndex);
         }
         catch (Exception ex)
         {
-            Plugin.LogError($"RemoveItem 异常: {ex.Message}");
+            Plugin.LogError($"AddAndUpdate 异常: {ex.Message}");
         }
+    }
+
+    private void UpdateChestItems(int chestIndex)
+    {
+        if (chestIndex < 0 || chestIndex >= _chests.Count) return;
+
+        var chest = _chests[chestIndex];
+        var newItems = ReadItemsFromBag(chest.Facility);
+
+        int maxCap = 0, usedCap = 0;
+        ReadCapacityFromBag(chest.Facility, ref maxCap, ref usedCap);
+
+        _chests[chestIndex] = new ChestInfo
+        {
+            Guid = chest.Guid,
+            StuffId = chest.StuffId,
+            Name = chest.Name,
+            Items = newItems,
+            MaxCap = maxCap,
+            UsedCap = usedCap,
+            PosX = chest.PosX,
+            PosY = chest.PosY,
+            Facility = chest.Facility
+        };
+
+        Plugin.LogInfo($"更新箱子 {chest.Name} 物品数据: {newItems.Count} 个物品");
     }
 
     // ====== 反射工具 ======
