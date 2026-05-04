@@ -15,8 +15,11 @@ public class ChestEditorComponent : MonoBehaviour
     private string _searchText = "";
     private HashSet<int> _collapsedChests = new();
 
-    // 延迟操作队列，避免遍历时修改集合
+    // 延迟操作队列
     private Action? _pendingAction;
+
+    // 调试标记
+    private static bool _debugDumped;
 
     // 筛选
     private static readonly Dictionary<int, (string Name, bool Enabled)> _filterItems = new()
@@ -63,11 +66,7 @@ public class ChestEditorComponent : MonoBehaviour
     private int _addItemCount = 1;
     private ChestInfo? _selectedChest;
 
-    // 物品选择列表
     private static List<KeyValuePair<int, string>>? _allItems;
-
-    // 缓存 bag 的字典属性名
-    private static string? _cachedDicName;
 
     public ChestEditorComponent(IntPtr ptr) : base(ptr) { }
 
@@ -159,9 +158,9 @@ public class ChestEditorComponent : MonoBehaviour
 
     private void DrawWindow(int id)
     {
-        // 顶部栏
         GUILayout.BeginHorizontal();
         if (GUILayout.Button("刷新", GUILayout.Width(44))) RefreshChestList();
+        if (GUILayout.Button("调试", GUILayout.Width(44))) DumpFirstBag();
         if (GUILayout.Button("收起", GUILayout.Width(44)))
             foreach (var c in _chests) _collapsedChests.Add(c.Guid);
         if (GUILayout.Button("展开", GUILayout.Width(44)))
@@ -172,7 +171,6 @@ public class ChestEditorComponent : MonoBehaviour
         if (GUILayout.Button("X", GUILayout.Width(24), GUILayout.Height(20))) _showWindow = false;
         GUILayout.EndHorizontal();
 
-        // 筛选栏
         bool filterChanged = false;
         GUILayout.BeginHorizontal();
         GUILayout.Label("筛选:", GUILayout.Width(36));
@@ -211,7 +209,6 @@ public class ChestEditorComponent : MonoBehaviour
         if (fi > 0) GUILayout.EndHorizontal();
         if (filterChanged) RefreshChestList();
 
-        // 搜索栏
         GUILayout.BeginHorizontal();
         GUILayout.Label("搜索:", GUILayout.Width(36));
         _searchText = GUILayout.TextField(_searchText, _searchFieldStyle, GUILayout.ExpandWidth(true));
@@ -226,7 +223,6 @@ public class ChestEditorComponent : MonoBehaviour
 
         foreach (var chest in _chests)
         {
-            // 搜索过滤
             if (searching)
             {
                 bool chestHasMatch = false;
@@ -247,7 +243,6 @@ public class ChestEditorComponent : MonoBehaviour
                 ? $"{chest.UsedCap:N0}/{chest.MaxCap:N0}"
                 : $"{chest.Items.Count}";
 
-            // 箱子标题栏
             GUILayout.BeginHorizontal("box");
             if (GUILayout.Button($"{arrow} {chest.Name}", _chestHeaderStyle))
             {
@@ -256,7 +251,6 @@ public class ChestEditorComponent : MonoBehaviour
             }
             GUILayout.FlexibleSpace();
 
-            // 添加物品按钮
             if (GUILayout.Button("+添加", _addButtonStyle, GUILayout.Width(50)))
             {
                 _selectedChest = chest;
@@ -281,7 +275,6 @@ public class ChestEditorComponent : MonoBehaviour
                 continue;
             }
 
-            // 物品格子 - 用 for 循环代替 foreach，避免修改集合问题
             int col = 0;
             for (int i = 0; i < chest.Items.Count; i++)
             {
@@ -302,7 +295,6 @@ public class ChestEditorComponent : MonoBehaviour
                 GUILayout.Label(line2, _itemCountStyle, GUILayout.Width(72), GUILayout.Height(14));
                 GUILayout.Label($"x{item.Count}", _itemCountStyle, GUILayout.Width(72), GUILayout.Height(14));
 
-                // 删除按钮 - 使用延迟操作
                 GUILayout.BeginHorizontal();
                 if (GUILayout.Button("-1", _removeButtonStyle, GUILayout.Width(24), GUILayout.Height(18)))
                 {
@@ -347,14 +339,12 @@ public class ChestEditorComponent : MonoBehaviour
         GUILayout.Label($"向 [{chest.Name}] 添加物品", _titleStyle);
         GUILayout.Space(4);
 
-        // 搜索物品
         GUILayout.BeginHorizontal();
         GUILayout.Label("搜索:", GUILayout.Width(36));
         _addItemSearch = GUILayout.TextField(_addItemSearch, _searchFieldStyle, GUILayout.ExpandWidth(true));
         if (GUILayout.Button("清除", GUILayout.Width(40))) _addItemSearch = "";
         GUILayout.EndHorizontal();
 
-        // 数量设置
         GUILayout.BeginHorizontal();
         GUILayout.Label("数量:", GUILayout.Width(36));
         string countStr = GUILayout.TextField(_addItemCount.ToString(), GUILayout.Width(80));
@@ -368,13 +358,10 @@ public class ChestEditorComponent : MonoBehaviour
 
         GUILayout.Space(4);
 
-        // 物品列表
         _addItemScrollPos = GUILayout.BeginScrollView(_addItemScrollPos);
 
         if (_allItems == null)
-        {
             _allItems = ItemNames.GetAllItems().ToList();
-        }
 
         string searchLower = _addItemSearch.ToLower();
         bool searching = !string.IsNullOrEmpty(_addItemSearch);
@@ -389,7 +376,7 @@ public class ChestEditorComponent : MonoBehaviour
             GUILayout.Label($"{kvp.Value} (ID:{kvp.Key})", _itemCountStyle, GUILayout.ExpandWidth(true));
             if (GUILayout.Button($"添加 {_addItemCount}", _addButtonStyle, GUILayout.Width(70)))
             {
-                AddItemToChest(chest.Facility, kvp.Key, _addItemCount);
+                _pendingAction = () => AddItemToChest(chest.Facility, kvp.Key, _addItemCount);
             }
             GUILayout.EndHorizontal();
         }
@@ -398,11 +385,80 @@ public class ChestEditorComponent : MonoBehaviour
 
         GUILayout.Space(4);
         if (GUILayout.Button("关闭", GUILayout.Height(24)))
-        {
             _showAddItemWindow = false;
-        }
 
         GUI.DragWindow();
+    }
+
+    // ====== 调试方法 ======
+
+    private void DumpFirstBag()
+    {
+        if (_chests.Count == 0)
+        {
+            Plugin.LogInfo("没有箱子数据");
+            return;
+        }
+
+        var chest = _chests[0];
+        Plugin.LogInfo($"=== 调试箱子: {chest.Name} ===");
+
+        object facility = chest.Facility;
+        object? bag = GetProp(facility, "bag");
+        if (bag == null)
+        {
+            Plugin.LogError("bag 为 null");
+            return;
+        }
+
+        Plugin.LogInfo($"bag 类型: {bag.GetType().FullName}");
+
+        // 列出 bag 的所有属性
+        Plugin.LogInfo("--- bag 属性 ---");
+        var bagType = bag.GetType();
+        var t = bagType;
+        while (t != null && t != typeof(object))
+        {
+            foreach (var prop in t.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
+            {
+                if (prop.GetIndexParameters().Length > 0)
+                {
+                    Plugin.LogInfo($"  [索引器] {t.Name}.{prop.Name} (参数: {string.Join(", ", prop.GetIndexParameters().Select(p => p.ParameterType.Name))})");
+                    continue;
+                }
+                try
+                {
+                    var val = prop.GetValue(bag);
+                    string valStr = val?.ToString() ?? "null";
+                    if (valStr.Length > 100) valStr = valStr.Substring(0, 100) + "...";
+                    Plugin.LogInfo($"  {t.Name}.{prop.Name} = {valStr} (类型: {val?.GetType().Name ?? "null"})");
+                }
+                catch (Exception ex)
+                {
+                    Plugin.LogInfo($"  {t.Name}.{prop.Name} = [异常: {ex.Message}]");
+                }
+            }
+            t = t.BaseType;
+        }
+
+        // 列出 bag 的所有方法（只列出可能相关的）
+        Plugin.LogInfo("--- bag 方法 (Add/Remove/Set/Get) ---");
+        t = bagType;
+        while (t != null && t != typeof(object))
+        {
+            foreach (var method in t.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
+            {
+                string name = method.Name;
+                if (name.Contains("Add") || name.Contains("Remove") || name.Contains("Set") || name.Contains("Get")
+                    || name.Contains("Item") || name.Contains("Put") || name.Contains("Take"))
+                {
+                    var p = method.GetParameters();
+                    string paramStr = string.Join(", ", p.Select(x => $"{x.ParameterType.Name} {x.Name}"));
+                    Plugin.LogInfo($"  {t.Name}.{name}({paramStr}) -> {method.ReturnType.Name}");
+                }
+            }
+            t = t.BaseType;
+        }
     }
 
     // ====== 物品操作方法 ======
@@ -418,62 +474,113 @@ public class ChestEditorComponent : MonoBehaviour
                 return;
             }
 
-            // 获取 bag 内部的字典
-            object? dic = GetBagDic(bag);
-            if (dic == null)
+            Plugin.LogInfo($"尝试添加物品: stuffId={stuffId}, count={count}");
+            Plugin.LogInfo($"bag 类型: {bag.GetType().FullName}");
+
+            // 尝试直接调用 bag 的方法
+            var bagType = bag.GetType();
+            var methods = bagType.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+
+            // 1. 先尝试找 AddItem 方法
+            foreach (var m in methods)
             {
-                Plugin.LogError("找不到 bag 的字典");
-                return;
+                if (m.Name == "AddItem" && m.GetParameters().Length == 2)
+                {
+                    var p = m.GetParameters();
+                    Plugin.LogInfo($"找到 AddItem: ({p[0].ParameterType.Name}, {p[1].ParameterType.Name})");
+                    try
+                    {
+                        var result = m.Invoke(bag, new object[] { stuffId, count });
+                        Plugin.LogInfo($"AddItem 调用成功, 返回: {result}");
+                        RefreshChestList();
+                        return;
+                    }
+                    catch (Exception ex)
+                    {
+                        Plugin.LogError($"AddItem 调用失败: {ex.Message}");
+                    }
+                }
             }
 
-            // 直接用反射获取并设置值
-            var dicType = dic.GetType();
-
-            // 查找 set_Item 方法（索引器的 setter）
-            var methods = dicType.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            MethodInfo? setItemMethod = null;
-            MethodInfo? getItemMethod = null;
-
+            // 2. 尝试找 set_Item 索引器
             foreach (var m in methods)
             {
                 if (m.Name == "set_Item" && m.GetParameters().Length == 2)
                 {
                     var p = m.GetParameters();
-                    if (p[0].ParameterType == typeof(int) && p[1].ParameterType == typeof(int))
+                    Plugin.LogInfo($"找到 set_Item: ({p[0].ParameterType.Name}, {p[1].ParameterType.Name})");
+                    try
                     {
-                        setItemMethod = m;
+                        m.Invoke(bag, new object[] { stuffId, count });
+                        Plugin.LogInfo($"set_Item 调用成功");
+                        RefreshChestList();
+                        return;
                     }
-                }
-                if (m.Name == "get_Item" && m.GetParameters().Length == 1)
-                {
-                    var p = m.GetParameters();
-                    if (p[0].ParameterType == typeof(int))
+                    catch (Exception ex)
                     {
-                        getItemMethod = m;
+                        Plugin.LogError($"set_Item 调用失败: {ex.Message}");
                     }
                 }
             }
 
-            if (setItemMethod != null)
+            // 3. 尝试遍历 bag 的属性找字典
+            Plugin.LogInfo("--- 尝试遍历 bag 属性找字典 ---");
+            var t3 = bagType;
+            while (t3 != null && t3 != typeof(object))
             {
-                // 先获取当前数量
-                int currentCount = 0;
-                if (getItemMethod != null)
+                foreach (var prop in t3.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
                 {
-                    try { currentCount = (int)(getItemMethod.Invoke(dic, new object[] { stuffId }) ?? 0); } catch { }
-                }
+                    if (prop.GetIndexParameters().Length > 0) continue;
+                    try
+                    {
+                        var val = prop.GetValue(bag);
+                        if (val == null) continue;
 
-                setItemMethod.Invoke(dic, new object[] { stuffId, currentCount + count });
-                Plugin.LogInfo($"添加物品成功: {stuffId} x{count} (原有 {currentCount})");
-                RefreshChestList();
-                return;
+                        var valType = val.GetType();
+                        Plugin.LogInfo($"  {prop.Name}: {valType.FullName}");
+
+                        // 检查是否是 Dictionary<int, int>
+                        if (valType.IsGenericType)
+                        {
+                            var args = valType.GetGenericArguments();
+                            if (args.Length == 2)
+                            {
+                                Plugin.LogInfo($"    泛型参数: {args[0].Name}, {args[1].Name}");
+
+                                // 尝试找 set_Item
+                                var valMethods = valType.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                                foreach (var vm in valMethods)
+                                {
+                                    if (vm.Name == "set_Item" && vm.GetParameters().Length == 2)
+                                    {
+                                        var vp = vm.GetParameters();
+                                        Plugin.LogInfo($"    找到字典 set_Item: ({vp[0].ParameterType.Name}, {vp[1].ParameterType.Name})");
+                                        try
+                                        {
+                                            vm.Invoke(val, new object[] { stuffId, count });
+                                            Plugin.LogInfo($"    字典 set_Item 调用成功!");
+                                            RefreshChestList();
+                                            return;
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            Plugin.LogError($"    字典 set_Item 失败: {ex.Message}");
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    catch { }
+                }
+                t3 = t3.BaseType;
             }
 
-            Plugin.LogError("未找到 set_Item 方法");
+            Plugin.LogError("未找到可用的添加方法");
         }
         catch (Exception ex)
         {
-            Plugin.LogError($"AddItemToChest 异常: {ex.Message}");
+            Plugin.LogError($"AddItemToChest 异常: {ex.Message}\n{ex.StackTrace}");
         }
     }
 
@@ -488,110 +595,120 @@ public class ChestEditorComponent : MonoBehaviour
                 return;
             }
 
-            object? dic = GetBagDic(bag);
-            if (dic == null)
-            {
-                Plugin.LogError("找不到 bag 的字典");
-                return;
-            }
+            Plugin.LogInfo($"尝试修改物品: stuffId={stuffId}, delta={delta}");
 
-            var dicType = dic.GetType();
-            var methods = dicType.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            MethodInfo? setItemMethod = null;
-            MethodInfo? getItemMethod = null;
-            MethodInfo? removeMethod = null;
+            var bagType = bag.GetType();
+            var methods = bagType.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
 
-            foreach (var m in methods)
+            // 1. 先尝试找 RemoveItem 方法
+            if (delta < 0)
             {
-                if (m.Name == "set_Item" && m.GetParameters().Length == 2)
+                foreach (var m in methods)
                 {
-                    var p = m.GetParameters();
-                    if (p[0].ParameterType == typeof(int) && p[1].ParameterType == typeof(int))
+                    if (m.Name == "RemoveItem" && m.GetParameters().Length == 2)
                     {
-                        setItemMethod = m;
-                    }
-                }
-                if (m.Name == "get_Item" && m.GetParameters().Length == 1)
-                {
-                    var p = m.GetParameters();
-                    if (p[0].ParameterType == typeof(int))
-                    {
-                        getItemMethod = m;
-                    }
-                }
-                if (m.Name == "Remove" && m.GetParameters().Length == 1)
-                {
-                    var p = m.GetParameters();
-                    if (p[0].ParameterType == typeof(int))
-                    {
-                        removeMethod = m;
+                        var p = m.GetParameters();
+                        Plugin.LogInfo($"找到 RemoveItem: ({p[0].ParameterType.Name}, {p[1].ParameterType.Name})");
+                        try
+                        {
+                            m.Invoke(bag, new object[] { stuffId, -delta });
+                            Plugin.LogInfo($"RemoveItem 调用成功");
+                            RefreshChestList();
+                            return;
+                        }
+                        catch (Exception ex)
+                        {
+                            Plugin.LogError($"RemoveItem 失败: {ex.Message}");
+                        }
                     }
                 }
             }
 
-            if (getItemMethod != null && (setItemMethod != null || removeMethod != null))
+            // 2. 尝试遍历属性找字典
+            var t2 = bagType;
+            while (t2 != null && t2 != typeof(object))
             {
-                int currentCount = 0;
-                try { currentCount = (int)(getItemMethod.Invoke(dic, new object[] { stuffId }) ?? 0); } catch { }
-
-                int newCount = Math.Max(0, currentCount + delta);
-
-                if (newCount == 0 && removeMethod != null)
+                foreach (var prop in t2.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
                 {
-                    removeMethod.Invoke(dic, new object[] { stuffId });
-                    Plugin.LogInfo($"移除物品: {stuffId}");
-                }
-                else if (setItemMethod != null)
-                {
-                    setItemMethod.Invoke(dic, new object[] { stuffId, newCount });
-                    Plugin.LogInfo($"修改物品: {stuffId} 数量 {currentCount} -> {newCount}");
-                }
+                    if (prop.GetIndexParameters().Length > 0) continue;
+                    try
+                    {
+                        var val = prop.GetValue(bag);
+                        if (val == null) continue;
 
-                RefreshChestList();
-                return;
+                        var valType = val.GetType();
+                        if (valType.IsGenericType)
+                        {
+                            var args = valType.GetGenericArguments();
+                            if (args.Length == 2 && args[0] == typeof(int) && args[1] == typeof(int))
+                            {
+                                var valMethods = valType.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+
+                                // 先获取当前值
+                                int currentCount = 0;
+                                foreach (var vm in valMethods)
+                                {
+                                    if (vm.Name == "get_Item" && vm.GetParameters().Length == 1)
+                                    {
+                                        try { currentCount = (int)(vm.Invoke(val, new object[] { stuffId }) ?? 0); } catch { }
+                                        break;
+                                    }
+                                }
+
+                                int newCount = Math.Max(0, currentCount + delta);
+                                Plugin.LogInfo($"当前数量: {currentCount}, 新数量: {newCount}");
+
+                                if (newCount == 0)
+                                {
+                                    // 尝试移除
+                                    foreach (var vm in valMethods)
+                                    {
+                                        if (vm.Name == "Remove" && vm.GetParameters().Length == 1)
+                                        {
+                                            try
+                                            {
+                                                vm.Invoke(val, new object[] { stuffId });
+                                                Plugin.LogInfo($"移除成功");
+                                                RefreshChestList();
+                                                return;
+                                            }
+                                            catch { }
+                                        }
+                                    }
+                                }
+
+                                // 设置新值
+                                foreach (var vm in valMethods)
+                                {
+                                    if (vm.Name == "set_Item" && vm.GetParameters().Length == 2)
+                                    {
+                                        try
+                                        {
+                                            vm.Invoke(val, new object[] { stuffId, newCount });
+                                            Plugin.LogInfo($"设置成功");
+                                            RefreshChestList();
+                                            return;
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            Plugin.LogError($"set_Item 失败: {ex.Message}");
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    catch { }
+                }
+                t2 = t2.BaseType;
             }
 
-            Plugin.LogError("未找到修改物品的方法");
+            Plugin.LogError("未找到修改方法");
         }
         catch (Exception ex)
         {
-            Plugin.LogError($"ModifyItemCount 异常: {ex.Message}");
+            Plugin.LogError($"ModifyItemCount 异常: {ex.Message}\n{ex.StackTrace}");
         }
-    }
-
-    /// <summary>
-    /// 获取 bag 内部的字典对象
-    /// </summary>
-    private object? GetBagDic(object bag)
-    {
-        // 如果已经缓存了字典名，直接用
-        if (_cachedDicName != null)
-        {
-            return GetProp(bag, _cachedDicName);
-        }
-
-        // 首次查找，尝试多个可能的名称
-        string[] dicNames = { "dic", "stuff_dic", "item_dic", "items", "content" };
-        foreach (var name in dicNames)
-        {
-            object? dic = GetProp(bag, name);
-            if (dic == null) continue;
-
-            // 验证这是一个 Dictionary<int, int>
-            var dicType = dic.GetType();
-            if (dicType.IsGenericType)
-            {
-                var args = dicType.GetGenericArguments();
-                if (args.Length == 2 && args[0] == typeof(int) && args[1] == typeof(int))
-                {
-                    _cachedDicName = name;
-                    Plugin.LogInfo($"找到 bag 字典: {name} (类型: {dicType.FullName})");
-                    return dic;
-                }
-            }
-        }
-
-        return null;
     }
 
     // ====== 反射工具 ======
@@ -752,11 +869,7 @@ public class ChestEditorComponent : MonoBehaviour
             }
 
             object? facilityDic = GetProp(territory, "facility_dic");
-            if (facilityDic == null)
-            {
-                Plugin.LogInfo("[错误] facility_dic 为 null");
-                return;
-            }
+            if (facilityDic == null) return;
 
             var values = GetProp(facilityDic, "Values");
             if (values == null) return;
@@ -828,29 +941,53 @@ public class ChestEditorComponent : MonoBehaviour
         object? bag = GetProp(facility, "bag");
         if (bag == null) return items;
 
-        object? dic = GetBagDic(bag);
-        if (dic == null) return items;
-
-        try
+        // 遍历 bag 的属性找字典
+        var bagType = bag.GetType();
+        var t = bagType;
+        while (t != null && t != typeof(object))
         {
-            var ge = dic.GetType().GetMethod("GetEnumerator", BF);
-            if (ge == null) return items;
-            var en = ge.Invoke(dic, null);
-            var mn = en.GetType().GetMethod("MoveNext", BF);
-            var cr = en.GetType().GetProperty("Current", BF);
-
-            while ((bool)(mn.Invoke(en, null) ?? false))
+            foreach (var prop in t.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
             {
-                var entry = cr.GetValue(en);
-                if (entry == null) continue;
+                if (prop.GetIndexParameters().Length > 0) continue;
+                try
+                {
+                    var val = prop.GetValue(bag);
+                    if (val == null) continue;
 
-                int key = GetInt(entry, "Key");
-                int val = GetInt(entry, "Value");
-                if (val > 0)
-                    items.Add(new ItemInfo { StuffId = key, Count = val });
+                    var valType = val.GetType();
+                    if (valType.IsGenericType)
+                    {
+                        var args = valType.GetGenericArguments();
+                        if (args.Length == 2 && args[0] == typeof(int) && args[1] == typeof(int))
+                        {
+                            // 找到 Dictionary<int, int>
+                            var ge = valType.GetMethod("GetEnumerator", BF);
+                            if (ge != null)
+                            {
+                                var en = ge.Invoke(val, null);
+                                var mn = en.GetType().GetMethod("MoveNext", BF);
+                                var cr = en.GetType().GetProperty("Current", BF);
+
+                                while ((bool)(mn.Invoke(en, null) ?? false))
+                                {
+                                    var entry = cr.GetValue(en);
+                                    if (entry == null) continue;
+
+                                    int key = GetInt(entry, "Key");
+                                    int val2 = GetInt(entry, "Value");
+                                    if (val2 > 0)
+                                        items.Add(new ItemInfo { StuffId = key, Count = val2 });
+                                }
+
+                                if (items.Count > 0) return items;
+                            }
+                        }
+                    }
+                }
+                catch { }
             }
+            t = t.BaseType;
         }
-        catch { }
 
         return items;
     }
@@ -865,24 +1002,46 @@ public class ChestEditorComponent : MonoBehaviour
             maxCap = GetInt(bag, "Limit");
             if (maxCap == 0) maxCap = GetInt(bag, "limit");
 
-            object? dic = GetBagDic(bag);
-            if (dic != null)
+            var bagType = bag.GetType();
+            var t = bagType;
+            while (t != null && t != typeof(object))
             {
-                var ge = dic.GetType().GetMethod("GetEnumerator", BF);
-                if (ge != null)
+                foreach (var prop in t.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
                 {
-                    var en = ge.Invoke(dic, null);
-                    var mn = en.GetType().GetMethod("MoveNext", BF);
-                    var cr = en.GetType().GetProperty("Current", BF);
-                    int total = 0;
-                    while ((bool)(mn.Invoke(en, null) ?? false))
+                    if (prop.GetIndexParameters().Length > 0) continue;
+                    try
                     {
-                        var entry = cr.GetValue(en);
-                        if (entry == null) continue;
-                        total += GetInt(entry, "Value");
+                        var val = prop.GetValue(bag);
+                        if (val == null) continue;
+
+                        var valType = val.GetType();
+                        if (valType.IsGenericType)
+                        {
+                            var args = valType.GetGenericArguments();
+                            if (args.Length == 2 && args[0] == typeof(int) && args[1] == typeof(int))
+                            {
+                                var ge = valType.GetMethod("GetEnumerator", BF);
+                                if (ge != null)
+                                {
+                                    var en = ge.Invoke(val, null);
+                                    var mn = en.GetType().GetMethod("MoveNext", BF);
+                                    var cr = en.GetType().GetProperty("Current", BF);
+                                    int total = 0;
+                                    while ((bool)(mn.Invoke(en, null) ?? false))
+                                    {
+                                        var entry = cr.GetValue(en);
+                                        if (entry == null) continue;
+                                        total += GetInt(entry, "Value");
+                                    }
+                                    usedCap = total;
+                                    return;
+                                }
+                            }
+                        }
                     }
-                    usedCap = total;
+                    catch { }
                 }
+                t = t.BaseType;
             }
         }
         catch { }
@@ -948,9 +1107,6 @@ public class ChestEditorComponent : MonoBehaviour
             pos.y = targetY;
             cam.transform.position = pos;
         }
-        catch (Exception ex)
-        {
-            Plugin.LogError($"LocateFacility 异常: {ex.Message}");
-        }
+        catch { }
     }
 }
