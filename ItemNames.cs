@@ -636,6 +636,68 @@ public static class ItemNames
 
     public static IEnumerable<KeyValuePair<int, string>> GetAllItems()
     {
-        return _names.OrderBy(x => x.Key);
+        return _names
+            .Where(x => IsStorageItem(x.Key))
+            .OrderBy(x => x.Key);
+    }
+
+    /// <summary>
+    /// 判断物品是否可以放进箱子（排除设施、科技等）
+    /// </summary>
+    public static bool IsStorageItem(int stuffId)
+    {
+        // 1xxxxx = 设施类，不能放进箱子
+        if (stuffId >= 100000 && stuffId < 200000) return false;
+
+        // 2xxxxx = 未知/保留
+        if (stuffId >= 200000 && stuffId < 300000) return false;
+
+        // 3xxxxx = 食物类，可以
+        if (stuffId >= 300000 && stuffId < 400000) return true;
+
+        // 4xxxxx = 工具/武器/装备/消耗品，可以
+        if (stuffId >= 400000 && stuffId < 500000) return true;
+
+        // 5xxxxx = 动物类，可以（但死亡的不行？先保留）
+        if (stuffId >= 500000 && stuffId < 600000) return true;
+
+        // 6xxxxx = 资源/材料类，可以
+        if (stuffId >= 600000 && stuffId < 700000) return true;
+
+        // 7xxxxx = 种子/植物/装饰品，可以
+        if (stuffId >= 700000 && stuffId < 800000) return true;
+
+        // 8xxxxx = 特殊物品（商人、尸体等），部分可以
+        // 排除商人(806xxx)、尸体(804001)、水(803001)等
+        if (stuffId >= 800000 && stuffId < 900000)
+        {
+            // 801xxx = 死亡动物，可以
+            if (stuffId >= 801000 && stuffId < 802000) return true;
+            // 802xxx = 贸易船，排除
+            if (stuffId >= 802000 && stuffId < 803000) return false;
+            // 803001 = 水，排除
+            if (stuffId == 803001) return false;
+            // 804001 = 尸体，排除
+            if (stuffId == 804001) return false;
+            // 806xxx = 商人，排除
+            if (stuffId >= 806000 && stuffId < 807000) return false;
+            // 808001 = ???，排除
+            if (stuffId == 808001) return false;
+            // 809001 = 鼻涕，排除
+            if (stuffId == 809001) return false;
+            // 812xxx = 种族，排除
+            if (stuffId >= 812000 && stuffId < 813000) return false;
+            // 813xxx = 派对，排除
+            if (stuffId >= 813000 && stuffId < 814000) return false;
+            // 814xxx = 区域，排除
+            if (stuffId >= 814000 && stuffId < 815000) return false;
+            // 其他 8xxxxx 保留（龙魂石、龙鳞等）
+            return true;
+        }
+
+        // 9xxxxx = 科技/研究类，不能放进箱子
+        if (stuffId >= 900000 && stuffId < 1000000) return false;
+
+        return true;
     }
 }
