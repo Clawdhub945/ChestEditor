@@ -793,107 +793,84 @@ public class ChestEditorComponent : MonoBehaviour
         var items = new List<ItemInfo>();
 
         object? bag = GetProp(facility, "bag");
-        if (bag == null)
+        if (bag == null) return items;
+
+        // 直接用 bag.GetStuffCount 逐个检查已知物品
+        // 先收集所有可能的物品ID
+        var possibleIds = new List<int>();
+
+        // 从 ItemNames 获取所有物品ID
+        foreach (var kvp in ItemNames.GetAllItems())
+            possibleIds.Add(kvp.Key);
+
+        // 用 GetStuffCount 方法检查每个物品
+        var getStuffCount = bag.GetType().GetMethod("GetStuffCount", BF);
+        if (getStuffCount != null)
         {
-            Plugin.LogInfo("ReadItemsFromBag: bag is null");
-            return items;
-        }
+            var parms = getStuffCount.GetParameters();
+            Plugin.LogInfo($"ReadItemsFromBag: GetStuffCount 参数: {string.Join(", ", parms.Select(p => $"{p.ParameterType.Name} {p.Name}"))}");
 
-        // 读取 bag.dic (BagDic 类型)
-        object? bagDic = GetProp(bag, "dic");
-        if (bagDic == null)
-        {
-            Plugin.LogInfo("ReadItemsFromBag: bagDic is null");
-            return items;
-        }
-
-        // 尝试从 BagDic 读取 _key_list_list 和 _value_list_list
-        object? keyList = GetProp(bagDic, "_key_list_list");
-        object? valueList = GetProp(bagDic, "_value_list_list");
-
-        // 如果 BagDic 没有，尝试从 bag 读取
-        if (keyList == null) keyList = GetProp(bag, "_key_list_list");
-        if (valueList == null) valueList = GetProp(bag, "_value_list_list");
-
-        Plugin.LogInfo($"ReadItemsFromBag: keyList={keyList != null}, valueList={valueList != null}");
-
-        if (keyList != null && valueList != null)
-        {
-            int keyCount = GetListCount(keyList);
-            int valueCount = GetListCount(valueList);
-            Plugin.LogInfo($"ReadItemsFromBag: keyCount={keyCount}, valueCount={valueCount}");
-
-            if (keyCount > 0 && keyCount == valueCount)
+            // 找到正确的重载 (int stuff_id, ...)
+            foreach (var m in bag.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
             {
-                for (int i = 0; i < keyCount; i++)
+                if (m.Name == "GetStuffCount")
                 {
-                    int key = GetListItem(keyList, i);
-                    int val = GetListItem(valueList, i);
-                    if (val > 0)
-                        items.Add(new ItemInfo { StuffId = key, Count = val });
+                    var p = m.GetParameters();
+                    Plugin.LogInfo($"  重载: ({string.Join(", ", p.Select(x => x.ParameterType.Name))})");
                 }
             }
-        }
 
-        // 如果上面没读到，尝试用 bag.GetAllStuff 方法
-        if (items.Count == 0)
-        {
-            Plugin.LogInfo("ReadItemsFromBag: 尝试用 bag.GetAllStuff");
+            // 尝试用 GetStuffCount(int stuff_id, null, null)
             try
             {
-                // 创建 Il2Cpp System.Collections.Generic.List<int>
-                var listType = typeof(Il2CppSystem.Collections.Generic.List<int>);
-                var outputList = new Il2CppSystem.Collections.Generic.List<int>();
-
-                // 调用 GetAllStuff
-                var getAllStuff = bag.GetType().GetMethod("GetAllStuff", BF);
-                if (getAllStuff != null)
+                foreach (int stuffId in possibleIds)
                 {
-                    getAllStuff.Invoke(bag, new object[] { outputList });
-                    Plugin.LogInfo($"ReadItemsFromBag: GetAllStuff 返回 {outputList.Count} 个物品");
-
-                    // outputList 格式是 [stuff_id, count, stuff_id, count, ...]
-                    for (int i = 0; i < outputList.Count - 1; i += 2)
+                    try
                     {
-                        int key = outputList[i];
-                        int val = outputList[i + 1];
-                        if (val > 0)
-                            items.Add(new ItemInfo { StuffId = key, Count = val });
+                        // 尝试不同的参数组合
+                        var result = getStuffCount.Invoke(bag, new object[] { stuffId, null, null });
+                        int count = Convert.ToInt32(result ?? 0);
+                        if (count > 0)
+                            items.Add(new ItemInfo { StuffId = stuffId, Count = count });
                     }
+                    catch { }
+                }
+
+                if (items.Count > 0)
+                {
+                    Plugin.LogInfo($"ReadItemsFromBag: GetStuffCount 读取 {items.Count} 个物品");
+                    return items;
                 }
             }
             catch (Exception ex)
             {
-                Plugin.LogError($"ReadItemsFromBag: GetAllStuff 异常: {ex.Message}");
+                Plugin.LogError($"ReadItemsFromBag: GetStuffCount 异常: {ex.Message}");
             }
         }
 
-        // 如果还是没读到，尝试遍历 BagDic 的属性找 Dictionary
-        if (items.Count == 0)
+        // 备选：遍历 BagDic 的所有字段和属性找 Dictionary
+        Plugin.LogInfo("ReadItemsFromBag: 尝试遍历 BagDic 找字典");
+        object? bagDic = GetProp(bag, "dic");
+        if (bagDic != null)
         {
-            Plugin.LogInfo("ReadItemsFromBag: 尝试遍历 BagDic 属性");
-            var dicType = bagDic.GetType();
-            var t = dicType;
+            var t = bagDic.GetType();
             while (t != null && t != typeof(object))
             {
-                foreach (var prop in t.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
+                // 遍历字段
+                foreach (var field in t.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
                 {
-                    if (prop.GetIndexParameters().Length > 0) continue;
                     try
                     {
-                        var val = prop.GetValue(bagDic);
+                        var val = field.GetValue(bagDic);
                         if (val == null) continue;
 
                         var valType = val.GetType();
-                        Plugin.LogInfo($"ReadItemsFromBag: 属性 {prop.Name} 类型 {valType.FullName}");
-
                         if (valType.IsGenericType)
                         {
                             var args = valType.GetGenericArguments();
                             if (args.Length == 2 && args[0] == typeof(int) && args[1] == typeof(int))
                             {
-                                Plugin.LogInfo($"ReadItemsFromBag: 找到 Dictionary<int,int> 属性 {prop.Name}");
-                                // 找到 Dictionary<int, int>
+                                Plugin.LogInfo($"ReadItemsFromBag: 找到字段 {field.Name} 类型 {valType.FullName}");
                                 var ge = valType.GetMethod("GetEnumerator", BF);
                                 if (ge != null)
                                 {
@@ -912,10 +889,71 @@ public class ChestEditorComponent : MonoBehaviour
                                             items.Add(new ItemInfo { StuffId = key, Count = v });
                                     }
 
-                                    Plugin.LogInfo($"ReadItemsFromBag: 从字典读取 {items.Count} 个物品");
-                                    if (items.Count > 0) return items;
+                                    if (items.Count > 0)
+                                    {
+                                        Plugin.LogInfo($"ReadItemsFromBag: 从字段 {field.Name} 读取 {items.Count} 个物品");
+                                        return items;
+                                    }
                                 }
                             }
+                        }
+                    }
+                    catch { }
+                }
+
+                // 遍历属性
+                foreach (var prop in t.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
+                {
+                    if (prop.GetIndexParameters().Length > 0) continue;
+                    try
+                    {
+                        var val = prop.GetValue(bagDic);
+                        if (val == null) continue;
+
+                        var valType = val.GetType();
+                        if (valType.IsGenericType)
+                        {
+                            var args = valType.GetGenericArguments();
+                            if (args.Length == 2 && args[0] == typeof(int) && args[1] == typeof(int))
+                            {
+                                Plugin.LogInfo($"ReadItemsFromBag: 找到属性 {prop.Name} 类型 {valType.FullName}");
+                                var ge = valType.GetMethod("GetEnumerator", BF);
+                                if (ge != null)
+                                {
+                                    var en = ge.Invoke(val, null);
+                                    var mn = en.GetType().GetMethod("MoveNext", BF);
+                                    var cr = en.GetType().GetProperty("Current", BF);
+
+                                    while ((bool)(mn.Invoke(en, null) ?? false))
+                                    {
+                                        var entry = cr.GetValue(en);
+                                        if (entry == null) continue;
+
+                                        int key = GetInt(entry, "Key");
+                                        int v = GetInt(entry, "Value");
+                                        if (v > 0)
+                                            items.Add(new ItemInfo { StuffId = key, Count = v });
+                                    }
+
+                                    if (items.Count > 0)
+                                    {
+                                        Plugin.LogInfo($"ReadItemsFromBag: 从属性 {prop.Name} 读取 {items.Count} 个物品");
+                                        return items;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    catch { }
+                }
+
+                t = t.BaseType;
+            }
+        }
+
+        Plugin.LogInfo($"ReadItemsFromBag: 最终读取 {items.Count} 个物品");
+        return items;
+    }
                         }
                     }
                     catch { }
