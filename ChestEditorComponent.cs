@@ -68,6 +68,7 @@ public class ChestEditorComponent : MonoBehaviour
     // 缓存方法
     private static MethodInfo? _addStuffMethod;
     private static MethodInfo? _removeStuffMethod;
+    private static MethodInfo? _addStuffNoNotifyMethod;
     private static bool _methodCached;
 
     public ChestEditorComponent(IntPtr ptr) : base(ptr) { }
@@ -403,17 +404,35 @@ public class ChestEditorComponent : MonoBehaviour
         var bagType = bag.GetType();
         var methods = bagType.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
 
-        // 找 AddStuff(int, int, bool)
+        // 找 AddStuffWithoutNotify(int, int)
         foreach (var m in methods)
         {
-            if (m.Name == "AddStuff")
+            if (m.Name == "AddStuffWithoutNotify")
             {
                 var p = m.GetParameters();
-                if (p.Length == 3 && p[0].ParameterType == typeof(int) && p[1].ParameterType == typeof(int) && p[2].ParameterType == typeof(bool))
+                if (p.Length == 2 && p[0].ParameterType == typeof(int) && p[1].ParameterType == typeof(int))
                 {
-                    _addStuffMethod = m;
-                    Plugin.LogInfo($"缓存 AddStuff 方法: ({p[0].ParameterType.Name}, {p[1].ParameterType.Name}, {p[2].ParameterType.Name})");
+                    _addStuffNoNotifyMethod = m;
+                    Plugin.LogInfo($"缓存 AddStuffWithoutNotify 方法");
                     break;
+                }
+            }
+        }
+
+        // 找 AddStuff(int, int, bool) 作为备选
+        if (_addStuffNoNotifyMethod == null)
+        {
+            foreach (var m in methods)
+            {
+                if (m.Name == "AddStuff")
+                {
+                    var p = m.GetParameters();
+                    if (p.Length == 3 && p[0].ParameterType == typeof(int) && p[1].ParameterType == typeof(int) && p[2].ParameterType == typeof(bool))
+                    {
+                        _addStuffMethod = m;
+                        Plugin.LogInfo($"缓存 AddStuff 方法");
+                        break;
+                    }
                 }
             }
         }
@@ -427,7 +446,7 @@ public class ChestEditorComponent : MonoBehaviour
                 if (p.Length == 3 && p[0].ParameterType == typeof(int) && p[1].ParameterType == typeof(int) && p[2].ParameterType == typeof(bool))
                 {
                     _removeStuffMethod = m;
-                    Plugin.LogInfo($"缓存 RemoveStuff 方法: ({p[0].ParameterType.Name}, {p[1].ParameterType.Name}, {p[2].ParameterType.Name})");
+                    Plugin.LogInfo($"缓存 RemoveStuff 方法");
                     break;
                 }
             }
@@ -447,9 +466,16 @@ public class ChestEditorComponent : MonoBehaviour
 
             CacheBagMethods(bag);
 
-            if (_addStuffMethod != null)
+            // 优先用 AddStuffWithoutNotify 避免回调卡死
+            if (_addStuffNoNotifyMethod != null)
             {
-                _addStuffMethod.Invoke(bag, new object[] { stuffId, count, true });
+                _addStuffNoNotifyMethod.Invoke(bag, new object[] { stuffId, count });
+                Plugin.LogInfo($"添加物品成功(无回调): {stuffId} x{count}");
+                RefreshChestList();
+            }
+            else if (_addStuffMethod != null)
+            {
+                _addStuffMethod.Invoke(bag, new object[] { stuffId, count, false });
                 Plugin.LogInfo($"添加物品成功: {stuffId} x{count}");
                 RefreshChestList();
             }
@@ -479,7 +505,7 @@ public class ChestEditorComponent : MonoBehaviour
 
             if (_removeStuffMethod != null)
             {
-                _removeStuffMethod.Invoke(bag, new object[] { stuffId, count, true });
+                _removeStuffMethod.Invoke(bag, new object[] { stuffId, count, false });
                 Plugin.LogInfo($"删除物品成功: {stuffId} x{count}");
                 RefreshChestList();
             }
