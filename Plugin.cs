@@ -35,7 +35,7 @@ public class Plugin : BasePlugin
         go.hideFlags = HideFlags.HideAndDontSave;
         go.AddComponent<ChestEditorComponent>();
 
-        LogInfo($"{PLUGIN_NAME} v{PLUGIN_VERSION} 已加载！按 F9 打开/关闭箱子编辑器");
+        LogInfo($"{PLUGIN_NAME} v{PLUGIN_VERSION} 已加载！按 F11 打开/关闭箱子编辑器");
     }
 
     public override bool Unload()

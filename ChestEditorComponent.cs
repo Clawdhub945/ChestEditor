@@ -68,7 +68,7 @@ public class ChestEditorComponent : MonoBehaviour
 
     private void Update()
     {
-        if (Input.GetKeyDown(KeyCode.F9))
+        if (Input.GetKeyDown(KeyCode.F11))
         {
             _showWindow = !_showWindow;
             if (_showWindow) RefreshChestList();
@@ -136,7 +136,7 @@ public class ChestEditorComponent : MonoBehaviour
     {
         if (!_showWindow) return;
         InitStyles();
-        _windowRect = GUI.Window(999001, _windowRect, (GUI.WindowFunction)DrawWindow, "箱子编辑器 (F9 关闭)");
+        _windowRect = GUI.Window(999001, _windowRect, (GUI.WindowFunction)DrawWindow, "箱子编辑器 (F11 关闭)");
 
         if (_showAddItemWindow && _selectedChest.HasValue)
         {
