@@ -835,7 +835,40 @@ public class ChestEditorComponent : MonoBehaviour
             }
         }
 
-        // 如果上面没读到，尝试直接遍历 BagDic 的属性找 Dictionary
+        // 如果上面没读到，尝试用 bag.GetAllStuff 方法
+        if (items.Count == 0)
+        {
+            Plugin.LogInfo("ReadItemsFromBag: 尝试用 bag.GetAllStuff");
+            try
+            {
+                // 创建 Il2Cpp System.Collections.Generic.List<int>
+                var listType = typeof(Il2CppSystem.Collections.Generic.List<int>);
+                var outputList = new Il2CppSystem.Collections.Generic.List<int>();
+
+                // 调用 GetAllStuff
+                var getAllStuff = bag.GetType().GetMethod("GetAllStuff", BF);
+                if (getAllStuff != null)
+                {
+                    getAllStuff.Invoke(bag, new object[] { outputList });
+                    Plugin.LogInfo($"ReadItemsFromBag: GetAllStuff 返回 {outputList.Count} 个物品");
+
+                    // outputList 格式是 [stuff_id, count, stuff_id, count, ...]
+                    for (int i = 0; i < outputList.Count - 1; i += 2)
+                    {
+                        int key = outputList[i];
+                        int val = outputList[i + 1];
+                        if (val > 0)
+                            items.Add(new ItemInfo { StuffId = key, Count = val });
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Plugin.LogError($"ReadItemsFromBag: GetAllStuff 异常: {ex.Message}");
+            }
+        }
+
+        // 如果还是没读到，尝试遍历 BagDic 的属性找 Dictionary
         if (items.Count == 0)
         {
             Plugin.LogInfo("ReadItemsFromBag: 尝试遍历 BagDic 属性");
