@@ -704,9 +704,6 @@ public class ChestEditorComponent : MonoBehaviour
 
     private void RefreshChestList()
     {
-        // 保存当前收起状态
-        var savedCollapsed = new HashSet<int>(_collapsedChests);
-
         _chests.Clear();
         _collapsedChests.Clear();
 
@@ -776,12 +773,10 @@ public class ChestEditorComponent : MonoBehaviour
                 });
             }
 
-            // 恢复之前的收起状态
+            // 默认全部收起
             foreach (var c in _chests)
-            {
-                if (savedCollapsed.Contains(c.Guid))
-                    _collapsedChests.Add(c.Guid);
-            }
+                _collapsedChests.Add(c.Guid);
+
             Plugin.LogInfo($"已缓存 {_chests.Count} 个设施");
         }
         catch (Exception ex)
