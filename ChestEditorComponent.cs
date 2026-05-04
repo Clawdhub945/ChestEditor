@@ -62,6 +62,7 @@ public class ChestEditorComponent : MonoBehaviour
     private string _addItemSearch = "";
     private int _addItemCount = 1;
     private ChestInfo? _selectedChest;
+    private int _selectedChestIndex = -1;
 
     private static List<KeyValuePair<int, string>>? _allItems;
 
@@ -223,8 +224,9 @@ public class ChestEditorComponent : MonoBehaviour
         bool searching = !string.IsNullOrEmpty(_searchText);
         string searchLower = searching ? _searchText.ToLower() : "";
 
-        foreach (var chest in _chests)
+        for (int ci = 0; ci < _chests.Count; ci++)
         {
+            var chest = _chests[ci];
             if (searching)
             {
                 bool chestHasMatch = false;
@@ -256,9 +258,11 @@ public class ChestEditorComponent : MonoBehaviour
             if (GUILayout.Button("+添加", _addButtonStyle, GUILayout.Width(50)))
             {
                 _selectedChest = chest;
+                _selectedChestIndex = ci;
                 _showAddItemWindow = true;
                 _addItemSearch = "";
                 _addItemCount = 1;
+
             }
 
             if (GUILayout.Button("定位", GUILayout.Width(36)))
@@ -380,9 +384,10 @@ public class ChestEditorComponent : MonoBehaviour
             GUILayout.Label($"{kvp.Value} (ID:{kvp.Key})", _itemCountStyle, GUILayout.ExpandWidth(true));
             if (GUILayout.Button($"添加 {_addItemCount}", _addButtonStyle, GUILayout.Width(70)))
             {
-                int chestIndex = _chests.IndexOf(chest);
+                int chestIndex = _selectedChestIndex;
                 int capturedStuffId = kvp.Key;
                 int capturedCount = _addItemCount;
+
                 _pendingAction = () => AddAndUpdate(chestIndex, capturedStuffId, capturedCount);
             }
             GUILayout.EndHorizontal();
@@ -416,7 +421,7 @@ public class ChestEditorComponent : MonoBehaviour
                 if (p.Length == 2 && p[0].ParameterType == typeof(int) && p[1].ParameterType == typeof(int))
                 {
                     _addStuffNoNotifyMethod = m;
-                    Plugin.LogInfo($"缓存 AddStuffWithoutNotify 方法");
+
                     break;
                 }
             }
@@ -433,7 +438,7 @@ public class ChestEditorComponent : MonoBehaviour
                     if (p.Length == 3 && p[0].ParameterType == typeof(int) && p[1].ParameterType == typeof(int) && p[2].ParameterType == typeof(bool))
                     {
                         _addStuffMethod = m;
-                        Plugin.LogInfo($"缓存 AddStuff 方法");
+
                         break;
                     }
                 }
@@ -449,7 +454,7 @@ public class ChestEditorComponent : MonoBehaviour
                 if (p.Length == 3 && p[0].ParameterType == typeof(int) && p[1].ParameterType == typeof(int) && p[2].ParameterType == typeof(bool))
                 {
                     _removeStuffMethod = m;
-                    Plugin.LogInfo($"缓存 RemoveStuff 方法");
+
                     break;
                 }
             }
@@ -475,7 +480,7 @@ public class ChestEditorComponent : MonoBehaviour
             if (_removeStuffMethod != null)
             {
                 _removeStuffMethod.Invoke(bag, new object[] { stuffId, count, false });
-                Plugin.LogInfo($"删除物品成功: {stuffId} x{count}");
+                Plugin.LogInfo($"删除成功: {ItemNames.GetName(stuffId)}({stuffId}) x{count}");
 
                 // 只更新当前箱子的物品数据
                 UpdateChestItems(chestIndex);
@@ -511,12 +516,12 @@ public class ChestEditorComponent : MonoBehaviour
             if (_addStuffNoNotifyMethod != null)
             {
                 _addStuffNoNotifyMethod.Invoke(bag, new object[] { stuffId, count });
-                Plugin.LogInfo($"添加物品成功(无回调): {stuffId} x{count}");
+                Plugin.LogInfo($"添加成功: {ItemNames.GetName(stuffId)}({stuffId}) x{count}");
             }
             else if (_addStuffMethod != null)
             {
                 _addStuffMethod.Invoke(bag, new object[] { stuffId, count, false });
-                Plugin.LogInfo($"添加物品成功: {stuffId} x{count}");
+                Plugin.LogInfo($"添加成功: {ItemNames.GetName(stuffId)}({stuffId}) x{count}");
             }
             else
             {
@@ -557,9 +562,7 @@ public class ChestEditorComponent : MonoBehaviour
         };
 
         // 调试输出
-        Plugin.LogInfo($"更新箱子 {chest.Name}: {newItems.Count} 个物品");
-        foreach (var item in newItems)
-            Plugin.LogInfo($"  {item.StuffId} x{item.Count}");
+
     }
 
     // ====== 反射工具 ======
@@ -715,7 +718,7 @@ public class ChestEditorComponent : MonoBehaviour
             var territory = SaveLoadPatches.CachedTerritory;
             if (territory == null)
             {
-                Plugin.LogInfo("[等待] Territory 未缓存");
+
                 return;
             }
 
@@ -780,11 +783,11 @@ public class ChestEditorComponent : MonoBehaviour
             foreach (var c in _chests)
                 _collapsedChests.Add(c.Guid);
 
-            Plugin.LogInfo($"已缓存 {_chests.Count} 个设施");
+
         }
         catch (Exception ex)
         {
-            Plugin.LogError($"[异常] {ex.Message}");
+
         }
     }
 
@@ -795,40 +798,83 @@ public class ChestEditorComponent : MonoBehaviour
         object? bag = GetProp(facility, "bag");
         if (bag == null) return items;
 
-        // 直接用 bag.GetStuffCount 逐个检查已知物品
-        // 先收集所有可能的物品ID
-        var possibleIds = new List<int>();
+        // 获取 BagDic 对象
+        object? bagDic = GetProp(bag, "dic");
 
-        // 从 ItemNames 获取所有物品ID
-        foreach (var kvp in ItemNames.GetAllItems())
-            possibleIds.Add(kvp.Key);
-
-        // 用 GetStuffCount 方法检查每个物品
-        var getStuffCount = bag.GetType().GetMethod("GetStuffCount", BF);
-        if (getStuffCount != null)
+        // 1. 找到 bag.GetStuffCount(int, Dictionary, Dictionary) 方法
+        MethodInfo? getStuffCountMethod = null;
+        foreach (var m in bag.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
         {
-            var parms = getStuffCount.GetParameters();
-            Plugin.LogInfo($"ReadItemsFromBag: GetStuffCount 参数: {string.Join(", ", parms.Select(p => $"{p.ParameterType.Name} {p.Name}"))}");
-
-            // 找到正确的重载 (int stuff_id, ...)
-            foreach (var m in bag.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+            if (m.Name == "GetStuffCount")
             {
-                if (m.Name == "GetStuffCount")
+                var p = m.GetParameters();
+                if (p.Length == 3 && p[0].ParameterType == typeof(int))
                 {
-                    var p = m.GetParameters();
-                    Plugin.LogInfo($"  重载: ({string.Join(", ", p.Select(x => x.ParameterType.Name))})");
+                    getStuffCountMethod = m;
+                    break;
                 }
             }
+        }
 
-            // 尝试用 GetStuffCount(int stuff_id, null, null)
+        // 2. 从 BagDic 中提取两个 Dictionary<int,int> 参数
+        object? dict1 = null, dict2 = null;
+        if (bagDic != null)
+        {
+            var dicType = bagDic.GetType();
+            var dicFields = new List<object>();
+            // 遍历 BagDic 的所有字段，找到 Dictionary<int,int> 类型的
+            var t = dicType;
+            while (t != null && t != typeof(object))
+            {
+                foreach (var field in t.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
+                {
+                    try
+                    {
+                        var val = field.GetValue(bagDic);
+                        if (val == null) continue;
+                        var valType = val.GetType();
+                        if (valType.IsGenericType)
+                        {
+                            var args = valType.GetGenericArguments();
+                            if (args.Length == 2 && args[0] == typeof(int) && args[1] == typeof(int))
+                            {
+
+                                dicFields.Add(val);
+                            }
+                        }
+                    }
+                    catch { }
+                }
+                t = t.BaseType;
+            }
+
+            if (dicFields.Count >= 2)
+            {
+                dict1 = dicFields[0];
+                dict2 = dicFields[1];
+            }
+            else if (dicFields.Count == 1)
+            {
+                dict1 = dicFields[0];
+            }
+        }
+
+        // 3. 用 GetStuffCount 逐个检查物品，传入实际字典
+        if (getStuffCountMethod != null)
+        {
+            var possibleIds = new List<int>();
+            foreach (var kvp in ItemNames.GetAllItems())
+                possibleIds.Add(kvp.Key);
+
+
+
             try
             {
                 foreach (int stuffId in possibleIds)
                 {
                     try
                     {
-                        // 尝试不同的参数组合
-                        var result = getStuffCount.Invoke(bag, new object[] { stuffId, null, null });
+                        var result = getStuffCountMethod.Invoke(bag, new object[] { stuffId, dict1, dict2 });
                         int count = Convert.ToInt32(result ?? 0);
                         if (count > 0)
                             items.Add(new ItemInfo { StuffId = stuffId, Count = count });
@@ -838,25 +884,27 @@ public class ChestEditorComponent : MonoBehaviour
 
                 if (items.Count > 0)
                 {
-                    Plugin.LogInfo($"ReadItemsFromBag: GetStuffCount 读取 {items.Count} 个物品");
+
                     return items;
                 }
+                else
+                {
+
+                }
             }
-            catch (Exception ex)
+            catch
             {
-                Plugin.LogError($"ReadItemsFromBag: GetStuffCount 异常: {ex.Message}");
+
             }
         }
 
-        // 备选：遍历 BagDic 的所有字段和属性找 Dictionary
-        Plugin.LogInfo("ReadItemsFromBag: 尝试遍历 BagDic 找字典");
-        object? bagDic = GetProp(bag, "dic");
+        // 4. 备选：直接遍历 BagDic 的 Dictionary<int,int> 字段
         if (bagDic != null)
         {
+
             var t = bagDic.GetType();
             while (t != null && t != typeof(object))
             {
-                // 遍历字段
                 foreach (var field in t.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
                 {
                     try
@@ -870,7 +918,7 @@ public class ChestEditorComponent : MonoBehaviour
                             var args = valType.GetGenericArguments();
                             if (args.Length == 2 && args[0] == typeof(int) && args[1] == typeof(int))
                             {
-                                Plugin.LogInfo($"ReadItemsFromBag: 找到字段 {field.Name} 类型 {valType.FullName}");
+
                                 var ge = valType.GetMethod("GetEnumerator", BF);
                                 if (ge != null)
                                 {
@@ -891,53 +939,7 @@ public class ChestEditorComponent : MonoBehaviour
 
                                     if (items.Count > 0)
                                     {
-                                        Plugin.LogInfo($"ReadItemsFromBag: 从字段 {field.Name} 读取 {items.Count} 个物品");
-                                        return items;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    catch { }
-                }
 
-                // 遍历属性
-                foreach (var prop in t.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
-                {
-                    if (prop.GetIndexParameters().Length > 0) continue;
-                    try
-                    {
-                        var val = prop.GetValue(bagDic);
-                        if (val == null) continue;
-
-                        var valType = val.GetType();
-                        if (valType.IsGenericType)
-                        {
-                            var args = valType.GetGenericArguments();
-                            if (args.Length == 2 && args[0] == typeof(int) && args[1] == typeof(int))
-                            {
-                                Plugin.LogInfo($"ReadItemsFromBag: 找到属性 {prop.Name} 类型 {valType.FullName}");
-                                var ge = valType.GetMethod("GetEnumerator", BF);
-                                if (ge != null)
-                                {
-                                    var en = ge.Invoke(val, null);
-                                    var mn = en.GetType().GetMethod("MoveNext", BF);
-                                    var cr = en.GetType().GetProperty("Current", BF);
-
-                                    while ((bool)(mn.Invoke(en, null) ?? false))
-                                    {
-                                        var entry = cr.GetValue(en);
-                                        if (entry == null) continue;
-
-                                        int key = GetInt(entry, "Key");
-                                        int v = GetInt(entry, "Value");
-                                        if (v > 0)
-                                            items.Add(new ItemInfo { StuffId = key, Count = v });
-                                    }
-
-                                    if (items.Count > 0)
-                                    {
-                                        Plugin.LogInfo($"ReadItemsFromBag: 从属性 {prop.Name} 读取 {items.Count} 个物品");
                                         return items;
                                     }
                                 }
@@ -951,7 +953,57 @@ public class ChestEditorComponent : MonoBehaviour
             }
         }
 
-        Plugin.LogInfo($"ReadItemsFromBag: 最终读取 {items.Count} 个物品");
+        // 5. 备选：尝试 bag.GetAllStuff()
+        try
+        {
+            var getAllStuff = bag.GetType().GetMethod("GetAllStuff", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (getAllStuff != null)
+            {
+
+                var result = getAllStuff.Invoke(bag, null);
+                if (result != null)
+                {
+                    // 尝试遍历返回的集合
+                    var resultType = result.GetType();
+                    var countProp = resultType.GetProperty("Count", BF);
+                    if (countProp != null)
+                    {
+                        int count = (int)(countProp.GetValue(result) ?? 0);
+
+                        // 遍历每一项
+                        var getItem = resultType.GetMethod("get_Item", BF);
+                        if (getItem != null)
+                        {
+                            for (int i = 0; i < count; i++)
+                            {
+                                try
+                                {
+                                    var entry = getItem.Invoke(result, new object[] { i });
+                                    if (entry == null) continue;
+                                    int key = GetInt(entry, "stuff_id") != 0 ? GetInt(entry, "stuff_id") : GetInt(entry, "Key") != 0 ? GetInt(entry, "Key") : GetInt(entry, "StuffId");
+                                    int val = GetInt(entry, "count") != 0 ? GetInt(entry, "count") : GetInt(entry, "Value") != 0 ? GetInt(entry, "Value") : GetInt(entry, "Count");
+                                    if (key > 0 && val > 0)
+                                        items.Add(new ItemInfo { StuffId = key, Count = val });
+                                }
+                                catch { }
+                            }
+                        }
+                    }
+
+                    if (items.Count > 0)
+                    {
+
+                        return items;
+                    }
+                }
+            }
+        }
+        catch
+        {
+
+        }
+
+
         return items;
     }
 
