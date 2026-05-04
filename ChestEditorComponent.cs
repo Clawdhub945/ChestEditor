@@ -665,6 +665,9 @@ public class ChestEditorComponent : MonoBehaviour
 
     private void RefreshChestList()
     {
+        // 保存当前收起状态
+        var savedCollapsed = new HashSet<int>(_collapsedChests);
+
         _chests.Clear();
         _collapsedChests.Clear();
 
@@ -734,7 +737,12 @@ public class ChestEditorComponent : MonoBehaviour
                 });
             }
 
-            foreach (var c in _chests) _collapsedChests.Add(c.Guid);
+            // 恢复之前的收起状态
+            foreach (var c in _chests)
+            {
+                if (savedCollapsed.Contains(c.Guid))
+                    _collapsedChests.Add(c.Guid);
+            }
             Plugin.LogInfo($"已缓存 {_chests.Count} 个设施");
         }
         catch (Exception ex)
@@ -754,13 +762,16 @@ public class ChestEditorComponent : MonoBehaviour
         object? bagDic = GetProp(bag, "dic");
         if (bagDic == null) return items;
 
-        // BagDic 内部有 _key_list_list 和 _value_list_list
-        object? keyList = GetProp(bagDic, "_key_list_list") ?? GetProp(bag, "_key_list_list");
-        object? valueList = GetProp(bagDic, "_value_list_list") ?? GetProp(bag, "_value_list_list");
+        // 尝试从 BagDic 读取 _key_list_list 和 _value_list_list
+        object? keyList = GetProp(bagDic, "_key_list_list");
+        object? valueList = GetProp(bagDic, "_value_list_list");
+
+        // 如果 BagDic 没有，尝试从 bag 读取
+        if (keyList == null) keyList = GetProp(bag, "_key_list_list");
+        if (valueList == null) valueList = GetProp(bag, "_value_list_list");
 
         if (keyList != null && valueList != null)
         {
-            // 尝试读取 List<int> 的内容
             int keyCount = GetListCount(keyList);
             int valueCount = GetListCount(valueList);
 
@@ -773,6 +784,57 @@ public class ChestEditorComponent : MonoBehaviour
                     if (val > 0)
                         items.Add(new ItemInfo { StuffId = key, Count = val });
                 }
+            }
+        }
+
+        // 如果上面没读到，尝试直接遍历 BagDic 的属性找 Dictionary
+        if (items.Count == 0)
+        {
+            var dicType = bagDic.GetType();
+            var t = dicType;
+            while (t != null && t != typeof(object))
+            {
+                foreach (var prop in t.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
+                {
+                    if (prop.GetIndexParameters().Length > 0) continue;
+                    try
+                    {
+                        var val = prop.GetValue(bagDic);
+                        if (val == null) continue;
+
+                        var valType = val.GetType();
+                        if (valType.IsGenericType)
+                        {
+                            var args = valType.GetGenericArguments();
+                            if (args.Length == 2 && args[0] == typeof(int) && args[1] == typeof(int))
+                            {
+                                // 找到 Dictionary<int, int>
+                                var ge = valType.GetMethod("GetEnumerator", BF);
+                                if (ge != null)
+                                {
+                                    var en = ge.Invoke(val, null);
+                                    var mn = en.GetType().GetMethod("MoveNext", BF);
+                                    var cr = en.GetType().GetProperty("Current", BF);
+
+                                    while ((bool)(mn.Invoke(en, null) ?? false))
+                                    {
+                                        var entry = cr.GetValue(en);
+                                        if (entry == null) continue;
+
+                                        int key = GetInt(entry, "Key");
+                                        int v = GetInt(entry, "Value");
+                                        if (v > 0)
+                                            items.Add(new ItemInfo { StuffId = key, Count = v });
+                                    }
+
+                                    if (items.Count > 0) return items;
+                                }
+                            }
+                        }
+                    }
+                    catch { }
+                }
+                t = t.BaseType;
             }
         }
 
