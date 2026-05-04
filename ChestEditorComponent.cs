@@ -954,16 +954,6 @@ public class ChestEditorComponent : MonoBehaviour
         Plugin.LogInfo($"ReadItemsFromBag: 最终读取 {items.Count} 个物品");
         return items;
     }
-                        }
-                    }
-                    catch { }
-                }
-                t = t.BaseType;
-            }
-        }
-
-        return items;
-    }
 
     private static int GetListCount(object list)
     {
