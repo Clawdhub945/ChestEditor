@@ -20,6 +20,7 @@ public partial class ChestEditorComponent : MonoBehaviour
         public int Count;
         public bool IsAdd;
         public int ExtraIndex; // 计划库存操作时存储目标箱子索引, 龙素材操作时存储stuffId
+        public int[]? NatureIds; // 召唤龙时的nature列表
         public string? ResultJson;
         public System.Threading.ManualResetEventSlim Signal;
     }
@@ -29,6 +30,7 @@ public partial class ChestEditorComponent : MonoBehaviour
     internal volatile string ChestsJson = "[]";
     internal volatile string ItemsJson = "[]";
     internal volatile string DragonBagJson = "[]";
+    internal volatile string? LastSummonResult;
 
     // 龙素材物品 ID 列表
     private static readonly int[] DragonItemIds = { 815001, 815002, 815003, 815004, 815005 };
@@ -112,6 +114,9 @@ public partial class ChestEditorComponent : MonoBehaviour
     {
         try
         {
+            // 龙系统一次性诊断（等存档加载后再执行）
+            if (SaveLoadPatches.CachedTerritory != null)
+                Il2CppHelper.DiagnoseDragonSystem();
             var sb = new StringBuilder();
             sb.Append('[');
             for (int i = 0; i < _chests.Count; i++)
@@ -168,22 +173,16 @@ public partial class ChestEditorComponent : MonoBehaviour
     {
         try
         {
-            var dragonItems = Il2CppHelper.ReadDragonStuffBag();
+            var cache = Il2CppHelper.GetDragonItemCache();
             var sb = new StringBuilder();
             sb.Append('[');
-
-            // 始终显示 5 种龙素材，即使数量为 0
-            var dict = new Dictionary<int, int>();
-            if (dragonItems != null)
-                foreach (var kv in dragonItems)
-                    dict[kv.Key] = kv.Value;
 
             bool first = true;
             foreach (int sid in DragonItemIds)
             {
                 if (!first) sb.Append(',');
                 first = false;
-                int count = dict.TryGetValue(sid, out int c) ? c : 0;
+                int count = cache.TryGetValue(sid, out int c) ? c : 0;
                 sb.Append($"{{\"stuffId\":{sid},\"name\":\"{Escape(ItemNames.GetName(sid))}\",\"count\":{count}}}");
             }
 
@@ -269,6 +268,13 @@ public partial class ChestEditorComponent : MonoBehaviour
                     Il2CppHelper.SetDragonItemQuantity(req.ExtraIndex, req.Count);
                     UpdateDragonBagJson();
                     req.ResultJson = DragonBagJson;
+                }
+                else if (req.ChestIndex == -7)
+                {
+                    // 召唤龙: ExtraIndex=dragon_stuff_id, NatureIds=nature列表
+                    string result = Il2CppHelper.SummonDragon(req.ExtraIndex, req.NatureIds);
+                    LastSummonResult = $"{{\"result\":\"{Escape(result)}\"}}";
+                    req.ResultJson = LastSummonResult;
                 }
                 else if (req.IsAdd)
                 {

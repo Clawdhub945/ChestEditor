@@ -171,6 +171,90 @@ internal class HttpServer
                 });
                 SendJson(resp, signal.Wait(5000) ? (comp.DragonBagJson ?? "{\"ok\":true}") : "{\"error\":\"timeout\"}");
             }
+            else if (path == "/api/dragon/summon" && method == "POST")
+            {
+                string body;
+                using (var reader = new StreamReader(req.InputStream, req.ContentEncoding))
+                    body = reader.ReadToEnd();
+                int typeIdx = 0, level = 1;
+                var natureIds = new System.Collections.Generic.List<int>();
+                // 简单解析 JSON
+                foreach (var part in body.Trim('{', '}').Split(','))
+                {
+                    var kv = part.Split(':');
+                    if (kv.Length != 2) continue;
+                    string key = kv[0].Trim().Trim('"');
+                    string val = kv[1].Trim().Trim('"');
+                    if (key == "typeIndex" && int.TryParse(val, out int v1)) typeIdx = v1;
+                    if (key == "level" && int.TryParse(val, out int v2)) level = v2;
+                }
+                // 解析 natures 数组: "natures":[1,2,3]
+                int naturesStart = body.IndexOf("\"natures\"");
+                if (naturesStart >= 0)
+                {
+                    int arrStart = body.IndexOf('[', naturesStart);
+                    int arrEnd = body.IndexOf(']', arrStart);
+                    if (arrStart >= 0 && arrEnd > arrStart)
+                    {
+                        var arrStr = body.Substring(arrStart + 1, arrEnd - arrStart - 1);
+                        foreach (var item in arrStr.Split(','))
+                        {
+                            if (int.TryParse(item.Trim().Trim('"'), out int nid))
+                                natureIds.Add(nid);
+                        }
+                    }
+                }
+                level = Math.Clamp(level, 1, 10);
+                var types = Il2CppHelper.DragonTypes;
+                if (typeIdx < 0 || typeIdx >= types.Length) { SendJson(resp, "{\"error\":\"invalid typeIndex\"}"); return; }
+                int dragonStuffId = types[typeIdx].BaseId + level - 1;
+                var comp = ChestEditorComponent.Instance;
+                if (comp == null) { SendJson(resp, "{\"error\":\"mod not ready\"}"); return; }
+                var signal = new ManualResetEventSlim(false);
+                comp.WriteQueue.Enqueue(new ChestEditorComponent.WriteRequest
+                {
+                    ChestIndex = -7, ExtraIndex = dragonStuffId, NatureIds = natureIds.Count > 0 ? natureIds.ToArray() : null, Signal = signal
+                });
+                SendJson(resp, signal.Wait(5000) ? (comp.LastSummonResult ?? "{\"ok\":true}") : "{\"error\":\"timeout\"}");
+            }
+            else if (path == "/api/dragon/types" && method == "GET")
+            {
+                SendJson(resp, Il2CppHelper.GetDragonTypesJson());
+            }
+            else if (path == "/api/dragon/souls" && method == "GET")
+            {
+                SendJson(resp, Il2CppHelper.GetDragonSoulsJson());
+            }
+            else if (path == "/api/dragon/soul/set" && method == "POST")
+            {
+                string body;
+                using (var reader = new StreamReader(req.InputStream, req.ContentEncoding))
+                    body = reader.ReadToEnd();
+                int idx = 0, val = 0;
+                string prop = "";
+                foreach (var part in body.Trim('{', '}').Split(','))
+                {
+                    var kv = part.Split(':');
+                    if (kv.Length != 2) continue;
+                    string key = kv[0].Trim().Trim('"');
+                    string v = kv[1].Trim().Trim('"');
+                    if (key == "index" && int.TryParse(v, out int v1)) idx = v1;
+                    if (key == "property") prop = v;
+                    if (key == "value" && int.TryParse(v, out int v2)) val = v2;
+                }
+                if (string.IsNullOrEmpty(prop)) { SendJson(resp, "{\"error\":\"missing property\"}"); return; }
+                string result = Il2CppHelper.SetDragonSoulProperty(idx, prop, val);
+                SendJson(resp, result == "ok" ? "{\"ok\":true}" : $"{{\"error\":\"{result}\"}}");
+            }
+            else if (path == "/api/dragon/searchmap" && method == "POST")
+            {
+                Il2CppHelper.SearchMapDragons();
+                SendJson(resp, "{\"ok\":true}");
+            }
+            else if (path == "/api/dragon/natures" && method == "GET")
+            {
+                SendJson(resp, Il2CppHelper.GetDragonNaturesJson());
+            }
             else if (path == "/api/filters" && method == "GET")
             {
                 var inst = ChestEditorComponent.Instance;

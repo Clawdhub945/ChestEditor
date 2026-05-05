@@ -850,11 +850,16 @@ body { font-family: 'Inter', sans-serif; background: var(--bg-primary); color: v
 let chests = [];
 let items = [];
 let dragonItems = [];
+let dragonTypes = [];
+let dragonNatures = [];
 let autoRefresh = true;
 let selectedChest = -1;
 let searchQuery = '';
 let categoryOpen = true;
 let dragonCategoryOpen = true;
+let summonCategoryOpen = true;
+let soulsCategoryOpen = true;
+let dragonSouls = [];
 let filters = [];
 
 async function fetchFilters() {
@@ -937,6 +942,75 @@ async function setDragonItem(stuffId) {
   } catch(e) { toast('操作失败', true); }
 }
 
+async function summonDragon(stuffId) {
+  try {
+    const r = await fetch('/api/dragon/summon', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({stuffId:stuffId})
+    });
+    const res = await r.json();
+    if (res.result === 'ok' || res.result === 'True') {
+      toast('召唤成功!');
+    } else {
+      toast('召唤结果: ' + (res.result || '未知'), res.result !== 'ok');
+    }
+    fetchDragonItems();
+  } catch(e) { toast('召唤失败', true); }
+}
+
+async function fetchDragonTypes() {
+  try {
+    const r = await fetch('/api/dragon/types');
+    dragonTypes = await r.json();
+  } catch(e) {}
+  try {
+    const r2 = await fetch('/api/dragon/natures');
+    dragonNatures = await r2.json();
+  } catch(e) {}
+  renderDragonSummon();
+  renderDragonSummonList();
+}
+
+function renderDragonSummon() {
+  const el = document.getElementById('dragonSummon');
+  if (!el || dragonTypes.length === 0) return;
+  let html = '<div style=""font-size:11px;font-weight:600;color:var(--text-muted);margin-bottom:4px"">召唤龙</div>';
+  html += '<div style=""display:flex;gap:6px;align-items:center;flex-wrap:wrap"">';
+  html += '<select id=""dragonTypeSelect"" style=""flex:1;min-width:80px;font-size:11px;padding:2px 4px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:4px"">';
+  for (let i = 0; i < dragonTypes.length; i++) {
+    html += '<option value=""' + i + '"">' + esc(dragonTypes[i].cn) + '</option>';
+  }
+  html += '</select>';
+  html += '<select id=""dragonLevelSelect"" style=""width:50px;font-size:11px;padding:2px 4px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:4px"">';
+  for (let lv = 1; lv <= 10; lv++) {
+    html += '<option value=""' + lv + '"">' + lv + '级</option>';
+  }
+  html += '</select>';
+  html += '<button class=""btn-adj"" onclick=""doSummonDragon()"" style=""font-size:11px;padding:3px 8px;background:#2a4a2a;color:#6f6"">召唤</button>';
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+async function doSummonDragon() {
+  const typeIdx = parseInt(document.getElementById('dragonTypeSelect').value);
+  const level = parseInt(document.getElementById('dragonLevelSelect').value);
+  const typeName = dragonTypes[typeIdx] ? dragonTypes[typeIdx].cn : '';
+  try {
+    const r = await fetch('/api/dragon/summon', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({typeIndex:typeIdx, level:level})
+    });
+    const res = await r.json();
+    if (res.result && (res.result.includes('True') || res.result === 'ok')) {
+      toast(typeName + ' Lv' + level + ' 召唤成功!');
+    } else {
+      toast('召唤结果: ' + (res.result || '未知'), true);
+    }
+  } catch(e) { toast('召唤失败', true); }
+}
+
 async function refreshChests() {
   const btn = document.getElementById('btnRefresh');
   try {
@@ -1009,10 +1083,35 @@ function renderSidebar() {
   html += '</div>';
   html += '<div class=""category-items' + (dragonCategoryOpen ? ' open' : '') + '"">';
   html += '<div id=""dragonItems"" style=""padding:4px 8px""></div>';
+  html += '<div id=""dragonSummon"" style=""padding:4px 8px;border-top:1px solid var(--border)""></div>';
+  html += '</div></div>';
+
+  // 召唤龙分类
+  html += '<div class=""category"">';
+  html += '<div class=""category-header"" onclick=""toggleSummonCategory()"">';
+  html += '<span class=""arrow' + (summonCategoryOpen ? ' open' : '') + '"">&#9654;</span>';
+  html += '<span>召唤龙</span>';
+  html += '<span style=""margin-left:auto;font-size:11px;color:var(--text-muted)"">' + dragonTypes.length + '</span>';
+  html += '</div>';
+  html += '<div class=""category-items' + (summonCategoryOpen ? ' open' : '') + '"">';
+  html += '<div id=""dragonSummonList"" style=""padding:4px 8px""></div>';
+  html += '</div></div>';
+
+  // 已召唤龙魂分类
+  html += '<div class=""category"">';
+  html += '<div class=""category-header"" onclick=""toggleSoulsCategory()"">';
+  html += '<span class=""arrow' + (soulsCategoryOpen ? ' open' : '') + '"">&#9654;</span>';
+  html += '<span>已召唤龙魂</span>';
+  html += '<span style=""margin-left:auto;font-size:11px;color:var(--text-muted)"">' + dragonSouls.length + '</span>';
+  html += '</div>';
+  html += '<div class=""category-items' + (soulsCategoryOpen ? ' open' : '') + '"">';
+  html += '<div id=""dragonSoulsList"" style=""padding:4px 8px""></div>';
   html += '</div></div>';
 
   el.innerHTML = html;
   renderDragonItems();
+  renderDragonSummonList();
+  renderDragonSoulsList();
 }
 
 function toggleCategory() {
@@ -1023,6 +1122,184 @@ function toggleCategory() {
 function toggleDragonCategory() {
   dragonCategoryOpen = !dragonCategoryOpen;
   renderSidebar();
+}
+
+function toggleSummonCategory() {
+  summonCategoryOpen = !summonCategoryOpen;
+  renderSidebar();
+}
+
+function toggleSoulsCategory() {
+  soulsCategoryOpen = !soulsCategoryOpen;
+  renderSidebar();
+}
+
+async function fetchDragonSouls() {
+  try {
+    const r = await fetch('/api/dragon/souls');
+    dragonSouls = await r.json();
+  } catch(e) {}
+}
+
+function renderDragonSoulsList() {
+  const el = document.getElementById('dragonSoulsList');
+  if (!el) return;
+  if (dragonSouls.length === 0) {
+    el.innerHTML = '<div style=""padding:8px;color:var(--text-muted);font-size:11px;text-align:center"">暂无龙魂</div>';
+    return;
+  }
+  let html = '';
+  // 搜索地图龙按钮
+  html += '<div style=""margin-bottom:6px""><button class=""btn-adj"" onclick=""searchMapDragons()"" style=""font-size:11px;padding:3px 8px;width:auto;height:auto"">搜索地图龙</button></div>';
+  for (let i = 0; i < dragonSouls.length; i++) {
+    const s = dragonSouls[i];
+    const active = s.is_active ? '已召唤' : '待命';
+    const activeColor = s.is_active ? '#4caf50' : '#888';
+    const typeName = findDragonTypeName(s.StuffId || s.stuff_id || 0);
+    html += '<div style=""padding:6px 0;border-bottom:1px solid var(--border)"">';
+    html += '<div style=""display:flex;align-items:center;gap:8px"">';
+    html += '<div style=""width:28px;height:28px;border-radius:4px;background:var(--bg-input);display:flex;align-items:center;justify-content:center;font-size:14px"">&#x1F409;</div>';
+    html += '<div style=""flex:1;min-width:0"">';
+    html += '<div style=""font-size:12px;font-weight:500"">' + esc(typeName || ('龙魂#' + (i+1))) + '</div>';
+    html += '<div style=""font-size:10px;color:' + activeColor + '"">' + active + '</div>';
+    html += '</div></div>';
+    // 强化编辑
+    const parts = [
+      {key:'Head', label:'头', enhanceRange:[1001,1050]},
+      {key:'Claw', label:'爪', enhanceRange:[3001,3050]},
+      {key:'Shield', label:'甲', enhanceRange:[2001,2050]},
+      {key:'Cloud', label:'魂', enhanceRange:[4001,4050]},
+    ];
+    html += '<div style=""display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;margin-left:36px;align-items:center"">';
+    for (const p of parts) {
+      const v = s[p.key] ?? s[p.key.toLowerCase()] ?? 0;
+      html += '<span style=""font-size:10px;color:var(--text-muted)"">' + p.label + ':</span>';
+      html += '<input type=""number"" id=""soul_' + i + '_' + p.key + '"" value=""' + v + '"" min=""0"" max=""50"" style=""width:36px;font-size:10px;padding:1px 2px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:3px"">';
+      html += '<button class=""btn-adj"" onclick=""setSoulProp(' + i + ',\'' + p.key + '\',' + i + ')"" style=""font-size:9px;padding:1px 4px;width:auto;height:auto"">设</button>';
+    }
+    // potentiality
+    const pot = s.Potentiality ?? s.potentiality ?? 0;
+    html += '<span style=""font-size:10px;color:var(--text-muted)"">潜力:</span>';
+    html += '<input type=""number"" id=""soul_' + i + '_Potentiality"" value=""' + pot + '"" min=""0"" style=""width:36px;font-size:10px;padding:1px 2px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:3px"">';
+    html += '<button class=""btn-adj"" onclick=""setSoulProp(' + i + ',\'Potentiality\',' + i + ')"" style=""font-size:9px;padding:1px 4px;width:auto;height:auto"">设</button>';
+    html += '</div>';
+    // nature
+    const natures = s.NatureList || s.nature_list;
+    if (natures && natures.length > 0) {
+      html += '<div style=""display:flex;flex-wrap:wrap;gap:3px;margin-top:3px;margin-left:36px"">';
+      for (const nid of natures) {
+        const n = dragonNatures.find(x => x.id === nid);
+        html += '<span style=""font-size:9px;padding:1px 4px;border-radius:3px;background:rgba(100,180,255,0.15);color:#8cf"">' + (n ? n.name : '#' + nid) + '</span>';
+      }
+      html += '</div>';
+    }
+    html += '</div>';
+  }
+  el.innerHTML = html;
+}
+
+async function setSoulProp(idx, prop) {
+  const input = document.getElementById('soul_' + idx + '_' + prop);
+  const val = parseInt(input.value) || 0;
+  try {
+    const r = await fetch('/api/dragon/soul/set', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({index:idx, property:prop, value:val})
+    });
+    const res = await r.json();
+    if (res.ok) {
+      toast(prop + ' 已设置为 ' + val);
+      fetchDragonSouls().then(() => { renderSidebar(); });
+    } else {
+      toast(res.error || '设置失败', true);
+    }
+  } catch(e) { toast('操作失败', true); }
+}
+
+async function searchMapDragons() {
+  try {
+    await fetch('/api/dragon/searchmap', {method:'POST'});
+    toast('已搜索，查看BepInEx日志');
+  } catch(e) { toast('搜索失败', true); }
+}
+
+function findDragonTypeName(stuffId) {
+  if (!stuffId) return '';
+  for (const dt of dragonTypes) {
+    if (stuffId >= dt.baseId && stuffId <= dt.baseId + 9) {
+      return dt.cn + ' Lv' + (stuffId - dt.baseId + 1);
+    }
+  }
+  return 'ID:' + stuffId;
+}
+
+function renderDragonSummonList() {
+  const el = document.getElementById('dragonSummonList');
+  if (!el || dragonTypes.length === 0) return;
+  let html = '';
+  for (let i = 0; i < dragonTypes.length; i++) {
+    const dt = dragonTypes[i];
+    html += '<div style=""padding:8px 0;border-bottom:1px solid var(--border)"">';
+    html += '<div style=""display:flex;align-items:center;gap:8px"">';
+    html += '<div style=""width:28px;height:28px;border-radius:4px;background:var(--bg-input);display:flex;align-items:center;justify-content:center;font-size:14px"">&#x1F409;</div>';
+    html += '<div style=""flex:1;min-width:0"">';
+    html += '<div style=""font-size:12px;font-weight:500"">' + esc(dt.cn) + '</div>';
+    html += '<div style=""font-size:10px;color:var(--text-muted)"">' + esc(dt.name) + ' (ID:' + dt.baseId + '~' + (dt.baseId+9) + ')</div>';
+    html += '</div>';
+    html += '<select id=""summonLv_' + i + '"" style=""width:48px;font-size:11px;padding:2px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:4px"">';
+    for (let lv = 1; lv <= 10; lv++) {
+      html += '<option value=""' + lv + '"">' + lv + '级</option>';
+    }
+    html += '</select>';
+    html += '<button class=""btn-adj"" onclick=""doSummonDragonAt(' + i + ')"" style=""font-size:11px;padding:3px 8px;background:#2a4a2a;color:#6f6;width:auto;height:auto"">召唤</button>';
+    html += '</div>';
+    // nature 选择标签
+    html += '<div style=""display:flex;flex-wrap:wrap;gap:3px;margin-top:4px;margin-left:36px"">';
+    for (const n of dragonNatures) {
+      const checked = natureSelected(i, n.id);
+      html += '<span class=""filter-tag' + (checked ? ' on' : '') + '"" onclick=""toggleSummonNature(' + i + ',' + n.id + ')"" style=""font-size:10px;padding:1px 5px"">' + n.name + '</span>';
+    }
+    html += '</div>';
+    html += '</div>';
+  }
+  el.innerHTML = html;
+}
+
+// 每条龙选中的 nature 存在全局对象里
+let _summonNatures = {};
+
+function natureSelected(typeIdx, natureId) {
+  const key = 't' + typeIdx;
+  return _summonNatures[key] && _summonNatures[key].includes(natureId);
+}
+
+function toggleSummonNature(typeIdx, natureId) {
+  const key = 't' + typeIdx;
+  if (!_summonNatures[key]) _summonNatures[key] = [];
+  const arr = _summonNatures[key];
+  const idx = arr.indexOf(natureId);
+  if (idx >= 0) arr.splice(idx, 1); else arr.push(natureId);
+  renderDragonSummonList();
+}
+
+async function doSummonDragonAt(typeIdx) {
+  const level = parseInt(document.getElementById('summonLv_' + typeIdx).value);
+  const typeName = dragonTypes[typeIdx] ? dragonTypes[typeIdx].cn : '';
+  const natures = _summonNatures['t' + typeIdx] || [];
+  try {
+    const r = await fetch('/api/dragon/summon', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({typeIndex:typeIdx, level:level, natures:natures})
+    });
+    const res = await r.json();
+    if (res.result && (res.result.includes('True') || res.result === 'ok')) {
+      toast(typeName + ' Lv' + level + ' 召唤成功!');
+    } else {
+      toast('召唤结果: ' + (res.result || '未知'), true);
+    }
+  } catch(e) { toast('召唤失败', true); }
 }
 
 function selectChest(i) {
@@ -1300,6 +1577,8 @@ async function init() {
   document.getElementById('btnAuto').className = 'on';
   await fetchItems();
   await fetchDragonItems();
+  await fetchDragonTypes();
+  await fetchDragonSouls();
   await fetchFilters();
   await refreshChests();
   renderSidebar();
@@ -1308,6 +1587,7 @@ async function init() {
     if (!autoRefresh) return;
     await fetchChests();
     await fetchDragonItems();
+    await fetchDragonSouls();
     renderSidebar();
     if (selectedChest >= 0) renderContent();
   }, 3000);
