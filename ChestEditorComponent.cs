@@ -1,13 +1,33 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Text;
 using UnityEngine;
 
 namespace ChestEditor;
 
 public class ChestEditorComponent : MonoBehaviour
 {
+    internal static ChestEditorComponent? Instance;
+
+    // HTTP 服务器写请求队列
+    internal struct WriteRequest
+    {
+        public int ChestIndex;
+        public int StuffId;
+        public int Count;
+        public bool IsAdd; // true=添加, false=删除
+        public string? ResultJson;
+        public System.Threading.ManualResetEventSlim Signal;
+    }
+    internal readonly ConcurrentQueue<WriteRequest> WriteQueue = new();
+
+    // JSON 缓存（主线程写，HTTP 线程读，volatile 保证可见性）
+    internal volatile string ChestsJson = "[]";
+    internal volatile string ItemsJson = "[]";
+
     private bool _showWindow;
     private Rect _windowRect = new Rect(100, 100, 750, 700);
     private Vector2 _scrollPos;
@@ -52,8 +72,8 @@ public class ChestEditorComponent : MonoBehaviour
         { 111002, ("泰坦之手", false) },
     };
 
-    private struct ItemInfo { public int StuffId; public int Count; }
-    private struct ChestInfo { public int Guid; public int StuffId; public string Name; public List<ItemInfo> Items; public int MaxCap; public int UsedCap; public float PosX; public float PosY; public object Facility; }
+    internal struct ItemInfo { public int StuffId; public int Count; }
+    internal struct ChestInfo { public int Guid; public int StuffId; public string Name; public List<ItemInfo> Items; public int MaxCap; public int UsedCap; public float PosX; public float PosY; public object Facility; }
 
     // 添加物品弹窗
     private bool _showAddItemWindow;
@@ -72,7 +92,12 @@ public class ChestEditorComponent : MonoBehaviour
     private static MethodInfo? _addStuffNoNotifyMethod;
     private static bool _methodCached;
 
-    public ChestEditorComponent(IntPtr ptr) : base(ptr) { }
+    public ChestEditorComponent(IntPtr ptr) : base(ptr)
+    {
+        Instance = this;
+    }
+
+    internal List<ChestInfo> GetChests() => _chests;
 
     private void Update()
     {
@@ -80,6 +105,115 @@ public class ChestEditorComponent : MonoBehaviour
         {
             _showWindow = !_showWindow;
             if (_showWindow) RefreshChestList();
+        }
+
+        // 每帧更新 JSON 缓存
+        UpdateJsonCache();
+
+        // 处理 HTTP 写请求
+        ProcessWriteRequests();
+    }
+
+    private void UpdateJsonCache()
+    {
+        try
+        {
+            var sb = new StringBuilder();
+            sb.Append('[');
+            for (int i = 0; i < _chests.Count; i++)
+            {
+                var c = _chests[i];
+                if (i > 0) sb.Append(',');
+                sb.Append($"{{\"index\":{i},\"guid\":{c.Guid},\"stuffId\":{c.StuffId},\"name\":\"{Escape(c.Name)}\",\"maxCap\":{c.MaxCap},\"usedCap\":{c.UsedCap},\"posX\":{c.PosX.ToString(System.Globalization.CultureInfo.InvariantCulture)},\"posY\":{c.PosY.ToString(System.Globalization.CultureInfo.InvariantCulture)},\"items\":[");
+                for (int j = 0; j < c.Items.Count; j++)
+                {
+                    var item = c.Items[j];
+                    if (j > 0) sb.Append(',');
+                    sb.Append($"{{\"stuffId\":{item.StuffId},\"name\":\"{Escape(ItemNames.GetName(item.StuffId))}\",\"count\":{item.Count}}}");
+                }
+                sb.Append("]}");
+            }
+            sb.Append(']');
+            ChestsJson = sb.ToString();
+
+            // 物品列表（用于添加物品下拉）
+            if (_allItems == null)
+                _allItems = ItemNames.GetAllItems().ToList();
+            if (_allItems != null)
+            {
+                var sb2 = new StringBuilder();
+                sb2.Append('[');
+                bool first = true;
+                foreach (var kvp in _allItems)
+                {
+                    if (!first) sb2.Append(',');
+                    first = false;
+                    sb2.Append($"{{\"stuffId\":{kvp.Key},\"name\":\"{Escape(kvp.Value)}\"}}");
+                }
+                sb2.Append(']');
+                ItemsJson = sb2.ToString();
+            }
+        }
+        catch { }
+    }
+
+    private static string Escape(string s) => s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "");
+
+    private void ProcessWriteRequests()
+    {
+        while (WriteQueue.TryDequeue(out var req))
+        {
+            try
+            {
+                // ChestIndex == -1 表示刷新操作
+                if (req.ChestIndex == -1)
+                {
+                    RefreshChestList();
+                    req.ResultJson = "{\"ok\":true}";
+                }
+                else if (req.IsAdd)
+                {
+                    AddAndUpdate(req.ChestIndex, req.StuffId, req.Count);
+                }
+                else
+                {
+                    RemoveAndUpdate(req.ChestIndex, req.StuffId, req.Count);
+                }
+
+                // 返回更新后的箱子 JSON（非刷新操作时）
+                if (req.ChestIndex >= 0 && req.ChestIndex < _chests.Count)
+                {
+                    var c = _chests[req.ChestIndex];
+                    var sb = new StringBuilder();
+                    sb.Append("{\"index\":").Append(req.ChestIndex);
+                    sb.Append(",\"guid\":").Append(c.Guid);
+                    sb.Append(",\"stuffId\":").Append(c.StuffId);
+                    sb.Append(",\"name\":\"").Append(Escape(c.Name)).Append('"');
+                    sb.Append(",\"maxCap\":").Append(c.MaxCap);
+                    sb.Append(",\"usedCap\":").Append(c.UsedCap);
+                    sb.Append(",\"items\":[");
+                    for (int j = 0; j < c.Items.Count; j++)
+                    {
+                        var item = c.Items[j];
+                        if (j > 0) sb.Append(',');
+                        sb.Append($"{{\"stuffId\":{item.StuffId},\"name\":\"{Escape(ItemNames.GetName(item.StuffId))}\",\"count\":{item.Count}}}");
+                    }
+                    sb.Append("]}");
+                    req.ResultJson = sb.ToString();
+                }
+                else if (req.ChestIndex >= 0)
+                {
+                    req.ResultJson = "{\"error\":\"chest not found\"}";
+                }
+            }
+            catch (Exception ex)
+            {
+                req.ResultJson = $"{{\"error\":\"{Escape(ex.Message)}\"}}";
+            }
+            finally
+            {
+                req.Signal.Set();
+            }
         }
     }
 
@@ -461,7 +595,7 @@ public class ChestEditorComponent : MonoBehaviour
         }
     }
 
-    private void RemoveAndUpdate(int chestIndex, int stuffId, int count)
+    internal void RemoveAndUpdate(int chestIndex, int stuffId, int count)
     {
         if (chestIndex < 0 || chestIndex >= _chests.Count) return;
 
@@ -496,7 +630,7 @@ public class ChestEditorComponent : MonoBehaviour
         }
     }
 
-    private void AddAndUpdate(int chestIndex, int stuffId, int count)
+    internal void AddAndUpdate(int chestIndex, int stuffId, int count)
     {
         if (chestIndex < 0 || chestIndex >= _chests.Count) return;
 
@@ -538,7 +672,7 @@ public class ChestEditorComponent : MonoBehaviour
         }
     }
 
-    private void UpdateChestItems(int chestIndex)
+    internal void UpdateChestItems(int chestIndex)
     {
         if (chestIndex < 0 || chestIndex >= _chests.Count) return;
 
@@ -708,7 +842,7 @@ public class ChestEditorComponent : MonoBehaviour
 
     // ====== 核心逻辑 ======
 
-    private void RefreshChestList()
+    internal void RefreshChestList()
     {
         _chests.Clear();
         _collapsedChests.Clear();
