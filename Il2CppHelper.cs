@@ -297,7 +297,49 @@ internal static class Il2CppHelper
         {
             var allMethods = bag.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
 
-            // 策略0：找 StuffCount(int) 或 GetStuffCount(int) 单参数版本
+            // 调试：打印所有 StuffCount 相关方法
+            foreach (var m in allMethods)
+            {
+                if (m.Name.Contains("StuffCount") || m.Name.Contains("stuffCount"))
+                {
+                    var p = m.GetParameters();
+                    var pTypes = string.Join(", ", p.Select(x => $"{x.ParameterType.Name} {x.Name}"));
+                    Plugin.LogInfo($"[Dragon] Bag.{m.Name}({pTypes})");
+                }
+            }
+
+            // 策略0：找 StuffCount(int, int) 2参数版本（游戏代码用的版本）
+            MethodInfo? twoParamMethod = null;
+            foreach (var m in allMethods)
+            {
+                if (m.Name == "StuffCount" || m.Name == "GetStuffCount")
+                {
+                    var p = m.GetParameters();
+                    if (p.Length == 2 && p[0].ParameterType == typeof(int))
+                    {
+                        twoParamMethod = m;
+                        break;
+                    }
+                }
+            }
+            if (twoParamMethod != null)
+            {
+                Plugin.LogInfo("[Dragon] 使用 2参数 StuffCount 方法");
+                foreach (var kvp in ItemNames.GetAllItems())
+                {
+                    try
+                    {
+                        var res = twoParamMethod.Invoke(bag, new object[] { kvp.Key, 0 });
+                        int count = Convert.ToInt32(res ?? 0);
+                        if (count > 0)
+                            result.Add(new KeyValuePair<int, int>(kvp.Key, count));
+                    }
+                    catch { }
+                }
+                if (result.Count > 0) return result;
+            }
+
+            // 策略0b：找 StuffCount(int) 单参数版本
             MethodInfo? singleParamMethod = null;
             foreach (var m in allMethods)
             {
@@ -313,6 +355,7 @@ internal static class Il2CppHelper
             }
             if (singleParamMethod != null)
             {
+                Plugin.LogInfo("[Dragon] 使用 1参数 StuffCount 方法");
                 foreach (var kvp in ItemNames.GetAllItems())
                 {
                     try
@@ -329,6 +372,7 @@ internal static class Il2CppHelper
 
             // 策略1：找 GetStuffCount(int, dict, dict) 方法
             object? bagDic = GetProp(bag, "dic");
+            Plugin.LogInfo($"[Dragon] bag.dic = {(bagDic != null ? bagDic.GetType().FullName : "null")}");
             MethodInfo? getStuffCountMethod = null;
             foreach (var m in allMethods)
             {
@@ -392,6 +436,7 @@ internal static class Il2CppHelper
             }
 
             // 策略2：直接遍历 bag 上所有 Dictionary<int,int> 类型的字段/属性
+            Plugin.LogInfo($"[Dragon] bag 类型: {bag.GetType().FullName}");
             var bagType = bag.GetType();
             var bagT = bagType;
             while (bagT != null && bagT != typeof(object))
@@ -401,9 +446,10 @@ internal static class Il2CppHelper
                     try
                     {
                         var val = field.GetValue(bag);
+                        var valType = val?.GetType();
+                        Plugin.LogInfo($"[Dragon] bag.{field.Name} : {field.FieldType.Name} = {(val != null ? valType?.FullName ?? "null" : "null")}");
                         if (val == null) continue;
-                        var valType = val.GetType();
-                        if (valType.IsGenericType)
+                        if (valType!.IsGenericType)
                         {
                             var args = valType.GetGenericArguments();
                             if (args.Length == 2 && args[0] == typeof(int) && args[1] == typeof(int))
