@@ -211,9 +211,6 @@ public partial class ChestEditorComponent
             if (GUILayout.Button("定位", GUILayout.Width(36)))
                 LocateFacility(chest.PosX, chest.PosY);
             GUILayout.Label(capText, _itemCountStyle, GUILayout.Width(130));
-            var chestTex = IconLoader.GetIconTexture(chest.StuffId);
-            if (chestTex != null)
-                GUILayout.Label(chestTex, GUILayout.Width(32), GUILayout.Height(32));
             GUILayout.EndHorizontal();
 
             if (collapsed) continue;
@@ -236,7 +233,6 @@ public partial class ChestEditorComponent
                 if (col % 8 == 0) GUILayout.BeginHorizontal();
 
                 GUILayout.BeginVertical(isMatch ? _highlightItemStyle : "box", GUILayout.Width(76));
-                DrawItemIcon(item.StuffId, 36);
                 string line1 = n.Length <= 6 ? n : n[..6];
                 string line2 = n.Length <= 6 ? "" : n[6..];
                 if (line2.Length > 6) line2 = line2[..6];
@@ -323,7 +319,6 @@ public partial class ChestEditorComponent
                 continue;
 
             GUILayout.BeginHorizontal("box");
-            DrawItemIcon(kvp.Key, 24);
             GUILayout.Label($"{kvp.Value} (ID:{kvp.Key})", _itemCountStyle, GUILayout.ExpandWidth(true));
             if (GUILayout.Button($"添加 {_addItemCount}", _addButtonStyle, GUILayout.Width(70)))
             {
@@ -345,12 +340,4 @@ public partial class ChestEditorComponent
         GUI.DragWindow();
     }
 
-    private static void DrawItemIcon(int stuffId, float size)
-    {
-        var tex = IconLoader.GetIconTexture(stuffId);
-        if (tex != null)
-            GUILayout.Label(tex, GUILayout.Width(size), GUILayout.Height(size));
-        else
-            GUILayout.Space(size);
-    }
 }
