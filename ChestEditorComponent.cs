@@ -8,7 +8,7 @@ using UnityEngine;
 
 namespace ChestEditor;
 
-public class ChestEditorComponent : MonoBehaviour
+public partial class ChestEditorComponent : MonoBehaviour
 {
     internal static ChestEditorComponent? Instance;
 
@@ -29,15 +29,8 @@ public class ChestEditorComponent : MonoBehaviour
     internal volatile string ChestsJson = "[]";
     internal volatile string ItemsJson = "[]";
 
-    private bool _showWindow;
-    private Rect _windowRect = new Rect(100, 100, 750, 700);
-    private Vector2 _scrollPos;
     private List<ChestInfo> _chests = new();
-    private string _searchText = "";
     private HashSet<int> _collapsedChests = new();
-
-    // 延迟操作队列
-    private Action? _pendingAction;
 
     // 筛选
     private static readonly Dictionary<int, (string Name, bool Enabled)> _filterItems = new()
@@ -80,15 +73,6 @@ public class ChestEditorComponent : MonoBehaviour
 
     internal struct ItemInfo { public int StuffId; public int Count; }
     internal struct ChestInfo { public int Guid; public int StuffId; public string Name; public List<ItemInfo> Items; public int MaxCap; public int UsedCap; public float PosX; public float PosY; public object Facility; public List<ItemInfo> PlanStock; }
-
-    // 添加物品弹窗
-    private bool _showAddItemWindow;
-    private Rect _addWindowRect = new Rect(300, 200, 400, 500);
-    private Vector2 _addItemScrollPos;
-    private string _addItemSearch = "";
-    private int _addItemCount = 1;
-    private ChestInfo? _selectedChest;
-    private int _selectedChestIndex = -1;
 
     private static List<KeyValuePair<int, string>>? _allItems;
 
@@ -190,8 +174,6 @@ public class ChestEditorComponent : MonoBehaviour
         return sb.ToString();
     }
 
-
-
     private void ProcessWriteRequests()
     {
         while (WriteQueue.TryDequeue(out var req))
@@ -226,7 +208,7 @@ public class ChestEditorComponent : MonoBehaviour
                     // 设置计划库存: ExtraIndex=箱子索引, StuffId=物品ID, Count=新数量
                     if (req.ExtraIndex >= 0 && req.ExtraIndex < _chests.Count)
                     {
-                        SetStuffPlanValue(_chests[req.ExtraIndex].Facility, req.StuffId, req.Count);
+                        Il2CppHelper.SetStuffPlanValue(_chests[req.ExtraIndex].Facility, req.StuffId, req.Count);
                         RefreshChestList();
                     }
                     req.ResultJson = "{\"ok\":true}";
@@ -301,325 +283,6 @@ public class ChestEditorComponent : MonoBehaviour
         }
     }
 
-    private static GUIStyle? _titleStyle;
-    private static GUIStyle? _chestHeaderStyle;
-    private static GUIStyle? _itemCountStyle;
-    private static GUIStyle? _emptyStyle;
-    private static GUIStyle? _highlightItemStyle;
-    private static GUIStyle? _searchFieldStyle;
-    private static GUIStyle? _addButtonStyle;
-    private static GUIStyle? _removeButtonStyle;
-    private static bool _stylesInited;
-
-    private static void InitStyles()
-    {
-        if (_stylesInited) return;
-        _stylesInited = true;
-
-        _titleStyle = new GUIStyle { fontSize = 14 };
-        _titleStyle.normal.textColor = new Color(1f, 0.85f, 0.3f);
-
-        _chestHeaderStyle = new GUIStyle { fontSize = 13 };
-        _chestHeaderStyle.normal.textColor = new Color(0.6f, 0.9f, 1f);
-
-        _itemCountStyle = new GUIStyle { fontSize = 11, wordWrap = true };
-        _itemCountStyle.normal.textColor = new Color(0.8f, 0.8f, 0.8f);
-
-        _emptyStyle = new GUIStyle();
-        _emptyStyle.normal.textColor = new Color(0.6f, 0.6f, 0.6f);
-
-        _searchFieldStyle = new GUIStyle { fontSize = 13 };
-        _searchFieldStyle.normal.textColor = Color.white;
-        var fieldBg = new Texture2D(1, 1);
-        fieldBg.SetPixel(0, 0, new Color(0.15f, 0.15f, 0.15f, 1f));
-        fieldBg.Apply();
-        _searchFieldStyle.normal.background = fieldBg;
-        _searchFieldStyle.focused.textColor = Color.white;
-        _searchFieldStyle.focused.background = fieldBg;
-        _searchFieldStyle.padding = new RectOffset(4, 4, 2, 2);
-
-        _highlightItemStyle = new GUIStyle();
-        var hlTex = new Texture2D(1, 1);
-        hlTex.SetPixel(0, 0, new Color(1f, 0.85f, 0.2f, 0.35f));
-        hlTex.Apply();
-        _highlightItemStyle.normal.background = hlTex;
-        _highlightItemStyle.padding = new RectOffset(2, 2, 2, 2);
-
-        _addButtonStyle = new GUIStyle();
-        _addButtonStyle.normal.textColor = new Color(0.2f, 1f, 0.2f);
-        _addButtonStyle.fontSize = 12;
-        _addButtonStyle.normal.background = fieldBg;
-        _addButtonStyle.padding = new RectOffset(4, 4, 2, 2);
-
-        _removeButtonStyle = new GUIStyle();
-        _removeButtonStyle.normal.textColor = new Color(1f, 0.3f, 0.3f);
-        _removeButtonStyle.fontSize = 12;
-        _removeButtonStyle.normal.background = fieldBg;
-        _removeButtonStyle.padding = new RectOffset(4, 4, 2, 2);
-    }
-
-    private void OnGUI()
-    {
-        if (!_showWindow) return;
-        InitStyles();
-        _windowRect = GUI.Window(999001, _windowRect, (GUI.WindowFunction)DrawWindow, "箱子编辑器 (F11 关闭)");
-
-        if (_showAddItemWindow && _selectedChest.HasValue)
-        {
-            _addWindowRect = GUI.Window(999002, _addWindowRect, (GUI.WindowFunction)DrawAddItemWindow, "添加物品");
-        }
-
-        // 执行延迟操作
-        if (_pendingAction != null)
-        {
-            var action = _pendingAction;
-            _pendingAction = null;
-            action();
-        }
-    }
-
-    private void DrawWindow(int id)
-    {
-        GUILayout.BeginHorizontal();
-        if (GUILayout.Button("刷新", GUILayout.Width(44))) RefreshChestList();
-        if (GUILayout.Button("收起", GUILayout.Width(44)))
-            foreach (var c in _chests) _collapsedChests.Add(c.Guid);
-        if (GUILayout.Button("展开", GUILayout.Width(44)))
-            _collapsedChests.Clear();
-        GUILayout.FlexibleSpace();
-        GUILayout.Label($"共 {_chests.Count} 个箱子", _titleStyle);
-        GUILayout.FlexibleSpace();
-        if (GUILayout.Button("X", GUILayout.Width(24), GUILayout.Height(20))) _showWindow = false;
-        GUILayout.EndHorizontal();
-
-        bool filterChanged = false;
-        GUILayout.BeginHorizontal();
-        GUILayout.Label("筛选:", GUILayout.Width(36));
-        if (GUILayout.Button("全选", GUILayout.Width(40)))
-        {
-            foreach (var k in _filterItems.Keys.ToList())
-                _filterItems[k] = (_filterItems[k].Name, true);
-            filterChanged = true;
-        }
-        if (GUILayout.Button("反选", GUILayout.Width(40)))
-        {
-            foreach (var k in _filterItems.Keys.ToList())
-                _filterItems[k] = (_filterItems[k].Name, !_filterItems[k].Enabled);
-            filterChanged = true;
-        }
-        GUILayout.EndHorizontal();
-
-        int fi = 0;
-        int perRow = 8;
-        foreach (var kvp in _filterItems)
-        {
-            if (fi % perRow == 0)
-            {
-                if (fi > 0) GUILayout.EndHorizontal();
-                GUILayout.BeginHorizontal();
-                GUILayout.Space(36);
-            }
-            string label = kvp.Value.Enabled ? $"[✓]{kvp.Value.Name}" : $"[  ]{kvp.Value.Name}";
-            if (GUILayout.Button(label, GUILayout.Width(78)))
-            {
-                _filterItems[kvp.Key] = (kvp.Value.Name, !kvp.Value.Enabled);
-                filterChanged = true;
-            }
-            fi++;
-        }
-        if (fi > 0) GUILayout.EndHorizontal();
-        if (filterChanged) RefreshChestList();
-
-        GUILayout.BeginHorizontal();
-        GUILayout.Label("搜索:", GUILayout.Width(36));
-        _searchText = GUILayout.TextField(_searchText, _searchFieldStyle, GUILayout.ExpandWidth(true));
-        if (GUILayout.Button("清除", GUILayout.Width(40))) _searchText = "";
-        GUILayout.EndHorizontal();
-
-        GUILayout.Space(4);
-        _scrollPos = GUILayout.BeginScrollView(_scrollPos);
-
-        bool searching = !string.IsNullOrEmpty(_searchText);
-        string searchLower = searching ? _searchText.ToLower() : "";
-
-        for (int ci = 0; ci < _chests.Count; ci++)
-        {
-            var chest = _chests[ci];
-            if (searching)
-            {
-                bool chestHasMatch = false;
-                foreach (var item in chest.Items)
-                {
-                    if (ItemNames.GetName(item.StuffId).ToLower().Contains(searchLower))
-                    {
-                        chestHasMatch = true;
-                        break;
-                    }
-                }
-                if (!chestHasMatch) continue;
-            }
-
-            bool collapsed = _collapsedChests.Contains(chest.Guid);
-            string arrow = collapsed ? "▶" : "▼";
-            string capText = chest.MaxCap > 0
-                ? $"{chest.UsedCap:N0}/{chest.MaxCap:N0}"
-                : $"{chest.Items.Count}";
-
-            GUILayout.BeginHorizontal("box");
-            if (GUILayout.Button($"{arrow} {chest.Name}", _chestHeaderStyle))
-            {
-                if (collapsed) _collapsedChests.Remove(chest.Guid);
-                else _collapsedChests.Add(chest.Guid);
-            }
-            GUILayout.FlexibleSpace();
-
-            if (GUILayout.Button("+添加", _addButtonStyle, GUILayout.Width(50)))
-            {
-                _selectedChest = chest;
-                _selectedChestIndex = ci;
-                _showAddItemWindow = true;
-                _addItemSearch = "";
-                _addItemCount = 1;
-
-            }
-
-            if (GUILayout.Button("定位", GUILayout.Width(36)))
-                LocateFacility(chest.PosX, chest.PosY);
-            GUILayout.Label(capText, _itemCountStyle, GUILayout.Width(130));
-            var chestTex = GetIconTexture(chest.StuffId);
-            if (chestTex != null)
-                GUILayout.Label(chestTex, GUILayout.Width(32), GUILayout.Height(32));
-            GUILayout.EndHorizontal();
-
-            if (collapsed) continue;
-
-            if (chest.Items.Count == 0)
-            {
-                GUILayout.Label("  (空)", _emptyStyle);
-                continue;
-            }
-
-            int col = 0;
-            for (int i = 0; i < chest.Items.Count; i++)
-            {
-                var item = chest.Items[i];
-                string n = ItemNames.GetName(item.StuffId);
-                bool isMatch = searching && n.ToLower().Contains(searchLower);
-
-                if (searching && !isMatch) continue;
-
-                if (col % 8 == 0) GUILayout.BeginHorizontal();
-
-                GUILayout.BeginVertical(isMatch ? _highlightItemStyle : "box", GUILayout.Width(76));
-                DrawItemIcon(item.StuffId, 36);
-                string line1 = n.Length <= 6 ? n : n[..6];
-                string line2 = n.Length <= 6 ? "" : n[6..];
-                if (line2.Length > 6) line2 = line2[..6];
-                GUILayout.Label(line1, _itemCountStyle, GUILayout.Width(72), GUILayout.Height(14));
-                GUILayout.Label(line2, _itemCountStyle, GUILayout.Width(72), GUILayout.Height(14));
-                GUILayout.Label($"x{item.Count}", _itemCountStyle, GUILayout.Width(72), GUILayout.Height(14));
-
-                GUILayout.BeginHorizontal();
-                if (GUILayout.Button("-1", _removeButtonStyle, GUILayout.Width(24), GUILayout.Height(18)))
-                {
-                    int chestIndex = _chests.IndexOf(chest);
-                    int capturedStuffId = item.StuffId;
-                    _pendingAction = () => RemoveAndUpdate(chestIndex, capturedStuffId, 1);
-                }
-                if (GUILayout.Button("-All", _removeButtonStyle, GUILayout.Width(30), GUILayout.Height(18)))
-                {
-                    int chestIndex = _chests.IndexOf(chest);
-                    int capturedStuffId = item.StuffId;
-                    int capturedCount = item.Count;
-                    _pendingAction = () => RemoveAndUpdate(chestIndex, capturedStuffId, capturedCount);
-                }
-                GUILayout.EndHorizontal();
-
-                GUILayout.EndVertical();
-
-                col++;
-                if (col % 8 == 0) GUILayout.EndHorizontal();
-            }
-            if (col % 8 != 0) GUILayout.EndHorizontal();
-
-            GUILayout.Space(6);
-        }
-
-        if (_chests.Count == 0)
-            GUILayout.Label("无匹配箱子", _emptyStyle);
-
-        GUILayout.EndScrollView();
-        GUI.DragWindow();
-    }
-
-    private void DrawAddItemWindow(int id)
-    {
-        if (!_selectedChest.HasValue)
-        {
-            _showAddItemWindow = false;
-            return;
-        }
-
-        var chest = _selectedChest.Value;
-
-        GUILayout.Label($"向 [{chest.Name}] 添加物品", _titleStyle);
-        GUILayout.Space(4);
-
-        GUILayout.BeginHorizontal();
-        GUILayout.Label("搜索:", GUILayout.Width(36));
-        _addItemSearch = GUILayout.TextField(_addItemSearch, _searchFieldStyle, GUILayout.ExpandWidth(true));
-        if (GUILayout.Button("清除", GUILayout.Width(40))) _addItemSearch = "";
-        GUILayout.EndHorizontal();
-
-        GUILayout.BeginHorizontal();
-        GUILayout.Label("数量:", GUILayout.Width(36));
-        string countStr = GUILayout.TextField(_addItemCount.ToString(), GUILayout.Width(80));
-        if (int.TryParse(countStr, out int newCount) && newCount > 0)
-            _addItemCount = newCount;
-        if (GUILayout.Button("+1", GUILayout.Width(30))) _addItemCount++;
-        if (GUILayout.Button("+10", GUILayout.Width(36))) _addItemCount += 10;
-        if (GUILayout.Button("+100", GUILayout.Width(42))) _addItemCount += 100;
-        if (GUILayout.Button("最大", GUILayout.Width(36))) _addItemCount = 99999;
-        GUILayout.EndHorizontal();
-
-        GUILayout.Space(4);
-
-        _addItemScrollPos = GUILayout.BeginScrollView(_addItemScrollPos);
-
-        if (_allItems == null)
-            _allItems = ItemNames.GetAllItems().ToList();
-
-        string searchLower = _addItemSearch.ToLower();
-        bool searching = !string.IsNullOrEmpty(_addItemSearch);
-
-        foreach (var kvp in _allItems)
-        {
-            if (searching && !kvp.Value.ToLower().Contains(searchLower))
-                continue;
-
-            GUILayout.BeginHorizontal("box");
-            DrawItemIcon(kvp.Key, 24);
-            GUILayout.Label($"{kvp.Value} (ID:{kvp.Key})", _itemCountStyle, GUILayout.ExpandWidth(true));
-            if (GUILayout.Button($"添加 {_addItemCount}", _addButtonStyle, GUILayout.Width(70)))
-            {
-                int chestIndex = _selectedChestIndex;
-                int capturedStuffId = kvp.Key;
-                int capturedCount = _addItemCount;
-
-                _pendingAction = () => AddAndUpdate(chestIndex, capturedStuffId, capturedCount);
-            }
-            GUILayout.EndHorizontal();
-        }
-
-        GUILayout.EndScrollView();
-
-        GUILayout.Space(4);
-        if (GUILayout.Button("关闭", GUILayout.Height(24)))
-            _showAddItemWindow = false;
-
-        GUI.DragWindow();
-    }
-
     // ====== 物品操作方法 ======
 
     private static void CacheBagMethods(object bag)
@@ -686,7 +349,7 @@ public class ChestEditorComponent : MonoBehaviour
         var chest = _chests[chestIndex];
         try
         {
-            object? bag = GetProp(chest.Facility, "bag");
+            object? bag = Il2CppHelper.GetProp(chest.Facility, "bag");
             if (bag == null)
             {
                 Plugin.LogError("bag 为 null");
@@ -721,7 +384,7 @@ public class ChestEditorComponent : MonoBehaviour
         var chest = _chests[chestIndex];
         try
         {
-            object? bag = GetProp(chest.Facility, "bag");
+            object? bag = Il2CppHelper.GetProp(chest.Facility, "bag");
             if (bag == null)
             {
                 Plugin.LogError("bag 为 null");
@@ -779,150 +442,6 @@ public class ChestEditorComponent : MonoBehaviour
             Facility = chest.Facility,
             PlanStock = chest.PlanStock
         };
-
-        // 调试输出
-
-    }
-
-    // ====== 反射工具 ======
-
-    private const BindingFlags BF = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.FlattenHierarchy;
-
-    private static object? GetProp(object obj, string name)
-    {
-        try
-        {
-            var t = obj.GetType();
-            while (t != null && t != typeof(object))
-            {
-                var prop = t.GetProperty(name, BF);
-                if (prop != null) return prop.GetValue(obj);
-                t = t.BaseType;
-            }
-        }
-        catch { }
-        return null;
-    }
-
-    private static int GetInt(object obj, string name)
-    {
-        try
-        {
-            var t = obj.GetType();
-            while (t != null && t != typeof(object))
-            {
-                var field = t.GetField(name, BF);
-                if (field != null) return (int)(field.GetValue(obj) ?? 0);
-                var prop = t.GetProperty(name, BF);
-                if (prop != null) return (int)(prop.GetValue(obj) ?? 0);
-                t = t.BaseType;
-            }
-        }
-        catch { }
-        return 0;
-    }
-
-    private static int GetGuid(object obj)
-    {
-        try
-        {
-            var t = obj.GetType();
-            while (t != null && t != typeof(object))
-            {
-                foreach (var name in new[] { "Guid", "guid" })
-                {
-                    var prop = t.GetProperty(name, BF);
-                    if (prop != null) { var g = prop.GetGetMethod(); if (g != null) return (int)(g.Invoke(obj, null) ?? 0); }
-                }
-                t = t.BaseType;
-            }
-        }
-        catch { }
-        return 0;
-    }
-
-    // ====== 图片加载 ======
-
-    private static readonly Dictionary<int, Texture2D?> _iconCache = new();
-    private static Dictionary<string, Sprite>? _spriteDict;
-    private static bool _spriteScanned;
-
-    private static void EnsureScanned()
-    {
-        if (_spriteScanned) return;
-        _spriteScanned = true;
-        _spriteDict = new Dictionary<string, Sprite>();
-        foreach (var sp in Resources.FindObjectsOfTypeAll<Sprite>())
-        {
-            if (sp != null && !string.IsNullOrEmpty(sp.name) && !_spriteDict.ContainsKey(sp.name))
-                _spriteDict[sp.name] = sp;
-        }
-    }
-
-    private static Texture2D? GetIconTexture(int stuffId)
-    {
-        if (_iconCache.TryGetValue(stuffId, out var cached)) return cached;
-
-        try
-        {
-            EnsureScanned();
-            string targetName = $"ui_{stuffId}";
-
-            if (_spriteDict != null && _spriteDict.TryGetValue(targetName, out var sprite))
-            {
-                var atlas = sprite.texture;
-                var texRect = sprite.textureRect;
-                int sx = (int)texRect.x, sy = (int)texRect.y;
-                int sw = (int)texRect.width, sh = (int)texRect.height;
-
-                Color[]? pixels = null;
-                try
-                {
-                    pixels = atlas.GetPixels(sx, sy, sw, sh);
-                }
-                catch
-                {
-                    int aw = atlas.width, ah = atlas.height;
-                    var atlasRT = RenderTexture.GetTemporary(aw, ah, 0, RenderTextureFormat.ARGB32);
-                    Graphics.Blit(atlas, atlasRT);
-                    var prev = RenderTexture.active;
-                    RenderTexture.active = atlasRT;
-
-                    var tmpTex = new Texture2D(aw, ah, TextureFormat.RGBA32, false);
-                    tmpTex.ReadPixels(new Rect(0, 0, aw, ah), 0, 0);
-                    tmpTex.Apply();
-                    pixels = tmpTex.GetPixels(sx, sy, sw, sh);
-                    UnityEngine.Object.Destroy(tmpTex);
-
-                    RenderTexture.active = prev;
-                    RenderTexture.ReleaseTemporary(atlasRT);
-                }
-
-                var smallTex = new Texture2D(sw, sh, TextureFormat.RGBA32, false);
-                smallTex.SetPixels(pixels);
-                smallTex.Apply();
-
-                _iconCache[stuffId] = smallTex;
-                return smallTex;
-            }
-
-            _iconCache[stuffId] = null;
-            return null;
-        }
-        catch
-        {
-            _iconCache[stuffId] = null;
-            return null;
-        }
-    }
-
-    private static void DrawItemIcon(int stuffId, float size)
-    {
-        var tex = GetIconTexture(stuffId);
-        if (tex != null)
-            GUILayout.Label(tex, GUILayout.Width(size), GUILayout.Height(size));
-        else
-            GUILayout.Space(size);
     }
 
     // ====== 核心逻辑 ======
@@ -931,7 +450,7 @@ public class ChestEditorComponent : MonoBehaviour
     {
         _chests.Clear();
         _collapsedChests.Clear();
-        _debuggedTypes.Clear();
+        Il2CppHelper.ClearDebuggedTypes();
 
         try
         {
@@ -942,44 +461,44 @@ public class ChestEditorComponent : MonoBehaviour
                 return;
             }
 
-            object? facilityDic = GetProp(territory, "facility_dic");
+            object? facilityDic = Il2CppHelper.GetProp(territory, "facility_dic");
             if (facilityDic == null) return;
 
-            var values = GetProp(facilityDic, "Values");
+            var values = Il2CppHelper.GetProp(facilityDic, "Values");
             if (values == null) return;
 
-            var getEnum = values.GetType().GetMethod("GetEnumerator", BF);
+            var getEnum = values.GetType().GetMethod("GetEnumerator", Il2CppHelper.BF);
             if (getEnum == null) return;
             var enumerator = getEnum.Invoke(values, null);
-            var moveNext = enumerator.GetType().GetMethod("MoveNext", BF);
-            var current = enumerator.GetType().GetProperty("Current", BF);
+            var moveNext = enumerator.GetType().GetMethod("MoveNext", Il2CppHelper.BF);
+            var current = enumerator.GetType().GetProperty("Current", Il2CppHelper.BF);
 
             while ((bool)(moveNext.Invoke(enumerator, null) ?? false))
             {
                 var facility = current.GetValue(enumerator);
                 if (facility == null) continue;
 
-                int stuffId = GetInt(facility, "stuff_id");
+                int stuffId = Il2CppHelper.GetInt(facility, "stuff_id");
 
                 // 调试：检查 stuff_plan_dic 是否存在（只检查 _filterItems 中的）
                 if (_filterItems.ContainsKey(stuffId))
-                    DebugStuffPlanDic(facility, stuffId,
+                    Il2CppHelper.DebugStuffPlanDic(facility, stuffId,
                         _filterItems[stuffId].Name);
 
                 bool show = _filterItems.ContainsKey(stuffId) && _filterItems[stuffId].Enabled;
                 if (!show) continue;
 
-                int guid = GetGuid(facility);
+                int guid = Il2CppHelper.GetGuid(facility);
 
                 string name = "";
-                string logPrefix = GetProp(facility, "LOG_PREFIX")?.ToString() ?? "";
+                string logPrefix = Il2CppHelper.GetProp(facility, "LOG_PREFIX")?.ToString() ?? "";
                 if (!string.IsNullOrEmpty(logPrefix))
                 {
                     var parts = logPrefix.Split(' ');
                     if (parts.Length >= 2) name = parts[1];
                 }
                 if (string.IsNullOrEmpty(name))
-                    name = GetProp(facility, "stuff_name_with_id_index")?.ToString() ?? "";
+                    name = Il2CppHelper.GetProp(facility, "stuff_name_with_id_index")?.ToString() ?? "";
                 if (string.IsNullOrEmpty(name))
                     name = ItemNames.GetName(stuffId);
 
@@ -991,7 +510,7 @@ public class ChestEditorComponent : MonoBehaviour
                 float px = 0, py = 0;
                 ReadFacilityPos(facility, ref px, ref py);
 
-                var planDic = ReadStuffPlanDic(facility);
+                var planDic = Il2CppHelper.ReadStuffPlanDic(facility);
                 var planStock = new List<ItemInfo>();
                 if (planDic != null)
                     foreach (var kv in planDic)
@@ -1028,11 +547,11 @@ public class ChestEditorComponent : MonoBehaviour
     {
         var items = new List<ItemInfo>();
 
-        object? bag = GetProp(facility, "bag");
+        object? bag = Il2CppHelper.GetProp(facility, "bag");
         if (bag == null) return items;
 
         // 获取 BagDic 对象
-        object? bagDic = GetProp(bag, "dic");
+        object? bagDic = Il2CppHelper.GetProp(bag, "dic");
 
         // 1. 找到 bag.GetStuffCount(int, Dictionary, Dictionary) 方法
         MethodInfo? getStuffCountMethod = null;
@@ -1152,20 +671,20 @@ public class ChestEditorComponent : MonoBehaviour
                             if (args.Length == 2 && args[0] == typeof(int) && args[1] == typeof(int))
                             {
 
-                                var ge = valType.GetMethod("GetEnumerator", BF);
+                                var ge = valType.GetMethod("GetEnumerator", Il2CppHelper.BF);
                                 if (ge != null)
                                 {
                                     var en = ge.Invoke(val, null);
-                                    var mn = en.GetType().GetMethod("MoveNext", BF);
-                                    var cr = en.GetType().GetProperty("Current", BF);
+                                    var mn = en.GetType().GetMethod("MoveNext", Il2CppHelper.BF);
+                                    var cr = en.GetType().GetProperty("Current", Il2CppHelper.BF);
 
                                     while ((bool)(mn.Invoke(en, null) ?? false))
                                     {
                                         var entry = cr.GetValue(en);
                                         if (entry == null) continue;
 
-                                        int key = GetInt(entry, "Key");
-                                        int v = GetInt(entry, "Value");
+                                        int key = Il2CppHelper.GetInt(entry, "Key");
+                                        int v = Il2CppHelper.GetInt(entry, "Value");
                                         if (v > 0)
                                             items.Add(new ItemInfo { StuffId = key, Count = v });
                                     }
@@ -1198,13 +717,13 @@ public class ChestEditorComponent : MonoBehaviour
                 {
                     // 尝试遍历返回的集合
                     var resultType = result.GetType();
-                    var countProp = resultType.GetProperty("Count", BF);
+                    var countProp = resultType.GetProperty("Count", Il2CppHelper.BF);
                     if (countProp != null)
                     {
                         int count = (int)(countProp.GetValue(result) ?? 0);
 
                         // 遍历每一项
-                        var getItem = resultType.GetMethod("get_Item", BF);
+                        var getItem = resultType.GetMethod("get_Item", Il2CppHelper.BF);
                         if (getItem != null)
                         {
                             for (int i = 0; i < count; i++)
@@ -1213,8 +732,8 @@ public class ChestEditorComponent : MonoBehaviour
                                 {
                                     var entry = getItem.Invoke(result, new object[] { i });
                                     if (entry == null) continue;
-                                    int key = GetInt(entry, "stuff_id") != 0 ? GetInt(entry, "stuff_id") : GetInt(entry, "Key") != 0 ? GetInt(entry, "Key") : GetInt(entry, "StuffId");
-                                    int val = GetInt(entry, "count") != 0 ? GetInt(entry, "count") : GetInt(entry, "Value") != 0 ? GetInt(entry, "Value") : GetInt(entry, "Count");
+                                    int key = Il2CppHelper.GetInt(entry, "stuff_id") != 0 ? Il2CppHelper.GetInt(entry, "stuff_id") : Il2CppHelper.GetInt(entry, "Key") != 0 ? Il2CppHelper.GetInt(entry, "Key") : Il2CppHelper.GetInt(entry, "StuffId");
+                                    int val = Il2CppHelper.GetInt(entry, "count") != 0 ? Il2CppHelper.GetInt(entry, "count") : Il2CppHelper.GetInt(entry, "Value") != 0 ? Il2CppHelper.GetInt(entry, "Value") : Il2CppHelper.GetInt(entry, "Count");
                                     if (key > 0 && val > 0)
                                         items.Add(new ItemInfo { StuffId = key, Count = val });
                                 }
@@ -1244,7 +763,7 @@ public class ChestEditorComponent : MonoBehaviour
     {
         try
         {
-            var countProp = list.GetType().GetProperty("Count", BF);
+            var countProp = list.GetType().GetProperty("Count", Il2CppHelper.BF);
             if (countProp != null) return (int)(countProp.GetValue(list) ?? 0);
         }
         catch { }
@@ -1255,7 +774,7 @@ public class ChestEditorComponent : MonoBehaviour
     {
         try
         {
-            var getItem = list.GetType().GetMethod("get_Item", BF);
+            var getItem = list.GetType().GetMethod("get_Item", Il2CppHelper.BF);
             if (getItem != null) return (int)(getItem.Invoke(list, new object[] { index }) ?? 0);
         }
         catch { }
@@ -1266,11 +785,11 @@ public class ChestEditorComponent : MonoBehaviour
     {
         try
         {
-            object? bag = GetProp(facility, "bag");
+            object? bag = Il2CppHelper.GetProp(facility, "bag");
             if (bag == null) return;
 
-            maxCap = GetInt(bag, "limit");
-            if (maxCap == 0) maxCap = GetInt(bag, "Limit");
+            maxCap = Il2CppHelper.GetInt(bag, "limit");
+            if (maxCap == 0) maxCap = Il2CppHelper.GetInt(bag, "Limit");
 
             // 计算已用容量
             var items = ReadItemsFromBag(facility);
@@ -1288,211 +807,26 @@ public class ChestEditorComponent : MonoBehaviour
 
             foreach (var n in xNames)
             {
-                float v = GetFloat(facility, n);
+                float v = Il2CppHelper.GetFloat(facility, n);
                 if (v != 0) { px = v; break; }
             }
             foreach (var n in yNames)
             {
-                float v = GetFloat(facility, n);
+                float v = Il2CppHelper.GetFloat(facility, n);
                 if (v != 0) { py = v; break; }
             }
 
             if (px == 0 && py == 0)
             {
-                var pos = GetProp(facility, "position") ?? GetProp(facility, "Position") ?? GetProp(facility, "pos");
+                var pos = Il2CppHelper.GetProp(facility, "position") ?? Il2CppHelper.GetProp(facility, "Position") ?? Il2CppHelper.GetProp(facility, "pos");
                 if (pos != null)
                 {
-                    px = GetFloat(pos, "x");
-                    py = GetFloat(pos, "y");
+                    px = Il2CppHelper.GetFloat(pos, "x");
+                    py = Il2CppHelper.GetFloat(pos, "y");
                 }
             }
         }
         catch { }
-    }
-
-    private static IntPtr FindIl2CppMethod(object facility, string methodName)
-    {
-        if (facility is not Il2CppInterop.Runtime.InteropTypes.Il2CppObjectBase il2cppObj) return IntPtr.Zero;
-        IntPtr objPtr = Il2CppInterop.Runtime.IL2CPP.Il2CppObjectBaseToPtrNotNull(il2cppObj);
-        IntPtr realClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(objPtr);
-        IntPtr searchClass = realClass;
-        while (searchClass != IntPtr.Zero)
-        {
-            var m = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(searchClass, methodName, 0);
-            if (m != IntPtr.Zero) return m;
-            searchClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(searchClass);
-        }
-        return IntPtr.Zero;
-    }
-
-    private static List<KeyValuePair<int, int>>? ReadStuffPlanDic(object facility)
-    {
-        try
-        {
-            if (facility is not Il2CppInterop.Runtime.InteropTypes.Il2CppObjectBase il2cppObj) return null;
-            IntPtr objPtr = Il2CppInterop.Runtime.IL2CPP.Il2CppObjectBaseToPtrNotNull(il2cppObj);
-            var methodPtr = FindIl2CppMethod(facility, "GetStuffPlanDic");
-            if (methodPtr == IntPtr.Zero) return null;
-
-            IntPtr dictPtr;
-            unsafe
-            {
-                IntPtr exception = IntPtr.Zero;
-                void** args = null;
-                dictPtr = Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(methodPtr, objPtr, args, ref exception);
-            }
-            if (dictPtr == IntPtr.Zero) return null;
-
-            var dict = new Il2CppSystem.Collections.Generic.Dictionary<int, int>(dictPtr);
-            var result = new List<KeyValuePair<int, int>>();
-            var enumerator = dict.GetEnumerator();
-            while (enumerator.MoveNext())
-                result.Add(new KeyValuePair<int, int>(enumerator.Current.Key, enumerator.Current.Value));
-            return result;
-        }
-        catch { return null; }
-    }
-
-    private static void Il2CppDictSetItem(IntPtr dictPtr, int key, int value)
-    {
-        IntPtr dictClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(dictPtr);
-        string className = System.Runtime.InteropServices.Marshal.PtrToStringAnsi(
-            Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_name(dictClass)) ?? "?";
-        Plugin.LogInfo($"[Plan] dictClass={className}, dictPtr={dictPtr}");
-
-        // 列出所有方法
-        IntPtr iter = IntPtr.Zero;
-        IntPtr m;
-        while ((m = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_methods(dictClass, ref iter)) != IntPtr.Zero)
-        {
-            string mName = System.Runtime.InteropServices.Marshal.PtrToStringAnsi(
-                Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_name(m)) ?? "?";
-            if (mName.Contains("Item") || mName.Contains("Remove") || mName.Contains("Add") || mName.Contains("Set"))
-                Plugin.LogInfo($"[Plan] 方法: {mName}");
-        }
-
-        IntPtr setItemMethod = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(dictClass, "set_Item", 2);
-        Plugin.LogInfo($"[Plan] set_Item ptr={setItemMethod}");
-        if (setItemMethod == IntPtr.Zero) return;
-
-        unsafe
-        {
-            int k = key, v = value;
-            void** args = stackalloc void*[2];
-            args[0] = &k;
-            args[1] = &v;
-            IntPtr exception = IntPtr.Zero;
-            Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(setItemMethod, dictPtr, args, ref exception);
-            Plugin.LogInfo($"[Plan] set_Item({key},{value}) exception={exception}");
-        }
-    }
-
-    private static void Il2CppDictRemove(IntPtr dictPtr, int key)
-    {
-        IntPtr dictClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(dictPtr);
-        IntPtr removeMethod = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(dictClass, "Remove", 1);
-        Plugin.LogInfo($"[Plan] Remove ptr={removeMethod}");
-        if (removeMethod == IntPtr.Zero) return;
-
-        unsafe
-        {
-            int k = key;
-            void** args = stackalloc void*[1];
-            args[0] = &k;
-            IntPtr exception = IntPtr.Zero;
-            Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(removeMethod, dictPtr, args, ref exception);
-            Plugin.LogInfo($"[Plan] Remove({key}) exception={exception}");
-        }
-    }
-
-    internal static void SetStuffPlanValue(object facility, int itemId, int count)
-    {
-        try
-        {
-            if (facility is not Il2CppInterop.Runtime.InteropTypes.Il2CppObjectBase il2cppObj) return;
-            IntPtr objPtr = Il2CppInterop.Runtime.IL2CPP.Il2CppObjectBaseToPtrNotNull(il2cppObj);
-            var methodPtr = FindIl2CppMethod(facility, "GetStuffPlanDic");
-            if (methodPtr == IntPtr.Zero) return;
-
-            IntPtr dictPtr;
-            unsafe
-            {
-                IntPtr exception = IntPtr.Zero;
-                void** args = null;
-                dictPtr = Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(methodPtr, objPtr, args, ref exception);
-            }
-            if (dictPtr == IntPtr.Zero) return;
-
-            if (count <= 0)
-                Il2CppDictRemove(dictPtr, itemId);
-            else
-                Il2CppDictSetItem(dictPtr, itemId, count);
-        }
-        catch (Exception ex) { Plugin.LogError($"SetStuffPlanValue 出错: {ex.Message}"); }
-    }
-
-    private static HashSet<int> _debuggedTypes = new();
-    private static void DebugStuffPlanDic(object facility, int stuffId, string name)
-    {
-        if (!_debuggedTypes.Add(stuffId)) return; // 同类建筑只输出一次
-        try
-        {
-            if (facility is not Il2CppInterop.Runtime.InteropTypes.Il2CppObjectBase il2cppObj) return;
-            IntPtr objPtr = Il2CppInterop.Runtime.IL2CPP.Il2CppObjectBaseToPtrNotNull(il2cppObj);
-            IntPtr realClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(objPtr);
-
-            // 沿 IL2CPP 类继承链查找 GetStuffPlanDic 方法
-            IntPtr methodPtr = IntPtr.Zero;
-            IntPtr searchClass = realClass;
-            while (searchClass != IntPtr.Zero)
-            {
-                methodPtr = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(searchClass, "GetStuffPlanDic", 0);
-                if (methodPtr != IntPtr.Zero) break;
-                searchClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(searchClass);
-            }
-
-            if (methodPtr == IntPtr.Zero) return; // 没有该方法
-
-            // 调用 GetStuffPlanDic()
-            IntPtr dictPtr;
-            unsafe
-            {
-                IntPtr exception = IntPtr.Zero;
-                void** args = null;
-                dictPtr = Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(methodPtr, objPtr, args, ref exception);
-            }
-
-            if (dictPtr == IntPtr.Zero)
-            {
-                Plugin.LogInfo($"[调试] {name}(stuffId={stuffId}) stuff_plan_dic=null");
-                return;
-            }
-
-            var dict = new Il2CppSystem.Collections.Generic.Dictionary<int, int>(dictPtr);
-            Plugin.LogInfo($"[调试] {name}(stuffId={stuffId}) stuff_plan_dic 条目数={dict.Count}");
-        }
-        catch (Exception ex)
-        {
-            Plugin.LogInfo($"[调试] {name}(stuffId={stuffId}) 出错: {ex.Message}");
-        }
-    }
-
-    private static float GetFloat(object obj, string name)
-    {
-        try
-        {
-            var t = obj.GetType();
-            while (t != null && t != typeof(object))
-            {
-                var field = t.GetField(name, BF);
-                if (field != null) return Convert.ToSingle(field.GetValue(obj) ?? 0);
-                var prop = t.GetProperty(name, BF);
-                if (prop != null) return Convert.ToSingle(prop.GetValue(obj) ?? 0);
-                t = t.BaseType;
-            }
-        }
-        catch { }
-        return 0;
     }
 
     private void LocateFacility(float targetX, float targetY)
