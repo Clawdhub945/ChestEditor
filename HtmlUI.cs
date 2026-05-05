@@ -849,10 +849,12 @@ body { font-family: 'Inter', sans-serif; background: var(--bg-primary); color: v
 <script>
 let chests = [];
 let items = [];
+let dragonItems = [];
 let autoRefresh = true;
 let selectedChest = -1;
 let searchQuery = '';
 let categoryOpen = true;
+let dragonCategoryOpen = true;
 let filters = [];
 
 async function fetchFilters() {
@@ -895,6 +897,46 @@ async function fetchItems() {
   } catch(e) {}
 }
 
+async function fetchDragonItems() {
+  try {
+    const r = await fetch('/api/dragon');
+    dragonItems = await r.json();
+  } catch(e) {}
+}
+
+function renderDragonItems() {
+  const el = document.getElementById('dragonItems');
+  if (!el) return;
+  let html = '';
+  for (const it of dragonItems) {
+    html += '<div style=""display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)"">';
+    html += '<img src=""/icon/' + it.stuffId + '"" onerror=""hideImg(this)"" style=""width:24px;height:24px;image-rendering:pixelated;border-radius:4px;background:var(--bg-input);padding:2px"">';
+    html += '<div style=""flex:1;min-width:0"">';
+    html += '<div style=""font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"">' + esc(it.name) + '</div>';
+    html += '<div style=""font-size:10px;color:var(--text-muted)"">ID:' + it.stuffId + '</div>';
+    html += '</div>';
+    html += '<input type=""number"" class=""count-input"" value=""' + it.count + '"" min=""0"" id=""dragon_' + it.stuffId + '"" style=""width:60px"">';
+    html += '<button class=""btn-adj"" onclick=""setDragonItem(' + it.stuffId + ')"" style=""font-size:11px;padding:3px 8px;width:auto;height:auto"">设置</button>';
+    html += '</div>';
+  }
+  el.innerHTML = html;
+}
+
+async function setDragonItem(stuffId) {
+  const input = document.getElementById('dragon_' + stuffId);
+  const newCount = parseInt(input.value) || 0;
+  try {
+    const r = await fetch('/api/dragon/set', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({stuffId:stuffId, count:newCount})
+    });
+    dragonItems = await r.json();
+    renderDragonItems();
+    toast('龙素材已更新');
+  } catch(e) { toast('操作失败', true); }
+}
+
 async function refreshChests() {
   const btn = document.getElementById('btnRefresh');
   try {
@@ -904,6 +946,7 @@ async function refreshChests() {
     await fetch('/api/refresh', {method:'POST'});
     await fetchFilters();
     await fetchChests();
+    await fetchDragonItems();
     renderSidebar();
     if (selectedChest >= 0) renderContent();
     document.getElementById('status').textContent = chests.length + ' 个箱子';
@@ -957,11 +1000,28 @@ function renderSidebar() {
   }
 
   html += '</div></div>';
+
+  // 龙素材分类
+  html += '<div class=""category"">';
+  html += '<div class=""category-header"" onclick=""toggleDragonCategory()"">';
+  html += '<span class=""arrow' + (dragonCategoryOpen ? ' open' : '') + '"">&#9654;</span>';
+  html += '<span>龙素材 (驯龙)</span>';
+  html += '</div>';
+  html += '<div class=""category-items' + (dragonCategoryOpen ? ' open' : '') + '"">';
+  html += '<div id=""dragonItems"" style=""padding:4px 8px""></div>';
+  html += '</div></div>';
+
   el.innerHTML = html;
+  renderDragonItems();
 }
 
 function toggleCategory() {
   categoryOpen = !categoryOpen;
+  renderSidebar();
+}
+
+function toggleDragonCategory() {
+  dragonCategoryOpen = !dragonCategoryOpen;
   renderSidebar();
 }
 
@@ -1239,6 +1299,7 @@ async function init() {
   document.getElementById('btnAuto').addEventListener('click', toggleAuto);
   document.getElementById('btnAuto').className = 'on';
   await fetchItems();
+  await fetchDragonItems();
   await fetchFilters();
   await refreshChests();
   renderSidebar();
@@ -1246,6 +1307,7 @@ async function init() {
   setInterval(async () => {
     if (!autoRefresh) return;
     await fetchChests();
+    await fetchDragonItems();
     renderSidebar();
     if (selectedChest >= 0) renderContent();
   }, 3000);

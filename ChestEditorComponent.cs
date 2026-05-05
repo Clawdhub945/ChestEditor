@@ -19,7 +19,7 @@ public partial class ChestEditorComponent : MonoBehaviour
         public int StuffId;
         public int Count;
         public bool IsAdd;
-        public int ExtraIndex; // 计划库存操作时存储目标箱子索引
+        public int ExtraIndex; // 计划库存操作时存储目标箱子索引, 龙素材操作时存储stuffId
         public string? ResultJson;
         public System.Threading.ManualResetEventSlim Signal;
     }
@@ -28,6 +28,10 @@ public partial class ChestEditorComponent : MonoBehaviour
     // JSON 缓存（主线程写，HTTP 线程读，volatile 保证可见性）
     internal volatile string ChestsJson = "[]";
     internal volatile string ItemsJson = "[]";
+    internal volatile string DragonBagJson = "[]";
+
+    // 龙素材物品 ID 列表
+    private static readonly int[] DragonItemIds = { 815001, 815002, 815003, 815004, 815005 };
 
     private List<ChestInfo> _chests = new();
     private HashSet<int> _collapsedChests = new();
@@ -153,8 +157,40 @@ public partial class ChestEditorComponent : MonoBehaviour
                 sb2.Append(']');
                 ItemsJson = sb2.ToString();
             }
+
+            // 龙素材背包 JSON
+            UpdateDragonBagJson();
         }
         catch { }
+    }
+
+    private void UpdateDragonBagJson()
+    {
+        try
+        {
+            var dragonItems = Il2CppHelper.ReadDragonStuffBag();
+            var sb = new StringBuilder();
+            sb.Append('[');
+
+            // 始终显示 5 种龙素材，即使数量为 0
+            var dict = new Dictionary<int, int>();
+            if (dragonItems != null)
+                foreach (var kv in dragonItems)
+                    dict[kv.Key] = kv.Value;
+
+            bool first = true;
+            foreach (int sid in DragonItemIds)
+            {
+                if (!first) sb.Append(',');
+                first = false;
+                int count = dict.TryGetValue(sid, out int c) ? c : 0;
+                sb.Append($"{{\"stuffId\":{sid},\"name\":\"{Escape(ItemNames.GetName(sid))}\",\"count\":{count}}}");
+            }
+
+            sb.Append(']');
+            DragonBagJson = sb.ToString();
+        }
+        catch { DragonBagJson = "[]"; }
     }
 
     private static string Escape(string s) => s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "");
@@ -226,6 +262,13 @@ public partial class ChestEditorComponent : MonoBehaviour
                     {
                         req.ResultJson = "{\"error\":\"chest not found\"}";
                     }
+                }
+                else if (req.ChestIndex == -6)
+                {
+                    // 设置龙素材数量: ExtraIndex=stuffId, Count=新数量
+                    Il2CppHelper.SetDragonItemQuantity(req.ExtraIndex, req.Count);
+                    UpdateDragonBagJson();
+                    req.ResultJson = DragonBagJson;
                 }
                 else if (req.IsAdd)
                 {

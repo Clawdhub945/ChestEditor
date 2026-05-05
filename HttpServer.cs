@@ -142,6 +142,35 @@ internal class HttpServer
             {
                 HandleChestAction(resp, path, req);
             }
+            else if (path == "/api/dragon" && method == "GET")
+            {
+                var comp = ChestEditorComponent.Instance;
+                SendJson(resp, comp?.DragonBagJson ?? "[]");
+            }
+            else if (path == "/api/dragon/set" && method == "POST")
+            {
+                string body;
+                using (var reader = new StreamReader(req.InputStream, req.ContentEncoding))
+                    body = reader.ReadToEnd();
+                int sid = 0, cnt = 0;
+                foreach (var part in body.Trim('{', '}').Split(','))
+                {
+                    var kv = part.Split(':');
+                    if (kv.Length != 2) continue;
+                    string key = kv[0].Trim().Trim('"');
+                    string val = kv[1].Trim().Trim('"');
+                    if (key == "stuffId" && int.TryParse(val, out int v1)) sid = v1;
+                    if (key == "count" && int.TryParse(val, out int v2)) cnt = v2;
+                }
+                var comp = ChestEditorComponent.Instance;
+                if (comp == null) { SendJson(resp, "{\"error\":\"mod not ready\"}"); return; }
+                var signal = new ManualResetEventSlim(false);
+                comp.WriteQueue.Enqueue(new ChestEditorComponent.WriteRequest
+                {
+                    ChestIndex = -6, ExtraIndex = sid, Count = cnt, Signal = signal
+                });
+                SendJson(resp, signal.Wait(5000) ? (comp.DragonBagJson ?? "{\"ok\":true}") : "{\"error\":\"timeout\"}");
+            }
             else if (path == "/api/filters" && method == "GET")
             {
                 var inst = ChestEditorComponent.Instance;
