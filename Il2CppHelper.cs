@@ -244,14 +244,50 @@ internal static class Il2CppHelper
         try
         {
             var w = GetGameW();
-            if (w == null) return null;
+            if (w == null) { Plugin.LogInfo("[Dragon] Game.w 为 null"); return null; }
 
             object? dragonBag = GetProp(w, "dragon_stuff_bag");
-            if (dragonBag == null) return null;
+            if (dragonBag == null)
+            {
+                // 尝试其他可能的属性名
+                foreach (var name in new[] { "dragon_stuff_bag", "dragonStuffBag", "dragon_bag", "dragonBag" })
+                {
+                    dragonBag = GetProp(w, name);
+                    if (dragonBag != null) { Plugin.LogInfo($"[Dragon] 找到背包: {name}"); break; }
+                }
+                if (dragonBag == null)
+                {
+                    Plugin.LogInfo("[Dragon] dragon_stuff_bag 为 null");
+                    // 打印 w 对象的所有属性帮助调试
+                    try
+                    {
+                        var t = w.GetType();
+                        Plugin.LogInfo($"[Dragon] w 类型: {t.FullName}");
+                        while (t != null && t != typeof(object))
+                        {
+                            foreach (var prop in t.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
+                            {
+                                if (prop.Name.ToLower().Contains("dragon") || prop.Name.ToLower().Contains("bag") || prop.Name.ToLower().Contains("stuff"))
+                                    Plugin.LogInfo($"[Dragon] w.{prop.Name} : {prop.PropertyType.Name}");
+                            }
+                            foreach (var field in t.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
+                            {
+                                if (field.Name.ToLower().Contains("dragon") || field.Name.ToLower().Contains("bag") || field.Name.ToLower().Contains("stuff"))
+                                    Plugin.LogInfo($"[Dragon] w.{field.Name} : {field.FieldType.Name}");
+                            }
+                            t = t.BaseType;
+                        }
+                    }
+                    catch { }
+                    return null;
+                }
+            }
 
-            return ReadBagContents(dragonBag);
+            var result = ReadBagContents(dragonBag);
+            Plugin.LogInfo($"[Dragon] 读取到 {result.Count} 种龙素材");
+            return result;
         }
-        catch { return null; }
+        catch (Exception ex) { Plugin.LogError($"[Dragon] ReadDragonStuffBag 异常: {ex.Message}"); return null; }
     }
 
     internal static List<KeyValuePair<int, int>> ReadBagContents(object bag)
@@ -259,12 +295,44 @@ internal static class Il2CppHelper
         var result = new List<KeyValuePair<int, int>>();
         try
         {
+            var allMethods = bag.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+
+            // 策略0：找 StuffCount(int) 或 GetStuffCount(int) 单参数版本
+            MethodInfo? singleParamMethod = null;
+            foreach (var m in allMethods)
+            {
+                if (m.Name == "StuffCount" || m.Name == "GetStuffCount")
+                {
+                    var p = m.GetParameters();
+                    if (p.Length == 1 && p[0].ParameterType == typeof(int))
+                    {
+                        singleParamMethod = m;
+                        break;
+                    }
+                }
+            }
+            if (singleParamMethod != null)
+            {
+                foreach (var kvp in ItemNames.GetAllItems())
+                {
+                    try
+                    {
+                        var res = singleParamMethod.Invoke(bag, new object[] { kvp.Key });
+                        int count = Convert.ToInt32(res ?? 0);
+                        if (count > 0)
+                            result.Add(new KeyValuePair<int, int>(kvp.Key, count));
+                    }
+                    catch { }
+                }
+                if (result.Count > 0) return result;
+            }
+
             // 策略1：找 GetStuffCount(int, dict, dict) 方法
             object? bagDic = GetProp(bag, "dic");
             MethodInfo? getStuffCountMethod = null;
-            foreach (var m in bag.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+            foreach (var m in allMethods)
             {
-                if (m.Name == "GetStuffCount")
+                if (m.Name == "GetStuffCount" || m.Name == "StuffCount")
                 {
                     var p = m.GetParameters();
                     if (p.Length == 3 && p[0].ParameterType == typeof(int))
@@ -323,7 +391,49 @@ internal static class Il2CppHelper
                 if (result.Count > 0) return result;
             }
 
-            // 备选：直接遍历 BagDic 的 Dictionary<int,int>
+            // 策略2：直接遍历 bag 上所有 Dictionary<int,int> 类型的字段/属性
+            var bagType = bag.GetType();
+            var bagT = bagType;
+            while (bagT != null && bagT != typeof(object))
+            {
+                foreach (var field in bagT.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
+                {
+                    try
+                    {
+                        var val = field.GetValue(bag);
+                        if (val == null) continue;
+                        var valType = val.GetType();
+                        if (valType.IsGenericType)
+                        {
+                            var args = valType.GetGenericArguments();
+                            if (args.Length == 2 && args[0] == typeof(int) && args[1] == typeof(int))
+                            {
+                                var ge = valType.GetMethod("GetEnumerator", BF);
+                                if (ge != null)
+                                {
+                                    var en = ge.Invoke(val, null);
+                                    var mn = en.GetType().GetMethod("MoveNext", BF);
+                                    var cr = en.GetType().GetProperty("Current", BF);
+                                    while ((bool)(mn.Invoke(en, null) ?? false))
+                                    {
+                                        var entry = cr.GetValue(en);
+                                        if (entry == null) continue;
+                                        int key = GetInt(entry, "Key");
+                                        int v = GetInt(entry, "Value");
+                                        if (v > 0)
+                                            result.Add(new KeyValuePair<int, int>(key, v));
+                                    }
+                                    if (result.Count > 0) return result;
+                                }
+                            }
+                        }
+                    }
+                    catch { }
+                }
+                bagT = bagT.BaseType;
+            }
+
+            // 策略3：从 bag.dic 中遍历 Dictionary<int,int>
             if (bagDic != null)
             {
                 var t = bagDic.GetType();
@@ -367,7 +477,7 @@ internal static class Il2CppHelper
                 }
             }
 
-            // 备选：bag.GetAllStuff()
+            // 策略4：bag.GetAllStuff()
             var getAllStuff = bag.GetType().GetMethod("GetAllStuff", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
             if (getAllStuff != null)
             {
