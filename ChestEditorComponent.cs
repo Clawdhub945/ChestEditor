@@ -44,6 +44,7 @@ public class ChestEditorComponent : MonoBehaviour
         { 103001, ("大箱子", true) },
         { 103002, ("料堆", true) },
         { 103003, ("货架", true) },
+        { 106005, ("王座", true) },
         { 103004, ("交易台", false) },
         { 103005, ("通商口岸", false) },
         { 103008, ("周转箱", false) },
@@ -55,21 +56,25 @@ public class ChestEditorComponent : MonoBehaviour
         { 104016, ("餐桌", false) },
         { 104019, ("接待台", false) },
         { 104020, ("宴会桌", false) },
-        { 104021, ("厕所", false) },
         { 104026, ("幸运轮盘", false) },
-        { 105015, ("堆肥桶", false) },
         { 105026, ("码头", false) },
         { 105031, ("资源搜集点", false) },
         { 106001, ("军营", false) },
         { 106002, ("牢房", false) },
         { 106004, ("野营", false) },
-        { 106005, ("王座", false) },
         { 106008, ("训练场", false) },
         { 107004, ("强盗营地", false) },
         { 107005, ("蛮族军营", false) },
         { 108012, ("永恒圣殿", false) },
         { 109005, ("国库", false) },
         { 111002, ("泰坦之手", false) },
+        { 105003, ("牧场", false) },
+        { 103013, ("喂食器", false) },
+        { 108008, ("蚁穴", false) },
+        { 108011, ("红蚁穴", false) },
+        { 111003, ("光明祭坛", false) },
+        { 111004, ("黑暗祭坛", false) },
+        { 111005, ("永恒圣殿", false) },
     };
 
     internal struct ItemInfo { public int StuffId; public int Count; }
@@ -159,15 +164,49 @@ public class ChestEditorComponent : MonoBehaviour
 
     private static string Escape(string s) => s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "");
 
+    internal static string GetFiltersJson()
+    {
+        var sb = new StringBuilder();
+        sb.Append('[');
+        bool first = true;
+        foreach (var kvp in _filterItems)
+        {
+            if (!first) sb.Append(',');
+            first = false;
+            sb.Append($"{{\"stuffId\":{kvp.Key},\"name\":\"{Escape(kvp.Value.Name)}\",\"enabled\":{(kvp.Value.Enabled ? "true" : "false")}}}");
+        }
+        sb.Append(']');
+        return sb.ToString();
+    }
+
+
+
     private void ProcessWriteRequests()
     {
         while (WriteQueue.TryDequeue(out var req))
         {
             try
             {
-                // ChestIndex == -1 表示刷新操作
+                // ChestIndex == -1 表示刷新操作, -2=筛选切换, -3=全选/清空筛选
                 if (req.ChestIndex == -1)
                 {
+                    RefreshChestList();
+                    req.ResultJson = "{\"ok\":true}";
+                }
+                else if (req.ChestIndex == -2)
+                {
+                    if (_filterItems.ContainsKey(req.StuffId))
+                    {
+                        var (name, enabled) = _filterItems[req.StuffId];
+                        _filterItems[req.StuffId] = (name, !enabled);
+                    }
+                    RefreshChestList();
+                    req.ResultJson = "{\"ok\":true}";
+                }
+                else if (req.ChestIndex == -3)
+                {
+                    foreach (var k in _filterItems.Keys.ToList())
+                        _filterItems[k] = (_filterItems[k].Name, req.IsAdd);
                     RefreshChestList();
                     req.ResultJson = "{\"ok\":true}";
                 }
@@ -846,6 +885,7 @@ public class ChestEditorComponent : MonoBehaviour
     {
         _chests.Clear();
         _collapsedChests.Clear();
+        _debuggedTypes.Clear();
 
         try
         {
@@ -874,6 +914,12 @@ public class ChestEditorComponent : MonoBehaviour
                 if (facility == null) continue;
 
                 int stuffId = GetInt(facility, "stuff_id");
+
+                // 调试：检查 stuff_plan_dic 是否存在（只检查 _filterItems 中的）
+                if (_filterItems.ContainsKey(stuffId))
+                    DebugStuffPlanDic(facility, stuffId,
+                        _filterItems[stuffId].Name);
+
                 bool show = _filterItems.ContainsKey(stuffId) && _filterItems[stuffId].Enabled;
                 if (!show) continue;
 
@@ -1209,6 +1255,52 @@ public class ChestEditorComponent : MonoBehaviour
             }
         }
         catch { }
+    }
+
+    private static HashSet<int> _debuggedTypes = new();
+    private static void DebugStuffPlanDic(object facility, int stuffId, string name)
+    {
+        if (!_debuggedTypes.Add(stuffId)) return; // 同类建筑只输出一次
+        try
+        {
+            if (facility is not Il2CppInterop.Runtime.InteropTypes.Il2CppObjectBase il2cppObj) return;
+            IntPtr objPtr = Il2CppInterop.Runtime.IL2CPP.Il2CppObjectBaseToPtrNotNull(il2cppObj);
+            IntPtr realClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(objPtr);
+
+            // 沿 IL2CPP 类继承链查找 GetStuffPlanDic 方法
+            IntPtr methodPtr = IntPtr.Zero;
+            IntPtr searchClass = realClass;
+            while (searchClass != IntPtr.Zero)
+            {
+                methodPtr = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(searchClass, "GetStuffPlanDic", 0);
+                if (methodPtr != IntPtr.Zero) break;
+                searchClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(searchClass);
+            }
+
+            if (methodPtr == IntPtr.Zero) return; // 没有该方法
+
+            // 调用 GetStuffPlanDic()
+            IntPtr dictPtr;
+            unsafe
+            {
+                IntPtr exception = IntPtr.Zero;
+                void** args = null;
+                dictPtr = Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(methodPtr, objPtr, args, ref exception);
+            }
+
+            if (dictPtr == IntPtr.Zero)
+            {
+                Plugin.LogInfo($"[调试] {name}(stuffId={stuffId}) stuff_plan_dic=null");
+                return;
+            }
+
+            var dict = new Il2CppSystem.Collections.Generic.Dictionary<int, int>(dictPtr);
+            Plugin.LogInfo($"[调试] {name}(stuffId={stuffId}) stuff_plan_dic 条目数={dict.Count}");
+        }
+        catch (Exception ex)
+        {
+            Plugin.LogInfo($"[调试] {name}(stuffId={stuffId}) 出错: {ex.Message}");
+        }
     }
 
     private static float GetFloat(object obj, string name)
