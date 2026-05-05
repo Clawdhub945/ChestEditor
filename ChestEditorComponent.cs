@@ -15,10 +15,11 @@ public class ChestEditorComponent : MonoBehaviour
     // HTTP 服务器写请求队列
     internal struct WriteRequest
     {
-        public int ChestIndex;
+        public int ChestIndex; // >=0:操作箱子, -1:刷新, -2:筛选切换, -3:筛选全选, -4:设置计划库存
         public int StuffId;
         public int Count;
-        public bool IsAdd; // true=添加, false=删除
+        public bool IsAdd;
+        public int ExtraIndex; // 计划库存操作时存储目标箱子索引
         public string? ResultJson;
         public System.Threading.ManualResetEventSlim Signal;
     }
@@ -78,7 +79,7 @@ public class ChestEditorComponent : MonoBehaviour
     };
 
     internal struct ItemInfo { public int StuffId; public int Count; }
-    internal struct ChestInfo { public int Guid; public int StuffId; public string Name; public List<ItemInfo> Items; public int MaxCap; public int UsedCap; public float PosX; public float PosY; public object Facility; }
+    internal struct ChestInfo { public int Guid; public int StuffId; public string Name; public List<ItemInfo> Items; public int MaxCap; public int UsedCap; public float PosX; public float PosY; public object Facility; public List<ItemInfo> PlanStock; }
 
     // 添加物品弹窗
     private bool _showAddItemWindow;
@@ -135,6 +136,16 @@ public class ChestEditorComponent : MonoBehaviour
                     var item = c.Items[j];
                     if (j > 0) sb.Append(',');
                     sb.Append($"{{\"stuffId\":{item.StuffId},\"name\":\"{Escape(ItemNames.GetName(item.StuffId))}\",\"count\":{item.Count}}}");
+                }
+                sb.Append("],\"planStock\":[");
+                if (c.PlanStock != null)
+                {
+                    for (int j = 0; j < c.PlanStock.Count; j++)
+                    {
+                        if (j > 0) sb.Append(',');
+                        var ps = c.PlanStock[j];
+                        sb.Append($"{{\"stuffId\":{ps.StuffId},\"name\":\"{Escape(ItemNames.GetName(ps.StuffId))}\",\"count\":{ps.Count}}}");
+                    }
                 }
                 sb.Append("]}");
             }
@@ -210,6 +221,17 @@ public class ChestEditorComponent : MonoBehaviour
                     RefreshChestList();
                     req.ResultJson = "{\"ok\":true}";
                 }
+                else if (req.ChestIndex == -4)
+                {
+                    // 设置计划库存: ExtraIndex=箱子索引, StuffId=物品ID, Count=新数量, IsAdd=true添加/更新,false删除
+                    if (req.ExtraIndex >= 0 && req.ExtraIndex < _chests.Count)
+                    {
+                        SetStuffPlanValue(_chests[req.ExtraIndex].Facility, req.StuffId, req.Count);
+                        // 刷新后重新读取
+                        RefreshChestList();
+                    }
+                    req.ResultJson = "{\"ok\":true}";
+                }
                 else if (req.IsAdd)
                 {
                     AddAndUpdate(req.ChestIndex, req.StuffId, req.Count);
@@ -236,6 +258,16 @@ public class ChestEditorComponent : MonoBehaviour
                         var item = c.Items[j];
                         if (j > 0) sb.Append(',');
                         sb.Append($"{{\"stuffId\":{item.StuffId},\"name\":\"{Escape(ItemNames.GetName(item.StuffId))}\",\"count\":{item.Count}}}");
+                    }
+                    sb.Append("],\"planStock\":[");
+                    if (c.PlanStock != null)
+                    {
+                        for (int j = 0; j < c.PlanStock.Count; j++)
+                        {
+                            if (j > 0) sb.Append(',');
+                            var ps = c.PlanStock[j];
+                            sb.Append($"{{\"stuffId\":{ps.StuffId},\"name\":\"{Escape(ItemNames.GetName(ps.StuffId))}\",\"count\":{ps.Count}}}");
+                        }
                     }
                     sb.Append("]}");
                     req.ResultJson = sb.ToString();
@@ -731,7 +763,8 @@ public class ChestEditorComponent : MonoBehaviour
             UsedCap = usedCap,
             PosX = chest.PosX,
             PosY = chest.PosY,
-            Facility = chest.Facility
+            Facility = chest.Facility,
+            PlanStock = chest.PlanStock
         };
 
         // 调试输出
@@ -945,6 +978,12 @@ public class ChestEditorComponent : MonoBehaviour
                 float px = 0, py = 0;
                 ReadFacilityPos(facility, ref px, ref py);
 
+                var planDic = ReadStuffPlanDic(facility);
+                var planStock = new List<ItemInfo>();
+                if (planDic != null)
+                    foreach (var kv in planDic)
+                        planStock.Add(new ItemInfo { StuffId = kv.Key, Count = kv.Value });
+
                 _chests.Add(new ChestInfo
                 {
                     Guid = guid,
@@ -955,7 +994,8 @@ public class ChestEditorComponent : MonoBehaviour
                     UsedCap = usedCap,
                     PosX = px,
                     PosY = py,
-                    Facility = facility
+                    Facility = facility,
+                    PlanStock = planStock
                 });
             }
 
@@ -1255,6 +1295,127 @@ public class ChestEditorComponent : MonoBehaviour
             }
         }
         catch { }
+    }
+
+    private static IntPtr FindIl2CppMethod(object facility, string methodName)
+    {
+        if (facility is not Il2CppInterop.Runtime.InteropTypes.Il2CppObjectBase il2cppObj) return IntPtr.Zero;
+        IntPtr objPtr = Il2CppInterop.Runtime.IL2CPP.Il2CppObjectBaseToPtrNotNull(il2cppObj);
+        IntPtr realClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(objPtr);
+        IntPtr searchClass = realClass;
+        while (searchClass != IntPtr.Zero)
+        {
+            var m = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(searchClass, methodName, 0);
+            if (m != IntPtr.Zero) return m;
+            searchClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(searchClass);
+        }
+        return IntPtr.Zero;
+    }
+
+    private static List<KeyValuePair<int, int>>? ReadStuffPlanDic(object facility)
+    {
+        try
+        {
+            if (facility is not Il2CppInterop.Runtime.InteropTypes.Il2CppObjectBase il2cppObj) return null;
+            IntPtr objPtr = Il2CppInterop.Runtime.IL2CPP.Il2CppObjectBaseToPtrNotNull(il2cppObj);
+            var methodPtr = FindIl2CppMethod(facility, "GetStuffPlanDic");
+            if (methodPtr == IntPtr.Zero) return null;
+
+            IntPtr dictPtr;
+            unsafe
+            {
+                IntPtr exception = IntPtr.Zero;
+                void** args = null;
+                dictPtr = Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(methodPtr, objPtr, args, ref exception);
+            }
+            if (dictPtr == IntPtr.Zero) return null;
+
+            var dict = new Il2CppSystem.Collections.Generic.Dictionary<int, int>(dictPtr);
+            var result = new List<KeyValuePair<int, int>>();
+            var enumerator = dict.GetEnumerator();
+            while (enumerator.MoveNext())
+                result.Add(new KeyValuePair<int, int>(enumerator.Current.Key, enumerator.Current.Value));
+            return result;
+        }
+        catch { return null; }
+    }
+
+    private static void Il2CppDictSetItem(IntPtr dictPtr, int key, int value)
+    {
+        IntPtr dictClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(dictPtr);
+        string className = System.Runtime.InteropServices.Marshal.PtrToStringAnsi(
+            Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_name(dictClass)) ?? "?";
+        Plugin.LogInfo($"[Plan] dictClass={className}, dictPtr={dictPtr}");
+
+        // 列出所有方法
+        IntPtr iter = IntPtr.Zero;
+        IntPtr m;
+        while ((m = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_methods(dictClass, ref iter)) != IntPtr.Zero)
+        {
+            string mName = System.Runtime.InteropServices.Marshal.PtrToStringAnsi(
+                Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_name(m)) ?? "?";
+            if (mName.Contains("Item") || mName.Contains("Remove") || mName.Contains("Add") || mName.Contains("Set"))
+                Plugin.LogInfo($"[Plan] 方法: {mName}");
+        }
+
+        IntPtr setItemMethod = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(dictClass, "set_Item", 2);
+        Plugin.LogInfo($"[Plan] set_Item ptr={setItemMethod}");
+        if (setItemMethod == IntPtr.Zero) return;
+
+        unsafe
+        {
+            int k = key, v = value;
+            void** args = stackalloc void*[2];
+            args[0] = &k;
+            args[1] = &v;
+            IntPtr exception = IntPtr.Zero;
+            Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(setItemMethod, dictPtr, args, ref exception);
+            Plugin.LogInfo($"[Plan] set_Item({key},{value}) exception={exception}");
+        }
+    }
+
+    private static void Il2CppDictRemove(IntPtr dictPtr, int key)
+    {
+        IntPtr dictClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(dictPtr);
+        IntPtr removeMethod = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(dictClass, "Remove", 1);
+        Plugin.LogInfo($"[Plan] Remove ptr={removeMethod}");
+        if (removeMethod == IntPtr.Zero) return;
+
+        unsafe
+        {
+            int k = key;
+            void** args = stackalloc void*[1];
+            args[0] = &k;
+            IntPtr exception = IntPtr.Zero;
+            Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(removeMethod, dictPtr, args, ref exception);
+            Plugin.LogInfo($"[Plan] Remove({key}) exception={exception}");
+        }
+    }
+
+    internal static void SetStuffPlanValue(object facility, int itemId, int count)
+    {
+        try
+        {
+            if (facility is not Il2CppInterop.Runtime.InteropTypes.Il2CppObjectBase il2cppObj) return;
+            IntPtr objPtr = Il2CppInterop.Runtime.IL2CPP.Il2CppObjectBaseToPtrNotNull(il2cppObj);
+            var methodPtr = FindIl2CppMethod(facility, "GetStuffPlanDic");
+            if (methodPtr == IntPtr.Zero) return;
+
+            IntPtr dictPtr;
+            unsafe
+            {
+                IntPtr exception = IntPtr.Zero;
+                void** args = null;
+                dictPtr = Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(methodPtr, objPtr, args, ref exception);
+            }
+            if (dictPtr == IntPtr.Zero) return;
+
+            if (count <= 0)
+                Il2CppDictRemove(dictPtr, itemId);
+            else
+                Il2CppDictSetItem(dictPtr, itemId, count);
+        }
+        catch (Exception ex) { Plugin.LogError($"SetStuffPlanValue 出错: {ex.Message}"); }
     }
 
     private static HashSet<int> _debuggedTypes = new();

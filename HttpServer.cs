@@ -95,6 +95,36 @@ internal class HttpServer
             {
                 HandleRefresh(resp);
             }
+            else if (path.StartsWith("/api/chest/") && path.EndsWith("/plan") && method == "POST")
+            {
+                // POST /api/chest/{index}/plan  body: {stuffId, count}  count<=0表示删除
+                var parts = path.Split('/');
+                if (parts.Length < 5 || !int.TryParse(parts[3], out int ci))
+                {
+                    resp.StatusCode = 400; SendJson(resp, "{\"error\":\"invalid path\"}"); return;
+                }
+                string body;
+                using (var reader = new StreamReader(req.InputStream, req.ContentEncoding))
+                    body = reader.ReadToEnd();
+                int sid = 0, cnt = 0;
+                foreach (var part in body.Trim('{', '}').Split(','))
+                {
+                    var kv = part.Split(':');
+                    if (kv.Length != 2) continue;
+                    string key = kv[0].Trim().Trim('"');
+                    string val = kv[1].Trim().Trim('"');
+                    if (key == "stuffId" && int.TryParse(val, out int v1)) sid = v1;
+                    if (key == "count" && int.TryParse(val, out int v2)) cnt = v2;
+                }
+                var comp2 = ChestEditorComponent.Instance;
+                if (comp2 == null) { SendJson(resp, "{\"error\":\"mod not ready\"}"); return; }
+                var signal2 = new ManualResetEventSlim(false);
+                comp2.WriteQueue.Enqueue(new ChestEditorComponent.WriteRequest
+                {
+                    ChestIndex = -4, ExtraIndex = ci, StuffId = sid, Count = cnt, IsAdd = cnt > 0, Signal = signal2
+                });
+                SendJson(resp, signal2.Wait(5000) ? "{\"ok\":true}" : "{\"error\":\"timeout\"}");
+            }
             else if (path.StartsWith("/api/chest/") && method == "POST")
             {
                 HandleChestAction(resp, path, req);
@@ -548,6 +578,91 @@ body { font-family: 'Inter', sans-serif; background: var(--bg-primary); color: v
   border-color: var(--accent);
 }
 
+.plan-section {
+  margin-top: 16px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.plan-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.plan-header span {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.btn-add-plan {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+}
+
+.plan-item {
+  background: rgba(255, 193, 7, 0.05);
+  border-left: 3px solid #ffc107;
+}
+
+.btn-adj {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-adj:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+.plan-item .icount {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 80px;
+}
+
+.count-input {
+  width: 60px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-size: 12px;
+  text-align: center;
+}
+
+.count-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.plan-input {
+  border-color: #ffc107;
+}
+
+.plan-input:focus {
+  border-color: #ffc107;
+  box-shadow: 0 0 0 2px rgba(255,193,7,0.2);
+}
+
 .chest-item {
   padding: 10px 12px;
   border-radius: var(--radius-sm);
@@ -728,9 +843,10 @@ body { font-family: 'Inter', sans-serif; background: var(--bg-primary); color: v
 }
 
 .item .icount {
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--accent-light);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 80px;
   margin-bottom: 10px;
 }
 
@@ -1034,6 +1150,24 @@ body { font-family: 'Inter', sans-serif; background: var(--bg-primary); color: v
   </div>
 </div>
 
+<div class=""modal"" id=""planModal"">
+  <div class=""modal-content"">
+    <div class=""modal-header"">
+      <h2 id=""planTitle"">添加计划库存</h2>
+      <button class=""close"" onclick=""closePlanModal()"">&times;</button>
+    </div>
+    <div class=""modal-search""><input id=""planSearch"" placeholder=""搜索物品..."" oninput=""renderPlanList()""></div>
+    <div class=""modal-count"">
+      <span>计划数量:</span>
+      <input id=""planCount"" type=""number"" value=""1"" min=""1"">
+      <button onclick=""planN(1)"">+1</button>
+      <button onclick=""planN(10)"">+10</button>
+      <button onclick=""planN(100)"">+100</button>
+    </div>
+    <div class=""modal-list"" id=""planList""></div>
+  </div>
+</div>
+
 <script>
 let chests = [];
 let items = [];
@@ -1127,24 +1261,24 @@ function renderSidebar() {
   }
   html += '</div></div>';
 
-  for (let i = 0; i < chests.length; i++) {
-    const c = chests[i];
-    if (q && !c.name.toLowerCase().includes(q)) continue;
-    const cap = c.maxCap > 0 ? c.usedCap + '/' + c.maxCap : c.items.length + '';
-    const isActive = selectedChest === i;
-    html += '<div class=""chest-item' + (isActive ? ' active' : '') + '"" onclick=""selectChest(' + i + ')"">';
-    html += '<div class=""ci-icon""><img src=""/icon/' + c.stuffId + '"" onerror=""this.remove()""></div>';
-    html += '<div class=""ci-info"">';
-    html += '<div class=""ci-name"">' + esc(c.name) + '</div>';
-    html += '<div class=""ci-count"">' + cap + ' 物品</div>';
-    html += '</div></div>';
+  if (chests.length === 0) {
+    html += '<div style=""padding:20px;text-align:center;color:var(--text-muted)"">暂无箱子</div>';
+  } else {
+    for (let i = 0; i < chests.length; i++) {
+      const c = chests[i];
+      if (q && !c.name.toLowerCase().includes(q)) continue;
+      const cap = c.maxCap > 0 ? c.usedCap + '/' + c.maxCap : c.items.length + '';
+      const isActive = selectedChest === i;
+      html += '<div class=""chest-item' + (isActive ? ' active' : '') + '"" onclick=""selectChest(' + i + ')"">';
+      html += '<div class=""ci-icon""><img src=""/icon/' + c.stuffId + '"" onerror=""this.remove()""></div>';
+      html += '<div class=""ci-info"">';
+      html += '<div class=""ci-name"">' + esc(c.name) + '</div>';
+      html += '<div class=""ci-count"">' + cap + ' 物品</div>';
+      html += '</div></div>';
+    }
   }
 
   html += '</div></div>';
-
-  if (!chests.length) {
-    html = '<div style=""padding:20px;text-align:center;color:var(--text-muted)"">暂无箱子</div>';
-  }
   el.innerHTML = html;
 }
 
@@ -1188,16 +1322,87 @@ function renderContent() {
       html += '<img src=""/icon/' + it.stuffId + '"" onerror=""hideImg(this)"">';
       html += '<div class=""iname"" title=""' + esc(it.name) + '"">' + esc(it.name) + '</div>';
       html += '<div class=""iid"">ID:' + it.stuffId + '</div>';
-      html += '<div class=""icount"">x' + it.count + '</div>';
+      html += '<div class=""icount"">';
+      html += '<input type=""number"" class=""count-input"" value=""' + it.count + '"" min=""0"" id=""cnt_' + it.stuffId + '"">';
+      html += '</div>';
       html += '<div class=""btns"">';
-      html += '<button class=""btn-rm"" onclick=""doRemove(' + selectedChest + ',' + it.stuffId + ',1)"">-1</button>';
-      html += '<button class=""btn-rm"" onclick=""doRemove(' + selectedChest + ',' + it.stuffId + ',' + it.count + ')"">-All</button>';
+      html += '<button class=""btn-rm"" onclick=""setBagItem(' + selectedChest + ',' + it.stuffId + ')"">设置</button>';
+      html += '<button class=""btn-rm"" onclick=""doRemove(' + selectedChest + ',' + it.stuffId + ',' + it.count + ')"">清空</button>';
       html += '</div></div>';
     }
     html += '</div>';
   }
 
+  // 计划库存区域
+  if (c.planStock && c.planStock.length > 0) {
+    html += '<div class=""plan-section"">';
+    html += '<div class=""plan-header""><span>计划库存</span>';
+    html += '<button class=""btn-add-plan"" onclick=""openPlanModal(' + selectedChest + ')"">+ 添加</button></div>';
+    html += '<div class=""items"">';
+    for (const ps of c.planStock) {
+      html += '<div class=""item plan-item"">';
+      html += '<img src=""/icon/' + ps.stuffId + '"" onerror=""hideImg(this)"">';
+      html += '<div class=""iname"" title=""' + esc(ps.name) + '"">' + esc(ps.name) + '</div>';
+      html += '<div class=""iid"">ID:' + ps.stuffId + '</div>';
+      html += '<div class=""icount"">';
+      html += '<input type=""number"" class=""count-input plan-input"" value=""' + ps.count + '"" min=""0"" id=""plan_' + ps.stuffId + '"">';
+      html += '</div>';
+      html += '<div class=""btns"">';
+      html += '<button class=""btn-rm"" onclick=""setPlanItem(' + selectedChest + ',' + ps.stuffId + ')"">设置</button>';
+      html += '<button class=""btn-rm"" onclick=""doRemovePlan(' + selectedChest + ',' + ps.stuffId + ')"">删除</button>';
+      html += '</div></div>';
+    }
+    html += '</div></div>';
+  }
+
   el.innerHTML = html;
+}
+
+// 设置物品数量（先删除全部再添加指定数量）
+async function setBagItem(ci, sid) {
+  const input = document.getElementById('cnt_' + sid);
+  const newCnt = parseInt(input.value) || 0;
+  const oldItem = chests[ci].items.find(x => x.stuffId === sid);
+  const oldCnt = oldItem ? oldItem.count : 0;
+  if (newCnt === oldCnt) return;
+  if (newCnt <= 0) {
+    await doRemove(ci, sid, oldCnt);
+  } else {
+    // 先删除全部，再添加新数量
+    if (oldCnt > 0) await doRemoveRaw(ci, sid, oldCnt);
+    await doAddRaw(ci, sid, newCnt);
+  }
+}
+
+// 设置计划库存
+async function setPlanItem(ci, sid) {
+  const input = document.getElementById('plan_' + sid);
+  const newCnt = parseInt(input.value) || 0;
+  await adjPlan(ci, sid, newCnt);
+}
+
+// 原始删除（不刷新UI）
+async function doRemoveRaw(ci, sid, cnt) {
+  await fetch('/api/chest/' + ci + '/remove', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({stuffId:sid, count:cnt})
+  });
+}
+
+// 原始添加（不刷新UI）
+async function doAddRaw(ci, sid, cnt) {
+  const r = await fetch('/api/chest/' + ci + '/add', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({stuffId:sid, count:cnt})
+  });
+  const d = await r.json();
+  if (d.error) { toast(d.error, true); return; }
+  chests[ci] = d;
+  renderSidebar();
+  renderContent();
+  toast('设置成功');
 }
 
 async function doRemove(ci, sid, cnt) {
@@ -1263,6 +1468,64 @@ async function doAdd(sid) {
 
 function addN(n) {
   document.getElementById('addCount').value = n;
+}
+
+// ===== 计划库存操作 =====
+async function adjPlan(ci, sid, cnt) {
+  try {
+    const r = await fetch('/api/chest/' + ci + '/plan', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({stuffId:sid, count:cnt})
+    });
+    await r.json();
+    await fetchChests();
+    renderSidebar();
+    renderContent();
+    toast(cnt <= 0 ? '已删除' : '已更新');
+  } catch(e) { toast('操作失败', true); }
+}
+
+async function doRemovePlan(ci, sid) {
+  await adjPlan(ci, sid, 0);
+}
+
+function openPlanModal(ci) {
+  addChestIndex = ci;
+  document.getElementById('planTitle').textContent = '向 [' + chests[ci].name + '] 添加计划库存';
+  document.getElementById('planCount').value = 1;
+  document.getElementById('planSearch').value = '';
+  document.getElementById('planModal').classList.add('show');
+  renderPlanList();
+}
+
+function closePlanModal() {
+  document.getElementById('planModal').classList.remove('show');
+}
+
+function renderPlanList() {
+  const q = document.getElementById('planSearch').value.toLowerCase();
+  const el = document.getElementById('planList');
+  let html = '';
+  for (const it of items) {
+    if (q && !it.name.toLowerCase().includes(q)) continue;
+    html += '<div class=""modal-item"" onclick=""doAddPlan(' + it.stuffId + ')"">';
+    html += '<img src=""/icon/' + it.stuffId + '"" onerror=""hideImg(this)"">';
+    html += '<span class=""mi-name"">' + esc(it.name) + '</span>';
+    html += '<span class=""mi-id"">ID:' + it.stuffId + '</span>';
+    html += '</div>';
+  }
+  el.innerHTML = html;
+}
+
+async function doAddPlan(sid) {
+  const cnt = parseInt(document.getElementById('planCount').value) || 1;
+  await adjPlan(addChestIndex, sid, cnt);
+  closePlanModal();
+}
+
+function planN(n) {
+  document.getElementById('planCount').value = n;
 }
 
 function toggleAuto() {
