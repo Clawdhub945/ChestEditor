@@ -9,6 +9,224 @@ internal static class Il2CppHelper
 {
     internal const BindingFlags BF = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.FlattenHierarchy;
 
+    // IL2CPP 原生 API 缓存
+    private static MethodInfo? _il2cpp_get_class;
+    private static MethodInfo? _il2cpp_class_get_name;
+    private static MethodInfo? _il2cpp_class_get_fields;
+    private static MethodInfo? _il2cpp_field_get_name;
+    private static MethodInfo? _il2cpp_field_get_offset;
+    private static MethodInfo? _il2cpp_field_get_type;
+    private static MethodInfo? _il2cpp_type_get_type;
+    private static bool _il2cppApiCached;
+
+    private static void CacheIl2CppApi()
+    {
+        if (_il2cppApiCached) return;
+        _il2cppApiCached = true;
+        var asm = AppDomain.CurrentDomain.GetAssemblies()
+            .FirstOrDefault(a => a.GetName().Name == "Il2CppInterop.Runtime");
+        if (asm == null) { Plugin.LogInfo("[Il2CppApi] Il2CppInterop.Runtime 未找到"); return; }
+        var t = asm.GetTypes().FirstOrDefault(x => x.Name == "IL2CPP");
+        if (t == null) { Plugin.LogInfo("[Il2CppApi] IL2CPP 类未找到"); return; }
+        _il2cpp_get_class = t.GetMethod("il2cpp_object_get_class", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+        _il2cpp_class_get_name = t.GetMethod("il2cpp_class_get_name", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+        _il2cpp_class_get_fields = t.GetMethod("il2cpp_class_get_fields", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+        _il2cpp_field_get_name = t.GetMethod("il2cpp_field_get_name", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+        _il2cpp_field_get_offset = t.GetMethod("il2cpp_field_get_offset", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+        _il2cpp_field_get_type = t.GetMethod("il2cpp_field_get_type", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+        _il2cpp_type_get_type = t.GetMethod("il2cpp_type_get_type", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+        Plugin.LogInfo($"[Il2CppApi] get_class={_il2cpp_get_class != null}, class_get_name={_il2cpp_class_get_name != null}, " +
+            $"class_get_fields={_il2cpp_class_get_fields != null}, field_get_name={_il2cpp_field_get_name != null}, " +
+            $"field_get_offset={_il2cpp_field_get_offset != null}");
+    }
+
+    // 从 Il2CppObjectBase 获取原生指针
+    private static IntPtr GetIl2CppPtr(object obj)
+    {
+        try
+        {
+            var prop = obj.GetType().GetProperty("Pointer", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (prop != null) return (IntPtr)prop.GetValue(obj)!;
+        }
+        catch { }
+        return IntPtr.Zero;
+    }
+
+    // 将 IL2CPP 返回的 char* (IntPtr) 转为 string
+    private static unsafe string? PtrToString(IntPtr ptr)
+    {
+        if (ptr == IntPtr.Zero) return null;
+        try { return System.Runtime.InteropServices.Marshal.PtrToStringAnsi(ptr); } catch { return null; }
+    }
+
+    // 获取 IL2CPP 对象的真实类名
+    private static string? GetIl2CppClassName(IntPtr ptr)
+    {
+        try
+        {
+            CacheIl2CppApi();
+            if (_il2cpp_get_class == null || _il2cpp_class_get_name == null) return null;
+            IntPtr classPtr = (IntPtr)_il2cpp_get_class.Invoke(null, new object[] { ptr })!;
+            if (classPtr == IntPtr.Zero) return null;
+            // il2cpp_class_get_name 返回 char* (IntPtr), 不是 string
+            IntPtr namePtr = (IntPtr)_il2cpp_class_get_name.Invoke(null, new object[] { classPtr })!;
+            return PtrToString(namePtr);
+        }
+        catch { return null; }
+    }
+
+    // 获取 IL2CPP 类的所有字段名和偏移
+    private static List<(string Name, int Offset)> GetIl2CppFields(IntPtr classPtr)
+    {
+        var fields = new List<(string, int)>();
+        try
+        {
+            CacheIl2CppApi();
+            if (_il2cpp_class_get_fields == null || _il2cpp_field_get_name == null || _il2cpp_field_get_offset == null)
+                return fields;
+
+            // il2cpp_class_get_fields(klass, IntPtr& iter) - iter 是 ref IntPtr
+            // 使用 IntPtr[] 数组来模拟 ref 传递
+            IntPtr iter = IntPtr.Zero;
+            object[] args = new object[] { classPtr, iter };
+
+            while (true)
+            {
+                object? result = _il2cpp_class_get_fields.Invoke(null, args);
+                if (result == null) break;
+                IntPtr field = (IntPtr)result;
+                if (field == IntPtr.Zero) break;
+
+                // 读取字段名 (返回 char*)
+                IntPtr namePtr = (IntPtr)_il2cpp_field_get_name.Invoke(null, new object[] { field })!;
+                string? name = PtrToString(namePtr);
+
+                // il2cpp_field_get_offset 返回 UInt32
+                object offsetResult = _il2cpp_field_get_offset.Invoke(null, new object[] { field })!;
+                int offset = offsetResult is uint u ? (int)u : Convert.ToInt32(offsetResult);
+
+                if (name != null) fields.Add((name, offset));
+
+                // 更新 iter 为当前 field 指针，用于下一次迭代
+                args[1] = field;
+            }
+        }
+        catch { }
+        return fields;
+    }
+
+    // 从 IL2CPP 对象指针读取 int 字段
+    private static unsafe int ReadIl2CppInt(IntPtr objPtr, int offset)
+    {
+        try { return *(int*)(objPtr + offset); } catch { return 0; }
+    }
+
+    // 从 IL2CPP 对象指针读取 string 字段
+    private static unsafe string? ReadIl2CppString(IntPtr objPtr, int offset)
+    {
+        try
+        {
+            IntPtr strPtr = *(IntPtr*)(objPtr + offset);
+            if (strPtr == IntPtr.Zero) return null;
+            // IL2CPP string 对象布局: [klass(IntPtr), monitor(IntPtr), length(int), chars...]
+            // 但实际布局取决于平台。在 64 位上: 前 8 字节是 klass, 接下来 4 字节是 length
+            int len = *(int*)(strPtr + IntPtr.Size);
+            if (len <= 0 || len > 10000) return null;
+            // UTF-16 chars 从 IntPtr.Size + 4 开始（无 padding 在 64 位上）
+            char* chars = (char*)(strPtr + IntPtr.Size + 4);
+            return new string(chars, 0, len);
+        }
+        catch { return null; }
+    }
+
+    // 从 IL2CPP 对象指针读取 List<int> 的内容
+    private static unsafe List<int>? ReadIl2CppIntList(IntPtr objPtr, int offset)
+    {
+        try
+        {
+            IntPtr listPtr = *(IntPtr*)(objPtr + offset);
+            if (listPtr == IntPtr.Zero) return null;
+
+            CacheIl2CppApi();
+            if (_il2cpp_get_class == null) return null;
+
+            IntPtr classPtr = (IntPtr)_il2cpp_get_class.Invoke(null, new object[] { listPtr })!;
+            if (classPtr == IntPtr.Zero) return null;
+
+            // 遍历字段找 _size 和 _items
+            int size = -1;
+            int itemsOffset = -1;
+            var fields = GetIl2CppFields(classPtr);
+            foreach (var (name, off) in fields)
+            {
+                if (name == "_size") size = ReadIl2CppInt(listPtr, off);
+                else if (name == "_items") itemsOffset = off;
+            }
+
+            if (size <= 0 || itemsOffset < 0) return null;
+
+            // _items 是 T[] 数组
+            IntPtr itemsPtr = *(IntPtr*)(listPtr + itemsOffset);
+            if (itemsPtr == IntPtr.Zero) return null;
+
+            // 数组对象布局: [klass(IntPtr), monitor(IntPtr), max_length(int), length(int), data...]
+            // 但实际上 IL2CPP 数组: [Il2CppObject(2*IntPtr), bounds(Il2CppArrayBounds), max_length(int), data...]
+            // Il2CppObject = klass(8) + monitor(8), bounds = length(4) + lower_bound(4)
+            // 所以数据从 offset = 2*IntPtr.Size + 8 开始
+            int dataStart = 2 * IntPtr.Size + 8;
+            var result = new List<int>();
+            for (int i = 0; i < size; i++)
+            {
+                int val = *(int*)(itemsPtr + dataStart + i * 4);
+                result.Add(val);
+            }
+            return result;
+        }
+        catch { return null; }
+    }
+
+    // 写入 IL2CPP 对象的 int 字段
+    private static unsafe void WriteIl2CppInt(IntPtr objPtr, int offset, int value)
+    {
+        try { *(int*)(objPtr + offset) = value; } catch { }
+    }
+
+    // 读取 IL2CPP 对象的所有字段
+    internal static Dictionary<string, object?> ReadIl2CppFields(object obj)
+    {
+        var dict = new Dictionary<string, object?>();
+        try
+        {
+            IntPtr ptr = GetIl2CppPtr(obj);
+            if (ptr == IntPtr.Zero) return dict;
+
+            CacheIl2CppApi();
+            if (_il2cpp_get_class == null) return dict;
+
+            IntPtr classPtr = (IntPtr)_il2cpp_get_class.Invoke(null, new object[] { ptr })!;
+            if (classPtr == IntPtr.Zero) return dict;
+
+            var fields = GetIl2CppFields(classPtr);
+            foreach (var (name, offset) in fields)
+            {
+                try
+                {
+                    // 简单启发：偏移大的是引用类型（string 等），偏移小且对齐的是值类型
+                    // 对于 string 类型字段，尝试读取为 string
+                    // 对于 int 类型字段，尝试读取为 int
+                    // 先尝试 int，如果值看起来像指针则尝试 string
+                    int intVal = ReadIl2CppInt(ptr, offset);
+                    // IL2CPP 对象的字段从 IntPtr.Size 开始（前 IntPtr.Size 是类指针）
+                    // 所以实际偏移需要加上 IntPtr.Size... 等等，offset 已经是相对于对象起始的偏移了
+                    dict[name] = intVal;
+                }
+                catch { }
+            }
+        }
+        catch { }
+        return dict;
+    }
+
     internal static object? GetProp(object obj, string name)
     {
         try
@@ -253,6 +471,9 @@ internal static class Il2CppHelper
 
     internal static object? GetGameW()
     {
+        // 存档未加载时不要调用 Game.get_w()，否则 IL2CPP 会 AccessViolation 崩溃
+        if (SaveLoadPatches.CachedTerritory == null) return null;
+
         try
         {
             // Game.get_w() 是静态方法
@@ -288,262 +509,8 @@ internal static class Il2CppHelper
         return null;
     }
 
-    // ====== 龙系统诊断 ======
-    private static bool _dragonDiagDone = false;
-    internal static void DiagnoseDragonSystem()
-    {
-        if (_dragonDiagDone) return;
-
-        try
-        {
-            var w = GetGameW();
-            if (w == null) return; // 等存档加载
-
-            _dragonDiagDone = true;
-
-            var csharpAsm = AppDomain.CurrentDomain.GetAssemblies()
-                .FirstOrDefault(a => a.GetName().Name == "Assembly-CSharp");
-            Type[]? csharpTypes = null;
-            try { csharpTypes = csharpAsm?.GetTypes(); } catch { }
-            if (csharpTypes == null) return;
-            var wType = w.GetType();
-            Plugin.LogInfo($"[DragonDiag] Game.w 类型: {wType.FullName}");
-
-            // 列出 dragon 相关字段/属性
-            var t = wType;
-            while (t != null && t != typeof(object))
-            {
-                foreach (var field in t.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
-                {
-                    if (!field.Name.Contains("dragon") && !field.Name.Contains("Dragon")) continue;
-                    try
-                    {
-                        var val = field.GetValue(w);
-                        string valStr = val == null ? "null" : $"{val.GetType().FullName}";
-                        Plugin.LogInfo($"[DragonDiag] 字段 {field.Name} : {field.FieldType.Name} = {valStr}");
-                    }
-                    catch (Exception ex) { Plugin.LogInfo($"[DragonDiag] 字段 {field.Name} : 读取失败 {ex.Message}"); }
-                }
-                foreach (var prop in t.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
-                {
-                    if (!prop.Name.Contains("dragon") && !prop.Name.Contains("Dragon")) continue;
-                    try
-                    {
-                        var getter = prop.GetGetMethod(true);
-                        if (getter == null) continue;
-                        var val = getter.Invoke(w, null);
-                        string valStr = val == null ? "null" : $"{val.GetType().FullName}";
-                        Plugin.LogInfo($"[DragonDiag] 属性 {prop.Name} : {prop.PropertyType.Name} = {valStr}");
-                    }
-                    catch (Exception ex) { Plugin.LogInfo($"[DragonDiag] 属性 {prop.Name} : 读取失败 {ex.Message}"); }
-                }
-                t = t.BaseType;
-            }
-
-            // 列出 dragon 相关方法
-            Plugin.LogInfo("[DragonDiag] === Game.w 上 dragon 相关方法 ===");
-            foreach (var m in wType.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
-            {
-                if (m.Name.Contains("ragon") || m.Name.Contains("Dragon"))
-                {
-                    var p = m.GetParameters();
-                    var pStr = string.Join(", ", p.Select(x => $"{x.ParameterType.Name} {x.Name}"));
-                    Plugin.LogInfo($"[DragonDiag] 方法 {m.Name}({pStr})");
-                }
-            }
-
-            // 尝试读取 dragon_soul_list
-            object? soulList = GetProp(w, "dragon_soul_list");
-            if (soulList == null)
-            {
-                Plugin.LogInfo("[DragonDiag] dragon_soul_list 为 null");
-            }
-            else
-            {
-                var slType = soulList.GetType();
-                Plugin.LogInfo($"[DragonDiag] dragon_soul_list 类型: {slType.FullName}");
-
-                // 尝试获取 Count
-                int count = 0;
-                var countProp = slType.GetProperty("Count", BF);
-                if (countProp != null)
-                    count = Convert.ToInt32(countProp.GetValue(soulList) ?? 0);
-                Plugin.LogInfo($"[DragonDiag] dragon_soul_list.Count = {count}");
-
-                // 列出 dragon_soul_list 的方法
-                Plugin.LogInfo("[DragonDiag] === dragon_soul_list 方法 ===");
-                foreach (var m in slType.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
-                {
-                    var p = m.GetParameters();
-                    var pStr = string.Join(", ", p.Select(x => $"{x.ParameterType.Name} {x.Name}"));
-                    Plugin.LogInfo($"[DragonDiag]   {m.Name}({pStr})");
-                }
-
-                // 如果有元素，检查第一个 DragonSoul 的结构
-                if (count > 0)
-                {
-                    var getItem = slType.GetMethod("get_Item", BF);
-                    if (getItem != null)
-                    {
-                        var first = getItem.Invoke(soulList, new object[] { 0 });
-                        if (first != null)
-                        {
-                            var soulType = first.GetType();
-                            Plugin.LogInfo($"[DragonDiag] DragonSoul 类型: {soulType.FullName}");
-                            var st = soulType;
-                            while (st != null && st != typeof(object))
-                            {
-                                foreach (var f in st.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
-                                {
-                                    try
-                                    {
-                                        var v = f.GetValue(first);
-                                        Plugin.LogInfo($"[DragonDiag]   {f.Name} = {v}");
-                                    }
-                                    catch (Exception ex) { Plugin.LogInfo($"[DragonDiag]   {f.Name} : err {ex.Message}"); }
-                                }
-                                st = st.BaseType;
-                            }
-                            // DragonSoul 方法
-                            Plugin.LogInfo("[DragonDiag] === DragonSoul 方法 ===");
-                            foreach (var m in soulType.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
-                            {
-                                var p = m.GetParameters();
-                                var pStr = string.Join(", ", p.Select(x => $"{x.ParameterType.Name} {x.Name}"));
-                                Plugin.LogInfo($"[DragonDiag]   {m.Name}({pStr})");
-                            }
-                        }
-                    }
-                }
-            }
-
-            // 检查 dragon_control_count / dragon_control_level
-            int controlCount = GetInt(w, "dragon_control_count");
-            int controlLevel = GetInt(w, "dragon_control_level");
-            Plugin.LogInfo($"[DragonDiag] dragon_control_count={controlCount}, dragon_control_level={controlLevel}");
-
-            // 检查 AddDragonSoul 方法参数
-            var addDragonMethod = wType.GetMethod("AddDragonSoul", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            if (addDragonMethod != null)
-            {
-                var p = addDragonMethod.GetParameters();
-                Plugin.LogInfo($"[DragonDiag] AddDragonSoul 参数: {string.Join(", ", p.Select(x => $"{x.ParameterType.FullName} {x.Name}"))}");
-                // 检查返回类型
-                Plugin.LogInfo($"[DragonDiag] AddDragonSoul 返回类型: {addDragonMethod.ReturnType.FullName}");
-
-                // 检查 monster_nature_list 的元素类型
-                if (p.Length >= 2)
-                {
-                    var listType = p[1].ParameterType;
-                    Plugin.LogInfo($"[DragonDiag] nature_list 参数类型: {listType.FullName}");
-                    if (listType.IsGenericType)
-                    {
-                        var args = listType.GetGenericArguments();
-                        foreach (var a in args)
-                            Plugin.LogInfo($"[DragonDiag] nature_list 泛型参数: {a.FullName}");
-                    }
-                }
-            }
-
-            // 尝试查看 DragonNatures 枚举或数据
-            try
-            {
-                var dragonNatureType = csharpTypes.FirstOrDefault(t => t.Name == "DragonNature" || t.Name.Contains("DragonNature"));
-                if (dragonNatureType != null)
-                {
-                    Plugin.LogInfo($"[DragonDiag] DragonNature 类型: {dragonNatureType.FullName}");
-                    foreach (var f in dragonNatureType.GetFields(BindingFlags.Static | BindingFlags.Public))
-                        Plugin.LogInfo($"[DragonDiag]   静态字段 {f.Name} = {f.GetValue(null)}");
-                }
-                else
-                {
-                    Plugin.LogInfo("[DragonDiag] 未找到 DragonNature 类型");
-                }
-            }
-            catch { }
-
-            // 搜索所有包含 "Nature" 的枚举
-            try
-            {
-                foreach (var et in csharpTypes)
-                {
-                    try
-                    {
-                        if (et.IsEnum && et.Name.Contains("ature") && et.Name.Contains("Dragon"))
-                        {
-                            Plugin.LogInfo($"[DragonDiag] 枚举 {et.FullName}:");
-                            foreach (var name in Enum.GetNames(et))
-                                Plugin.LogInfo($"[DragonDiag]   {name} = {(int)Enum.Parse(et, name)}");
-                        }
-                    }
-                    catch { }
-                }
-            }
-            catch { }
-
-            // 搜索所有包含 Monster 的枚举
-            try
-            {
-                foreach (var et in csharpTypes)
-                {
-                    try
-                    {
-                        if (et.IsEnum && et.Name.Contains("Monster"))
-                        {
-                            var names = Enum.GetNames(et);
-                            Plugin.LogInfo($"[DragonDiag] 枚举 {et.FullName} ({names.Length} 个值):");
-                            foreach (var name in names.Take(10))
-                                Plugin.LogInfo($"[DragonDiag]   {name} = {(int)Enum.Parse(et, name)}");
-                            if (names.Length > 10) Plugin.LogInfo($"[DragonDiag]   ... 共 {names.Length} 个");
-                        }
-                    }
-                    catch { }
-                }
-            }
-            catch { }
-
-            // 搜索 DialogChooseDragon 和 DialogCreateMonster 的方法
-            try
-            {
-                foreach (var typeName in new[] { "DialogChooseDragon", "DialogCreateMonster" })
-                {
-                    var dialogType = csharpTypes.FirstOrDefault(t => t.Name == typeName);
-                    if (dialogType != null)
-                    {
-                        Plugin.LogInfo($"[DragonDiag] === {typeName} 方法 ===");
-                        foreach (var m in dialogType.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
-                        {
-                            var p = m.GetParameters();
-                            var pStr = string.Join(", ", p.Select(x => $"{x.ParameterType.Name} {x.Name}"));
-                            Plugin.LogInfo($"[DragonDiag]   {m.Name}({pStr}) -> {m.ReturnType.Name}");
-                        }
-                    }
-                }
-            }
-            catch { }
-
-            // 搜索所有包含 "MonsterType" 或 "CreatureType" 的枚举
-            try
-            {
-                foreach (var et in csharpTypes)
-                {
-                    try
-                    {
-                        if (et.IsEnum && (et.Name == "MonsterType" || et.Name == "CreatureType" || et.Name == "StuffType"))
-                        {
-                            var names = Enum.GetNames(et);
-                            Plugin.LogInfo($"[DragonDiag] 枚举 {et.FullName} ({names.Length} 个值):");
-                            foreach (var name in names.Where(n => n.Contains("ragon") || n.Contains("Dragon")))
-                                Plugin.LogInfo($"[DragonDiag]   {name} = {(int)Enum.Parse(et, name)}");
-                        }
-                    }
-                    catch { }
-                }
-            }
-            catch { }
-        }
-        catch (Exception ex) { Plugin.LogError($"[DragonDiag] 异常: {ex.Message}"); }
-    }
+    // ====== 龙系统诊断 (已禁用) ======
+    internal static void DiagnoseDragonSystem() { }
 
     internal static List<KeyValuePair<int, int>>? ReadDragonStuffBag()
     {
@@ -1033,8 +1000,6 @@ internal static class Il2CppHelper
     }
 
     // ====== 龙魂列表读取 ======
-    private static bool _dragonSoulTypeDumped;
-
     internal static List<Dictionary<string, object?>>? ReadDragonSouls()
     {
         try
@@ -1053,39 +1018,49 @@ internal static class Il2CppHelper
             var getItem = slType.GetMethod("get_Item", BF);
             if (getItem == null) return null;
 
-            // 第一次 dump DragonSoul 类型结构
+            // 读取第一个元素以获取字段布局
             var first = getItem.Invoke(soulList, new object[] { 0 });
-            if (first != null && !_dragonSoulTypeDumped)
+            if (first == null) return null;
+
+            IntPtr firstPtr = GetIl2CppPtr(first);
+            if (firstPtr == IntPtr.Zero) return null;
+
+            CacheIl2CppApi();
+            IntPtr classPtr = (IntPtr)_il2cpp_get_class!.Invoke(null, new object[] { firstPtr })!;
+            var fields = GetIl2CppFields(classPtr);
+
+            // 过滤掉静态字段 (offset=0 且不是第一个字段) 和已知常量
+            var instanceFields = fields.Where(f =>
+                f.Offset > 0 &&
+                f.Name != "HEAD" && f.Name != "SHIELD" && f.Name != "CLAW" && f.Name != "CLOUD"
+            ).ToList();
+
+            // 获取字段类型信息
+            var fieldTypes = new Dictionary<string, int>(); // 0=int, 1=string, 2=list
+            if (_il2cpp_field_get_type != null && _il2cpp_type_get_type != null && _il2cpp_class_get_fields != null)
             {
-                _dragonSoulTypeDumped = true;
-                var soulType = first.GetType();
-                Plugin.LogInfo($"[DragonSoul] 类型: {soulType.FullName}");
-                var st = soulType;
-                while (st != null && st != typeof(object))
+                object[] args = new object[] { classPtr, IntPtr.Zero };
+                int fi = 0;
+                while (fi < fields.Count)
                 {
-                    foreach (var f in st.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
+                    object? fieldResult = _il2cpp_class_get_fields.Invoke(null, args);
+                    if (fieldResult == null) break;
+                    IntPtr fieldPtr = (IntPtr)fieldResult;
+                    if (fieldPtr == IntPtr.Zero) break;
+
+                    IntPtr typePtr = (IntPtr)_il2cpp_field_get_type.Invoke(null, new object[] { fieldPtr })!;
+                    if (typePtr != IntPtr.Zero)
                     {
-                        try { Plugin.LogInfo($"[DragonSoul]   字段 {f.Name} ({f.FieldType.Name}) = {f.GetValue(first)}"); }
-                        catch { }
+                        int typeEnum = (int)_il2cpp_type_get_type.Invoke(null, new object[] { typePtr })!;
+                        // typeEnum: 14=string, 8=i4(int), 9=u4, 1=void*, etc.
+                        // 对于引用类型 (class/interface), typeEnum 可能是其他值
+                        string fn = fields[fi].Name;
+                        if (typeEnum == 14) fieldTypes[fn] = 1; // string
+                        else if (fn == "nature_list") fieldTypes[fn] = 2; // List<int>, 已知
+                        else fieldTypes[fn] = 0; // int/其他值类型
                     }
-                    foreach (var p in st.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
-                    {
-                        try
-                        {
-                            var getter = p.GetGetMethod(true);
-                            if (getter != null) Plugin.LogInfo($"[DragonSoul]   属性 {p.Name} ({p.PropertyType.Name}) = {getter.Invoke(first, null)}");
-                        }
-                        catch { }
-                    }
-                    st = st.BaseType;
-                }
-                // DragonSoul 方法
-                Plugin.LogInfo("[DragonSoul] === 方法 ===");
-                foreach (var m in soulType.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
-                {
-                    var pars = m.GetParameters();
-                    var pStr = string.Join(", ", pars.Select(x => $"{x.ParameterType.Name} {x.Name}"));
-                    Plugin.LogInfo($"[DragonSoul]   {m.Name}({pStr}) -> {m.ReturnType.Name}");
+                    args[1] = fieldPtr;
+                    fi++;
                 }
             }
 
@@ -1095,25 +1070,26 @@ internal static class Il2CppHelper
             {
                 var soul = getItem.Invoke(soulList, new object[] { i });
                 if (soul == null) continue;
+                IntPtr ptr = GetIl2CppPtr(soul);
+                if (ptr == IntPtr.Zero) continue;
+
                 var dict = new Dictionary<string, object?>();
-                var soulType = soul.GetType();
-                var st2 = soulType;
-                while (st2 != null && st2 != typeof(object))
+                foreach (var (name, offset) in instanceFields)
                 {
-                    foreach (var f in st2.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
+                    try
                     {
-                        try { dict[f.Name] = f.GetValue(soul); } catch { }
-                    }
-                    foreach (var p in st2.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
-                    {
-                        try
+                        int ft = fieldTypes.TryGetValue(name, out int v) ? v : 0;
+                        if (ft == 1)
+                            dict[name] = ReadIl2CppString(ptr, offset);
+                        else if (ft == 2)
                         {
-                            var getter = p.GetGetMethod(true);
-                            if (getter != null) dict[p.Name] = getter.Invoke(soul, null);
+                            var list = ReadIl2CppIntList(ptr, offset);
+                            dict[name] = list;
                         }
-                        catch { }
+                        else
+                            dict[name] = ReadIl2CppInt(ptr, offset);
                     }
-                    st2 = st2.BaseType;
+                    catch { }
                 }
                 result.Add(dict);
             }
@@ -1144,6 +1120,8 @@ internal static class Il2CppHelper
                     valStr = kv.Value.ToString()!;
                 else if (kv.Value is string s)
                     valStr = $"\"{s.Replace("\"", "'")}\"";
+                else if (kv.Value is List<int> intList)
+                    valStr = $"[{string.Join(",", intList)}]";
                 else
                     valStr = $"\"{kv.Value.GetType().Name}\"";
                 sb.Append($"\"{kv.Key}\":{valStr}");
@@ -1154,7 +1132,7 @@ internal static class Il2CppHelper
         return sb.ToString();
     }
 
-    // 修改龙魂属性
+    // 修改龙魂属性 (通过 IL2CPP 原生字段写入)
     internal static string SetDragonSoulProperty(int soulIndex, string property, int value)
     {
         try
@@ -1174,75 +1152,75 @@ internal static class Il2CppHelper
             var soul = getItem.Invoke(soulList, new object[] { soulIndex });
             if (soul == null) return "龙魂为空";
 
-            // 用属性 setter 设置值
-            var soulType = soul.GetType();
-            var setter = soulType.GetMethod($"set_{property}", BF);
-            if (setter == null) return $"属性 {property} setter 未找到";
+            IntPtr ptr = GetIl2CppPtr(soul);
+            if (ptr == IntPtr.Zero) return "无法获取原生指针";
 
-            setter.Invoke(soul, new object[] { value });
+            CacheIl2CppApi();
+            IntPtr classPtr = (IntPtr)_il2cpp_get_class!.Invoke(null, new object[] { ptr })!;
+            var fields = GetIl2CppFields(classPtr);
+            var field = fields.FirstOrDefault(f => f.Name == property);
+            if (field.Name == null) return $"字段 {property} 未找到";
+            if (field.Offset <= 0) return $"字段 {property} 是静态字段，不可修改";
+
+            WriteIl2CppInt(ptr, field.Offset, value);
             Plugin.LogInfo($"[DragonSoul] 设置 soul[{soulIndex}].{property} = {value}");
             return "ok";
         }
         catch (Exception ex) { return ex.Message; }
     }
 
-    // 查找地图上的龙对象
+    // 查找地图上的龙对象 - 通过 IL2CPP 原生字段读取
     internal static void SearchMapDragons()
     {
         try
         {
-            var csharpAsm = AppDomain.CurrentDomain.GetAssemblies()
-                .FirstOrDefault(a => a.GetName().Name == "Assembly-CSharp");
-            if (csharpAsm == null) { Plugin.LogInfo("[MapDragon] Assembly-CSharp 未找到"); return; }
-            var msType = csharpAsm.GetTypes().FirstOrDefault(t => t.Name == "MonsterStatus");
-            if (msType == null) { Plugin.LogInfo("[MapDragon] MonsterStatus 类型未找到"); return; }
-
-            // 用非泛型 FindObjectsOfType(Type)
-            MethodInfo? findMethod = null;
-            foreach (var m in typeof(UnityEngine.Object).GetMethods(BindingFlags.Static | BindingFlags.Public))
+            var souls = ReadDragonSouls();
+            if (souls == null || souls.Count == 0)
             {
-                if (m.Name == "FindObjectsOfType" && !m.IsGenericMethodDefinition && m.GetParameters().Length == 1
-                    && m.GetParameters()[0].ParameterType == typeof(Type))
-                { findMethod = m; break; }
-            }
-            if (findMethod == null) { Plugin.LogInfo("[MapDragon] FindObjectsOfType(Type) 未找到"); return; }
-            var objects = findMethod.Invoke(null, new object[] { msType }) as Array;
-            if (objects == null || objects.Length == 0)
-            {
-                Plugin.LogInfo("[MapDragon] 场景中未找到 MonsterStatus 对象");
+                Plugin.LogInfo("[MapDragon] 未找到龙魂数据");
                 return;
             }
 
-            Plugin.LogInfo($"[MapDragon] 找到 {objects.Length} 个 MonsterStatus 对象");
-            int dragonCount = 0;
-            foreach (var obj in objects)
+            Plugin.LogInfo($"[MapDragon] 共 {souls.Count} 条龙魂:");
+            for (int i = 0; i < souls.Count; i++)
             {
-                try
+                var soul = souls[i];
+                string guid = soul.TryGetValue("guid", out var g) ? (g?.ToString() ?? "") : "";
+                int stuffId = soul.TryGetValue("stuff_id", out var sid) ? Convert.ToInt32(sid ?? 0) : 0;
+                int isActive = soul.TryGetValue("is_active", out var ia) ? Convert.ToInt32(ia ?? 0) : 0;
+
+                // 查找龙类型名
+                string typeName = "未知";
+                foreach (var (Name, ChineseName, BaseId) in DragonTypes)
                 {
-                    if (obj == null) continue;
-                    var guidProp = obj.GetType().GetProperty("dragon_soul_guid", BF);
-                    if (guidProp != null)
+                    if (stuffId >= BaseId && stuffId < BaseId + 10)
                     {
-                        var guidVal = guidProp.GetValue(obj);
-                        if (guidVal != null && guidVal.ToString() != "0" && !string.IsNullOrEmpty(guidVal?.ToString()))
-                        {
-                            dragonCount++;
-                            Plugin.LogInfo($"[MapDragon] 龙对象 #{dragonCount}: guid={guidVal}");
-                            var t = obj.GetType();
-                            while (t != null && t != typeof(object))
-                            {
-                                foreach (var f in t.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
-                                {
-                                    try { Plugin.LogInfo($"[MapDragon]   {f.Name} ({f.FieldType.Name}) = {f.GetValue(obj)}"); } catch { }
-                                }
-                                t = t.BaseType;
-                            }
-                        }
+                        int level = stuffId - BaseId + 1;
+                        typeName = $"{ChineseName} Lv{level}";
+                        break;
                     }
                 }
-                catch { }
+
+                string natureStr = "";
+                if (soul.TryGetValue("nature_list", out var nl) && nl is List<int> natures && natures.Count > 0)
+                {
+                    var natureNames = natures.Select(nid =>
+                    {
+                        var found = DragonNatures.FirstOrDefault(x => x.Id == nid);
+                        return found.Id > 0 ? found.Name : $"#{nid}";
+                    });
+                    natureStr = $" [{string.Join(",", natureNames)}]";
+                }
+
+                // 读取属性值
+                int head = soul.TryGetValue("head", out var hv) ? Convert.ToInt32(hv ?? 0) : 0;
+                int claw = soul.TryGetValue("claw", out var cv) ? Convert.ToInt32(cv ?? 0) : 0;
+                int shield = soul.TryGetValue("shield", out var sv) ? Convert.ToInt32(sv ?? 0) : 0;
+                int cloud = soul.TryGetValue("cloud", out var clv) ? Convert.ToInt32(clv ?? 0) : 0;
+                int pot = soul.TryGetValue("potentiality", out var pv) ? Convert.ToInt32(pv ?? 0) : 0;
+
+                Plugin.LogInfo($"[MapDragon] #{i}: {typeName} (stuffId={stuffId}) active={isActive} guid=\"{guid}\"{natureStr} head={head} claw={claw} shield={shield} cloud={cloud} pot={pot}");
             }
-            Plugin.LogInfo($"[MapDragon] 共找到 {dragonCount} 条龙");
         }
         catch (Exception ex) { Plugin.LogError($"[MapDragon] 搜索异常: {ex.Message}"); }
     }
