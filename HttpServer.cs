@@ -95,6 +95,19 @@ internal class HttpServer
             {
                 HandleRefresh(resp);
             }
+            else if (path.StartsWith("/api/chest/") && path.EndsWith("/locate") && method == "POST")
+            {
+                var parts = path.Split('/');
+                if (parts.Length < 5 || !int.TryParse(parts[3], out int ci))
+                {
+                    resp.StatusCode = 400; SendJson(resp, "{\"error\":\"invalid path\"}"); return;
+                }
+                var comp = ChestEditorComponent.Instance;
+                if (comp == null) { SendJson(resp, "{\"error\":\"mod not ready\"}"); return; }
+                var signal = new ManualResetEventSlim(false);
+                comp.WriteQueue.Enqueue(new ChestEditorComponent.WriteRequest { ChestIndex = -5, ExtraIndex = ci, Signal = signal });
+                SendJson(resp, signal.Wait(5000) ? "{\"ok\":true}" : "{\"error\":\"timeout\"}");
+            }
             else if (path.StartsWith("/api/chest/") && path.EndsWith("/plan") && method == "POST")
             {
                 // POST /api/chest/{index}/plan  body: {stuffId, count}  count<=0表示删除
@@ -765,6 +778,24 @@ body { font-family: 'Inter', sans-serif; background: var(--bg-primary); color: v
   transform: translateY(-1px);
 }
 
+.content-header .btn-locate {
+  padding: 8px 16px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.15s ease;
+}
+
+.content-header .btn-locate:hover {
+  background: var(--accent);
+  color: #fff;
+  transform: translateY(-1px);
+}
+
 .content-search {
   padding: 12px 20px;
   background: var(--bg-secondary);
@@ -1308,6 +1339,7 @@ function renderContent() {
   html += '<div class=""content-header"">';
   html += '<span class=""ch-title"">' + esc(c.name) + '</span>';
   html += '<span class=""ch-cap"">' + cap + '</span>';
+  html += '<button class=""btn-locate"" onclick=""locateChest(' + selectedChest + ')"">定位</button>';
   html += '<button class=""btn-add"" onclick=""openAddModal(' + selectedChest + ')"">+ 添加物品</button>';
   html += '</div>';
   html += '<div class=""content-search""><input id=""searchItem"" placeholder=""搜索物品..."" value=""' + esc(searchQuery) + '"" oninput=""searchQuery=this.value;renderContent()""></div>';
@@ -1359,6 +1391,15 @@ function renderContent() {
 }
 
 // 设置物品数量（先删除全部再添加指定数量）
+async function locateChest(ci) {
+  try {
+    const r = await fetch('/api/chest/' + ci + '/locate', {method:'POST'});
+    const d = await r.json();
+    if (d.error) { toast(d.error, true); return; }
+    toast('已定位到 (' + d.posX.toFixed(1) + ', ' + d.posY.toFixed(1) + ')');
+  } catch(e) { toast('定位失败', true); }
+}
+
 async function setBagItem(ci, sid) {
   const input = document.getElementById('cnt_' + sid);
   const newCnt = parseInt(input.value) || 0;

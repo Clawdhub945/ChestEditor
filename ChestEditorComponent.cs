@@ -223,14 +223,27 @@ public class ChestEditorComponent : MonoBehaviour
                 }
                 else if (req.ChestIndex == -4)
                 {
-                    // 设置计划库存: ExtraIndex=箱子索引, StuffId=物品ID, Count=新数量, IsAdd=true添加/更新,false删除
+                    // 设置计划库存: ExtraIndex=箱子索引, StuffId=物品ID, Count=新数量
                     if (req.ExtraIndex >= 0 && req.ExtraIndex < _chests.Count)
                     {
                         SetStuffPlanValue(_chests[req.ExtraIndex].Facility, req.StuffId, req.Count);
-                        // 刷新后重新读取
                         RefreshChestList();
                     }
                     req.ResultJson = "{\"ok\":true}";
+                }
+                else if (req.ChestIndex == -5)
+                {
+                    // 定位设施: ExtraIndex=箱子索引
+                    if (req.ExtraIndex >= 0 && req.ExtraIndex < _chests.Count)
+                    {
+                        var c = _chests[req.ExtraIndex];
+                        LocateFacility(c.PosX, c.PosY);
+                        req.ResultJson = $"{{\"ok\":true,\"posX\":{c.PosX.ToString(System.Globalization.CultureInfo.InvariantCulture)},\"posY\":{c.PosY.ToString(System.Globalization.CultureInfo.InvariantCulture)}}}";
+                    }
+                    else
+                    {
+                        req.ResultJson = "{\"error\":\"chest not found\"}";
+                    }
                 }
                 else if (req.IsAdd)
                 {
