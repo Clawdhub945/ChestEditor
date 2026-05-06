@@ -384,6 +384,11 @@ body { font-family: 'Inter', sans-serif; background: var(--bg-primary); color: v
   overflow: hidden;
 }
 
+#dragonViewContent {
+  overflow-y: auto;
+  flex: 1;
+}
+
 .content-header {
   padding: 16px 20px;
   background: var(--bg-secondary);
@@ -1519,6 +1524,40 @@ function renderDragonSummonPanel() {
   const idleSouls = dragonSouls.filter(s => !s.is_active);
   let html = '';
 
+  // 召唤新龙
+  html += '<div class=""plan-section"">';
+  html += '<div class=""plan-header""><span>召唤新龙 (' + dragonTypes.length + ')</span></div>';
+  html += '<div class=""items"">';
+  for (let i = 0; i < dragonTypes.length; i++) {
+    const dt = dragonTypes[i];
+    html += '<div class=""item"" style=""flex-direction:column;align-items:stretch;gap:6px;padding:10px"">';
+    // 第一行: 图标 + 名字 + 等级 + 召唤按钮
+    html += '<div style=""display:flex;align-items:center;gap:6px"">';
+    html += '<div style=""width:40px;height:40px;border-radius:4px;background:var(--bg-input);display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0"">';
+    html += '<img src=""/api/dragon/icon/' + i + '"" style=""width:36px;height:36px;object-fit:contain"" onerror=""hideImg(this)"">';
+    html += '</div>';
+    html += '<div style=""flex:1;min-width:0;overflow:hidden"">';
+    html += '<div class=""iname"" style=""font-size:11px"">' + esc(dt.cn) + '</div>';
+    html += '<div style=""font-size:9px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis"">' + esc(dt.name) + '</div>';
+    html += '</div>';
+    html += '<select id=""summonLv_' + i + '"" style=""width:44px;font-size:10px;padding:2px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:3px;flex-shrink:0"">';
+    for (let lv = 1; lv <= 10; lv++) {
+      html += '<option value=""' + lv + '"">' + lv + '级</option>';
+    }
+    html += '</select>';
+    html += '<button class=""btn-adj"" onclick=""doSummonDragonAt(' + i + ')"" style=""font-size:10px;padding:3px 6px;background:#2a4a2a;color:#6f6;width:auto;height:auto;flex-shrink:0;white-space:nowrap"">召唤</button>';
+    html += '</div>';
+    // nature 选择
+    html += '<div style=""display:flex;flex-wrap:wrap;gap:3px"">';
+    for (const n of dragonNatures) {
+      const checked = natureSelected(i, n.id);
+      html += '<span class=""filter-tag' + (checked ? ' on' : '') + '"" onclick=""toggleSummonNature(' + i + ',' + n.id + ',this)"" style=""font-size:9px;padding:1px 4px"">' + n.name + '</span>';
+    }
+    html += '</div>';
+    html += '</div>';
+  }
+  html += '</div></div>';
+
   // 待命龙魂
   if (idleSouls.length > 0) {
     html += '<div class=""plan-section"">';
@@ -1572,39 +1611,6 @@ function renderDragonSummonPanel() {
     html += '</div></div>';
   }
 
-  // 召唤新龙
-  html += '<div class=""plan-section"">';
-  html += '<div class=""plan-header""><span>召唤新龙 (' + dragonTypes.length + ')</span></div>';
-  html += '<div class=""items"">';
-  for (let i = 0; i < dragonTypes.length; i++) {
-    const dt = dragonTypes[i];
-    html += '<div class=""item"" style=""flex-direction:column;align-items:stretch;gap:6px;padding:10px"">';
-    // 第一行: 图标 + 名字 + 等级 + 召唤按钮
-    html += '<div style=""display:flex;align-items:center;gap:6px"">';
-    html += '<div style=""width:40px;height:40px;border-radius:4px;background:var(--bg-input);display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0"">';
-    html += '<img src=""/api/dragon/icon/' + i + '"" style=""width:36px;height:36px;object-fit:contain"" onerror=""hideImg(this)"">';
-    html += '</div>';
-    html += '<div style=""flex:1;min-width:0;overflow:hidden"">';
-    html += '<div class=""iname"" style=""font-size:11px"">' + esc(dt.cn) + '</div>';
-    html += '<div style=""font-size:9px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis"">' + esc(dt.name) + '</div>';
-    html += '</div>';
-    html += '<select id=""summonLv_' + i + '"" style=""width:44px;font-size:10px;padding:2px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:3px;flex-shrink:0"">';
-    for (let lv = 1; lv <= 10; lv++) {
-      html += '<option value=""' + lv + '"">' + lv + '级</option>';
-    }
-    html += '</select>';
-    html += '<button class=""btn-adj"" onclick=""doSummonDragonAt(' + i + ')"" style=""font-size:10px;padding:3px 6px;background:#2a4a2a;color:#6f6;width:auto;height:auto;flex-shrink:0;white-space:nowrap"">召唤</button>';
-    html += '</div>';
-    // nature 选择
-    html += '<div style=""display:flex;flex-wrap:wrap;gap:3px"">';
-    for (const n of dragonNatures) {
-      const checked = natureSelected(i, n.id);
-      html += '<span class=""filter-tag' + (checked ? ' on' : '') + '"" onclick=""toggleSummonNature(' + i + ',' + n.id + ',this)"" style=""font-size:9px;padding:1px 4px"">' + n.name + '</span>';
-    }
-    html += '</div>';
-    html += '</div>';
-  }
-  html += '</div></div>';
   el.innerHTML = html;
 }
 
