@@ -1241,12 +1241,12 @@ internal static class Il2CppHelper
                     // 匹配包含 dragon (不区分大小写) 的 GO 名称
                     if (!goName.ToLower().Contains("dragon")) continue;
 
-                    Plugin.LogInfo($"[DragonEntity] GO: {goName}");
                     found++;
 
-                    // 只输出前2个龙GO的组件类名
+                    // 只输出前2个龙GO的21字段组件
                     if (found <= 2)
                     {
+                        Plugin.LogInfo($"[DragonEntity] GO: {goName}");
                         var components = go.GetComponents<UnityEngine.Component>();
                         foreach (var comp in components)
                         {
@@ -1254,11 +1254,20 @@ internal static class Il2CppHelper
                             IntPtr compPtr = GetIl2CppPtr(comp);
                             if (compPtr == IntPtr.Zero) continue;
                             IntPtr compClass = (IntPtr)_il2cpp_get_class!.Invoke(null, new object[] { compPtr })!;
-                            string? className = GetIl2CppClassName(compClass);
-                            if (className == null) continue;
                             var fields = GetIl2CppFields(compClass);
-                            int fieldCount = fields.Count(f => f.Offset > 0);
-                            Plugin.LogInfo($"[DragonEntity]   {className} ({fieldCount}字段)");
+                            var instanceFields = fields.Where(f => f.Offset > 0).ToList();
+                            if (instanceFields.Count < 10) continue; // 只看字段多的组件
+
+                            Plugin.LogInfo($"[DragonEntity]   组件({instanceFields.Count}字段):");
+                            foreach (var (name, offset) in instanceFields)
+                            {
+                                try
+                                {
+                                    int val = ReadIl2CppInt(compPtr, offset);
+                                    Plugin.LogInfo($"[DragonEntity]     {name} offset={offset} val={val}");
+                                }
+                                catch { }
+                            }
                         }
                     }
 
