@@ -121,6 +121,12 @@ internal static class Il2CppHelper
         try { return *(int*)(objPtr + offset); } catch { return 0; }
     }
 
+    // 从 IL2CPP 对象指针读取 float 字段
+    private static unsafe float ReadIl2CppFloat(IntPtr objPtr, int offset)
+    {
+        try { return *(float*)(objPtr + offset); } catch { return 0; }
+    }
+
     // 从 IL2CPP 对象指针读取 string 字段
     private static unsafe string? ReadIl2CppString(IntPtr objPtr, int offset)
     {
@@ -1222,6 +1228,227 @@ internal static class Il2CppHelper
     /// <summary>
     /// 搜索地图上的龙实体 GameObject
     /// </summary>
+
+    // 龙实体战斗属性字段偏移缓存
+    private static readonly Dictionary<string, int> _dragonFieldOffsets = new();
+    private static bool _dragonOffsetsCached;
+
+    private static void CacheDragonFieldOffsets(IntPtr compPtr, IntPtr compClass)
+    {
+        if (_dragonOffsetsCached) return;
+        _dragonOffsetsCached = true;
+        var seen = new HashSet<int>();
+        IntPtr cls = compClass;
+        int depth = 0;
+        while (cls != IntPtr.Zero && depth < 10)
+        {
+            int clsAddr = cls.GetHashCode();
+            if (seen.Contains(clsAddr)) break;
+            seen.Add(clsAddr);
+            var fields = GetIl2CppFields(cls);
+            foreach (var (name, offset) in fields)
+            {
+                if (offset > 0 && !_dragonFieldOffsets.ContainsKey(name))
+                    _dragonFieldOffsets[name] = offset;
+            }
+            try { cls = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(cls); } catch { break; }
+            depth++;
+        }
+    }
+
+    private static readonly string[] _dragonStatFields = { "stuff_id", "guid", "hp", "hp_total", "atk_min", "atk_max", "magic_atk_min", "magic_atk_max", "speed", "power", "atk_range", "atk_cd", "view_range", "create_days",
+        "train_increase_hp", "train_increase_atk", "train_increase_ability_power", "train_increase_phys_res", "train_increase_magic_res" };
+    private static readonly HashSet<string> _dragonFloatFields = new() { "hp", "hp_total", "atk_min", "atk_max", "magic_atk_min", "magic_atk_max", "speed", "power", "atk_range", "atk_cd", "view_range" };
+
+    internal static List<Dictionary<string, object>> ReadDragonEntities()
+    {
+        var result = new List<Dictionary<string, object>>();
+        try
+        {
+            CacheIl2CppApi();
+            Plugin.LogInfo("[ReadDragonEntities] 开始扫描...");
+            var allGOs = UnityEngine.Resources.FindObjectsOfTypeAll<UnityEngine.GameObject>();
+            Plugin.LogInfo($"[ReadDragonEntities] 共 {allGOs.Length} 个 GO");
+            int found = 0;
+            foreach (var go in allGOs)
+            {
+                try
+                {
+                    string goName = go.name;
+                    if (!goName.ToLower().Contains("dragon")) continue;
+                    found++;
+                    if (found > 30) break;
+
+                    var components = go.GetComponents<UnityEngine.Component>();
+                    foreach (var comp in components)
+                    {
+                        if (comp == null) continue;
+                        IntPtr compPtr = GetIl2CppPtr(comp);
+                        if (compPtr == IntPtr.Zero) continue;
+                        IntPtr compClass = IntPtr.Zero;
+                        try { compClass = (IntPtr)_il2cpp_get_class!.Invoke(null, new object[] { compPtr })!; } catch { }
+                        if (compClass == IntPtr.Zero) continue;
+
+                        // 检查是否有 hp_total 字段（战斗组件）
+                        if (!_dragonOffsetsCached)
+                        {
+                            var tmpFields = new List<(string, int)>();
+                            var seen = new HashSet<int>();
+                            IntPtr cls = compClass;
+                            int d = 0;
+                            while (cls != IntPtr.Zero && d < 10)
+                            {
+                                int ca = cls.GetHashCode();
+                                if (seen.Contains(ca)) break;
+                                seen.Add(ca);
+                                var ff = GetIl2CppFields(cls);
+                                foreach (var f in ff) { if (f.Offset > 0 && !tmpFields.Any(x => x.Item1 == f.Name)) tmpFields.Add((f.Name, f.Offset)); }
+                                try { cls = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(cls); } catch { break; }
+                                d++;
+                            }
+                            if (!tmpFields.Any(x => x.Item1 == "hp_total")) continue;
+                            foreach (var (n, o) in tmpFields) { if (o > 0 && !_dragonFieldOffsets.ContainsKey(n)) _dragonFieldOffsets[n] = o; }
+                            _dragonOffsetsCached = true;
+                        }
+
+                        if (!_dragonFieldOffsets.ContainsKey("hp_total")) continue;
+
+                        int guid = 0, stuffId = 0;
+                        try { guid = ReadIl2CppInt(compPtr, _dragonFieldOffsets["guid"]); } catch { }
+                        try { stuffId = ReadIl2CppInt(compPtr, _dragonFieldOffsets["stuff_id"]); } catch { }
+                        // 只保留真正的龙实体：stuffId 在 201401-2015510 范围，guid > 0
+                        if (guid <= 0 || stuffId < 201401 || stuffId > 2015510) continue;
+
+                        var dict = new Dictionary<string, object> { ["goName"] = goName };
+                        foreach (var fname in _dragonStatFields)
+                        {
+                            if (!_dragonFieldOffsets.TryGetValue(fname, out int off)) continue;
+                            try
+                            {
+                                if (_dragonFloatFields.Contains(fname))
+                                    dict[fname] = ReadIl2CppFloat(compPtr, off);
+                                else
+                                    dict[fname] = ReadIl2CppInt(compPtr, off);
+                            }
+                            catch { }
+                        }
+                        result.Add(dict);
+                        break;
+                    }
+                }
+                catch { }
+            }
+        }
+        catch (Exception ex) { Plugin.LogError($"[ReadDragonEntities] 异常: {ex.Message}"); }
+        Plugin.LogInfo($"[ReadDragonEntities] 完成, 找到 {result.Count} 个实体");
+        foreach (var d in result)
+        {
+            int sid = d.TryGetValue("stuff_id", out var sv) ? Convert.ToInt32(sv) : 0;
+            int g = d.TryGetValue("guid", out var gv) ? Convert.ToInt32(gv) : 0;
+            float hp = d.TryGetValue("hp", out var hv) ? Convert.ToSingle(hv) : 0;
+            Plugin.LogInfo($"[ReadDragonEntities]   {d["goName"]} stuffId={sid} guid={g} hp={hp}");
+        }
+        return result;
+    }
+
+    internal static string GetDragonEntitiesJson()
+    {
+        var entities = ReadDragonEntities();
+        var sb = new System.Text.StringBuilder();
+        sb.Append('[');
+        bool first = true;
+        foreach (var d in entities)
+        {
+            if (!first) sb.Append(',');
+            first = false;
+            sb.Append('{');
+            bool f2 = true;
+            foreach (var kv in d)
+            {
+                if (!f2) sb.Append(',');
+                f2 = false;
+                if (kv.Value is float fv)
+                    sb.Append($"\"{kv.Key}\":{fv:G}");
+                else if (kv.Value is string sv)
+                    sb.Append($"\"{kv.Key}\":\"{sv}\"");
+                else
+                    sb.Append($"\"{kv.Key}\":{kv.Value}");
+            }
+            sb.Append('}');
+        }
+        sb.Append(']');
+        return sb.ToString();
+    }
+
+    internal static string SetDragonEntityField(int guid, string fieldName, float value)
+    {
+        try
+        {
+            CacheIl2CppApi();
+            var allGOs = UnityEngine.Resources.FindObjectsOfTypeAll<UnityEngine.GameObject>();
+            int found = 0;
+            foreach (var go in allGOs)
+            {
+                try
+                {
+                    if (!go.name.ToLower().Contains("dragon")) continue;
+                    found++;
+                    if (found > 30) break;
+
+                    var components = go.GetComponents<UnityEngine.Component>();
+                    foreach (var comp in components)
+                    {
+                        if (comp == null) continue;
+                        IntPtr compPtr = GetIl2CppPtr(comp);
+                        if (compPtr == IntPtr.Zero) continue;
+                        IntPtr compClass = IntPtr.Zero;
+                        try { compClass = (IntPtr)_il2cpp_get_class!.Invoke(null, new object[] { compPtr })!; } catch { }
+                        if (compClass == IntPtr.Zero) continue;
+
+                        if (!_dragonFieldOffsets.ContainsKey("hp_total"))
+                        {
+                            var tmpFields = new List<(string, int)>();
+                            var seen = new HashSet<int>();
+                            IntPtr cls = compClass;
+                            int d = 0;
+                            while (cls != IntPtr.Zero && d < 10)
+                            {
+                                int ca = cls.GetHashCode();
+                                if (seen.Contains(ca)) break;
+                                seen.Add(ca);
+                                var ff = GetIl2CppFields(cls);
+                                foreach (var f in ff) { if (f.Offset > 0 && !tmpFields.Any(x => x.Item1 == f.Name)) tmpFields.Add((f.Name, f.Offset)); }
+                                try { cls = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(cls); } catch { break; }
+                                d++;
+                            }
+                            foreach (var (n, o) in tmpFields) { if (o > 0 && !_dragonFieldOffsets.ContainsKey(n)) _dragonFieldOffsets[n] = o; }
+                        }
+
+                        if (!_dragonFieldOffsets.TryGetValue(fieldName, out int offset))
+                            return $"unknown field: {fieldName}";
+
+                        int curGuid = 0;
+                        if (_dragonFieldOffsets.TryGetValue("guid", out int guidOff))
+                            curGuid = ReadIl2CppInt(compPtr, guidOff);
+                        if (curGuid != guid) continue;
+
+                        unsafe
+                        {
+                            if (_dragonFloatFields.Contains(fieldName))
+                                *(float*)(compPtr + offset) = value;
+                            else
+                                *(int*)(compPtr + offset) = (int)value;
+                        }
+                        return "ok";
+                    }
+                }
+                catch { }
+            }
+            return "dragon not found";
+        }
+        catch (Exception ex) { return ex.Message; }
+    }
+
     internal static void SearchMapDragonEntities()
     {
         try
@@ -1232,7 +1459,6 @@ internal static class Il2CppHelper
             Plugin.LogInfo($"[DragonEntity] 扫描 {allGOs.Length} 个 GameObject...");
 
             int found = 0;
-            var seenClasses = new HashSet<string>();
             foreach (var go in allGOs)
             {
                 try
@@ -1243,35 +1469,66 @@ internal static class Il2CppHelper
 
                     found++;
 
-                    // 只输出前2个龙GO的21字段组件
-                    if (found <= 2)
+                    // 找到所有龙GO，读取战斗属性
                     {
-                        Plugin.LogInfo($"[DragonEntity] GO: {goName}");
                         var components = go.GetComponents<UnityEngine.Component>();
                         foreach (var comp in components)
                         {
                             if (comp == null) continue;
                             IntPtr compPtr = GetIl2CppPtr(comp);
                             if (compPtr == IntPtr.Zero) continue;
-                            IntPtr compClass = (IntPtr)_il2cpp_get_class!.Invoke(null, new object[] { compPtr })!;
-                            var fields = GetIl2CppFields(compClass);
-                            var instanceFields = fields.Where(f => f.Offset > 0).ToList();
-                            if (instanceFields.Count < 10) continue; // 只看字段多的组件
+                            IntPtr compClass = IntPtr.Zero;
+                            try { compClass = (IntPtr)_il2cpp_get_class!.Invoke(null, new object[] { compPtr })!; } catch { }
+                            if (compClass == IntPtr.Zero) continue;
 
-                            Plugin.LogInfo($"[DragonEntity]   组件({instanceFields.Count}字段):");
-                            foreach (var (name, offset) in instanceFields)
+                            var allFields = new List<(string Name, int Offset)>();
+                            var seen = new HashSet<int>();
+                            IntPtr cls = compClass;
+                            int depth = 0;
+                            while (cls != IntPtr.Zero && depth < 10)
+                            {
+                                int clsAddr = cls.GetHashCode();
+                                if (seen.Contains(clsAddr)) break;
+                                seen.Add(clsAddr);
+                                var clsFields = GetIl2CppFields(cls);
+                                foreach (var f in clsFields)
+                                {
+                                    if (f.Offset > 0 && !allFields.Any(x => x.Name == f.Name))
+                                        allFields.Add(f);
+                                }
+                                try { cls = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(cls); } catch { break; }
+                                depth++;
+                            }
+
+                            // 只输出有 hp_total 字段的组件（战斗组件）
+                            if (!allFields.Any(x => x.Name == "hp_total")) continue;
+
+                            int stuffId = 0, guid = 0;
+                            float hp = 0, hpTotal = 0, atkMax = 0, mAtkMax = 0, speed = 0, power = 0;
+                            foreach (var (name, offset) in allFields)
                             {
                                 try
                                 {
-                                    int val = ReadIl2CppInt(compPtr, offset);
-                                    Plugin.LogInfo($"[DragonEntity]     {name} offset={offset} val={val}");
+                                    switch (name)
+                                    {
+                                        case "stuff_id": stuffId = ReadIl2CppInt(compPtr, offset); break;
+                                        case "guid": guid = ReadIl2CppInt(compPtr, offset); break;
+                                        case "hp": hp = ReadIl2CppFloat(compPtr, offset); break;
+                                        case "hp_total": hpTotal = ReadIl2CppFloat(compPtr, offset); break;
+                                        case "atk_max": atkMax = ReadIl2CppFloat(compPtr, offset); break;
+                                        case "magic_atk_max": mAtkMax = ReadIl2CppFloat(compPtr, offset); break;
+                                        case "speed": speed = ReadIl2CppFloat(compPtr, offset); break;
+                                        case "power": power = ReadIl2CppFloat(compPtr, offset); break;
+                                    }
                                 }
                                 catch { }
                             }
+                            Plugin.LogInfo($"[DragonEntity] {goName} guid={guid} stuffId={stuffId} HP={hp}/{hpTotal} ATK={atkMax} MATK={mAtkMax} SPD={speed} PWR={power}");
+                            break; // 每个GO只取一个战斗组件
                         }
                     }
 
-                    if (found >= 20) break;
+                    if (found >= 30) break;
                 }
                 catch { }
             }

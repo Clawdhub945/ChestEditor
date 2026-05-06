@@ -863,6 +863,7 @@ let chests = [];
 let items = [];
 let dragonItems = [];
 let dragonTypes = [];
+let dragonEntities = [];
 let dragonNatures = [];
 let autoRefresh = true;
 let selectedChest = -1;
@@ -1151,6 +1152,19 @@ async function fetchDragonSouls() {
     const r = await fetch('/api/dragon/souls');
     dragonSouls = await r.json();
   } catch(e) {}
+}
+
+async function fetchDragonEntities() {
+  try {
+    const r = await fetch('/api/dragon/entities');
+    const d = await r.json();
+    if (Array.isArray(d) && d.length > 0) {
+      dragonEntities = d;
+      console.log('龙实体加载:', d.length, '条');
+    } else {
+      console.log('龙实体API返回:', JSON.stringify(d).substring(0, 200));
+    }
+  } catch(e) { console.log('龙实体请求失败:', e); }
 }
 
 function renderDragonSoulsList() {
@@ -1445,9 +1459,8 @@ function renderDragonSoulsPanel() {
   let html = '';
   html += '<div class=""plan-section"" style=""margin-top:12px"">';
   html += '<div class=""plan-header""><span>地图龙 (' + activeSouls.length + ')</span>';
-  html += '<button class=""btn-adj"" onclick=""searchMapDragons()"" style=""font-size:11px;padding:3px 8px;width:auto;height:auto;margin-left:auto"">搜索地图龙</button>';
-  html += '<button class=""btn-adj"" onclick=""searchMapDragonEntities()"" style=""font-size:11px;padding:3px 8px;width:auto;height:auto"">搜索龙实体</button></div>';
-  html += '<div class=""items"">';
+  html += '<button class=""btn-adj"" onclick=""refreshDragonEntities()"" style=""font-size:11px;padding:3px 8px;width:auto;height:auto;margin-left:auto"">刷新属性</button></div>';
+  html += '<div class=""items"" style=""max-height:500px;overflow-y:auto"">';
   for (let i = 0; i < dragonSouls.length; i++) {
     const s = dragonSouls[i];
     if (!s.is_active) continue;
@@ -1496,6 +1509,38 @@ function renderDragonSoulsPanel() {
       }
       html += '</div>';
     }
+
+    // 战斗属性（匹配实体）
+    let ents = [];
+    try { ents = Array.isArray(dragonEntities) ? dragonEntities.filter(e => Number(e.stuff_id) === Number(stuffId) && Number(e.guid) > 0) : []; } catch(ex) {}
+    for (const e of ents) {
+      const hp = e.hp || 0;
+      const hpTotal = e.hp_total || 0;
+      const hpPct = hpTotal > 0 ? Math.round(hp / hpTotal * 100) : 0;
+      html += '<div style=""width:100%;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;padding:6px"">';
+      html += '<div style=""display:flex;justify-content:space-between;font-size:9px;color:var(--text-muted);margin-bottom:3px""><span>HP (GUID:' + e.guid + ')</span><span>' + Math.round(hp) + ' / ' + Math.round(hpTotal) + ' (' + hpPct + '%)</span></div>';
+      html += '<div style=""background:var(--bg-secondary);border-radius:3px;height:6px;overflow:hidden;margin-bottom:4px"">';
+      html += '<div style=""background:' + (hpPct > 50 ? '#4caf50' : hpPct > 20 ? '#ff9800' : '#f44336') + ';height:100%;width:' + hpPct + '%""></div>';
+      html += '</div>';
+      const efields = [
+        {key:'hp', label:'当前HP', step:1}, {key:'hp_total', label:'HP上限', step:1},
+        {key:'atk_max', label:'物攻', step:1}, {key:'magic_atk_max', label:'魔攻', step:1},
+        {key:'speed', label:'速度', step:0.01}, {key:'power', label:'力量', step:1},
+      ];
+      html += '<div style=""display:grid;grid-template-columns:repeat(auto-fill,minmax(80px,1fr));gap:4px;width:100%"">';
+      for (const f of efields) {
+        const v = (e[f.key] || 0);
+        const disp = f.step < 1 ? v.toFixed(2) : Math.round(v);
+        html += '<div style=""background:var(--bg-secondary);border:1px solid var(--border);border-radius:4px;padding:4px 6px;display:flex;flex-direction:column;align-items:center;gap:2px"">';
+        html += '<span style=""font-size:9px;color:var(--text-muted)"">' + f.label + '</span>';
+        html += '<div style=""display:flex;align-items:center;gap:2px;width:100%"">';
+        html += '<input type=""number"" id=""de_' + e.guid + '_' + f.key + '"" value=""' + disp + '"" step=""' + f.step + '"" style=""flex:1;min-width:0;font-size:10px;padding:1px 2px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:3px;text-align:center"">';
+        html += '<button class=""btn-adj"" onclick=""setDE(' + e.guid + ',\'' + f.key + '\')"" style=""font-size:9px;padding:1px 4px;width:auto;height:auto;flex-shrink:0"">设</button>';
+        html += '</div></div>';
+      }
+      html += '</div></div>';
+    }
+
     html += '</div>';
   }
   html += '</div></div>';
@@ -1622,6 +1667,30 @@ function renderDragonSummonPanel() {
   }
 
   el.innerHTML = html;
+}
+
+async function setDE(guid, field) {
+  const inp = document.getElementById('de_' + guid + '_' + field);
+  if (!inp) return;
+  const val = parseFloat(inp.value);
+  if (isNaN(val)) { toast('数值无效', true); return; }
+  try {
+    const r = await fetch('/api/dragon/entity/set', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({guid, field, value: val})
+    });
+    const d = await r.json();
+    if (d.error) { toast(d.error, true); return; }
+    toast('已设置');
+  } catch(e) { toast('设置失败', true); }
+}
+
+async function refreshDragonEntities() {
+  await fetchDragonEntities();
+  // 不重新渲染，避免覆盖用户正在输入的值和滚动位置
+  // 数据已更新，下次交互时自动生效
+  toast('龙属性已刷新 (' + dragonEntities.length + '条)');
 }
 
 // 设置物品数量（先删除全部再添加指定数量）
@@ -1829,6 +1898,7 @@ async function init() {
   await fetchDragonItems();
   await fetchDragonTypes();
   await fetchDragonSouls();
+  await fetchDragonEntities();
   await fetchFilters();
   await refreshChests();
   renderSidebar();
@@ -1838,8 +1908,10 @@ async function init() {
     await fetchChests();
     await fetchDragonItems();
     await fetchDragonSouls();
-    renderSidebar();
-    if (selectedChest >= 0) renderContent();
+    if (!dragonView) {
+      renderSidebar();
+      if (selectedChest >= 0) renderContent();
+    }
   }, 3000);
 }
 

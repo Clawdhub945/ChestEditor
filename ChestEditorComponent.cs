@@ -30,6 +30,7 @@ public partial class ChestEditorComponent : MonoBehaviour
     internal volatile string ChestsJson = "[]";
     internal volatile string ItemsJson = "[]";
     internal volatile string DragonBagJson = "[]";
+    internal volatile string DragonEntitiesJson = "[]";
     internal volatile string? LastSummonResult;
 
     // 龙素材物品 ID 列表
@@ -284,6 +285,22 @@ public partial class ChestEditorComponent : MonoBehaviour
                     string result = Il2CppHelper.SummonDragon(req.ExtraIndex, req.NatureIds);
                     LastSummonResult = $"{{\"result\":\"{Escape(result)}\"}}";
                     req.ResultJson = LastSummonResult;
+                }
+                else if (req.ChestIndex == -8)
+                {
+                    // 读取龙实体属性（主线程执行避免GC崩溃）
+                    Plugin.LogInfo("[MainThread] 开始读取龙实体...");
+                    DragonEntitiesJson = Il2CppHelper.GetDragonEntitiesJson();
+                    Plugin.LogInfo($"[MainThread] 龙实体读取完成, JSON长度={DragonEntitiesJson.Length}");
+                    req.ResultJson = DragonEntitiesJson;
+                }
+                else if (req.ChestIndex == -9)
+                {
+                    // 设置龙实体属性（主线程执行）
+                    string field = req.ResultJson ?? "";
+                    float val = BitConverter.Int32BitsToSingle(req.Count);
+                    string result = Il2CppHelper.SetDragonEntityField(req.ExtraIndex, field, val);
+                    req.ResultJson = result == "ok" ? "{\"ok\":true}" : $"{{\"error\":\"{Escape(result)}\"}}";
                 }
                 else if (req.IsAdd)
                 {

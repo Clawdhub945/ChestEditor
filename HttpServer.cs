@@ -257,8 +257,63 @@ internal class HttpServer
             }
             else if (path == "/api/dragon/searchmap2" && method == "POST")
             {
-                Il2CppHelper.SearchMapDragonEntities();
-                SendJson(resp, "{\"ok\":true}");
+                var comp = ChestEditorComponent.Instance;
+                if (comp == null) { SendJson(resp, "{\"error\":\"mod not ready\"}"); return; }
+                var signal = new ManualResetEventSlim(false);
+                comp.WriteQueue.Enqueue(new ChestEditorComponent.WriteRequest { ChestIndex = -8, Signal = signal });
+                SendJson(resp, signal.Wait(10000) ? "{\"ok\":true}" : "{\"error\":\"timeout\"}");
+            }
+            else if (path == "/api/dragon/entities" && method == "GET")
+            {
+                Plugin.LogInfo("[HTTP] /api/dragon/entities 请求");
+                var comp = ChestEditorComponent.Instance;
+                if (comp == null) { SendJson(resp, "{\"error\":\"mod not ready\"}"); return; }
+                var signal = new ManualResetEventSlim(false);
+                comp.WriteQueue.Enqueue(new ChestEditorComponent.WriteRequest { ChestIndex = -8, Signal = signal });
+                if (signal.Wait(10000))
+                {
+                    Plugin.LogInfo($"[HTTP] entities 返回, 长度={comp.DragonEntitiesJson.Length}");
+                    SendJson(resp, comp.DragonEntitiesJson);
+                }
+                else
+                {
+                    Plugin.LogError("[HTTP] entities 超时");
+                    SendJson(resp, "{\"error\":\"timeout\"}");
+                }
+            }
+            else if (path == "/api/dragon/entity/set" && method == "POST")
+            {
+                string body;
+                using (var reader = new StreamReader(req.InputStream, req.ContentEncoding))
+                    body = reader.ReadToEnd();
+                int guid = 0;
+                string field = "";
+                float val = 0;
+                foreach (var part in body.Trim('{', '}').Split(','))
+                {
+                    var kv = part.Split(':');
+                    if (kv.Length != 2) continue;
+                    string key = kv[0].Trim().Trim('"');
+                    string v = kv[1].Trim().Trim('"');
+                    if (key == "guid" && int.TryParse(v, out int g)) guid = g;
+                    if (key == "field") field = v;
+                    if (key == "value" && float.TryParse(v, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float fv)) val = fv;
+                }
+                if (guid == 0 || string.IsNullOrEmpty(field)) { SendJson(resp, "{\"error\":\"missing guid/field\"}"); return; }
+                var comp = ChestEditorComponent.Instance;
+                if (comp == null) { SendJson(resp, "{\"error\":\"mod not ready\"}"); return; }
+                var signal = new ManualResetEventSlim(false);
+                var writeReq = new ChestEditorComponent.WriteRequest
+                {
+                    ChestIndex = -9, ExtraIndex = guid,
+                    Count = BitConverter.SingleToInt32Bits(val),
+                    ResultJson = field, Signal = signal
+                };
+                comp.WriteQueue.Enqueue(writeReq);
+                if (signal.Wait(5000))
+                    SendJson(resp, writeReq.ResultJson ?? "{\"ok\":true}");
+                else
+                    SendJson(resp, "{\"error\":\"timeout\"}");
             }
             else if (path == "/api/dragon/natures" && method == "GET")
             {
