@@ -1244,8 +1244,8 @@ internal static class Il2CppHelper
                     Plugin.LogInfo($"[DragonEntity] GO: {goName}");
                     found++;
 
-                    // 只输出前3个龙GO的详细信息
-                    if (found <= 3)
+                    // 只输出前2个龙GO的组件类名
+                    if (found <= 2)
                     {
                         var components = go.GetComponents<UnityEngine.Component>();
                         foreach (var comp in components)
@@ -1256,25 +1256,9 @@ internal static class Il2CppHelper
                             IntPtr compClass = (IntPtr)_il2cpp_get_class!.Invoke(null, new object[] { compPtr })!;
                             string? className = GetIl2CppClassName(compClass);
                             if (className == null) continue;
-
                             var fields = GetIl2CppFields(compClass);
-                            var instanceFields = fields.Where(f => f.Offset > 0).ToList();
-                            if (instanceFields.Count == 0) continue;
-
-                            // 输出所有非零字段值
-                            var vals = new List<string>();
-                            foreach (var (name, offset) in instanceFields)
-                            {
-                                try
-                                {
-                                    int val = ReadIl2CppInt(compPtr, offset);
-                                    if (val != 0 && val != -1 && Math.Abs(val) < 10000000)
-                                        vals.Add($"{name}={val}");
-                                }
-                                catch { }
-                            }
-                            if (vals.Count > 0)
-                                Plugin.LogInfo($"[DragonEntity]   {className}({instanceFields.Count}字段): {string.Join(" ", vals)}");
+                            int fieldCount = fields.Count(f => f.Offset > 0);
+                            Plugin.LogInfo($"[DragonEntity]   {className} ({fieldCount}字段)");
                         }
                     }
 
