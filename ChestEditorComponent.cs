@@ -173,19 +173,28 @@ public partial class ChestEditorComponent : MonoBehaviour
     {
         try
         {
+            // 从游戏实时读取 dragon_stuff_bag 内容
+            var liveItems = Il2CppHelper.ReadDragonBagLive();
+            // 合并本地缓存（本地缓存跟踪通过 mod 修改过的值）
             var cache = Il2CppHelper.GetDragonItemCache();
+            var merged = new Dictionary<int, int>();
+            foreach (var kv in liveItems)
+                merged[kv.Key] = kv.Value;
+            foreach (var kv in cache)
+            {
+                if (kv.Value > 0 && !merged.ContainsKey(kv.Key))
+                    merged[kv.Key] = kv.Value;
+            }
+
             var sb = new StringBuilder();
             sb.Append('[');
-
             bool first = true;
-            foreach (int sid in DragonItemIds)
+            foreach (var kv in merged.OrderByDescending(x => x.Value))
             {
                 if (!first) sb.Append(',');
                 first = false;
-                int count = cache.TryGetValue(sid, out int c) ? c : 0;
-                sb.Append($"{{\"stuffId\":{sid},\"name\":\"{Escape(ItemNames.GetName(sid))}\",\"count\":{count}}}");
+                sb.Append($"{{\"stuffId\":{kv.Key},\"name\":\"{Escape(ItemNames.GetName(kv.Key))}\",\"count\":{kv.Value}}}");
             }
-
             sb.Append(']');
             DragonBagJson = sb.ToString();
         }

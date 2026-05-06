@@ -512,6 +512,56 @@ internal static class Il2CppHelper
     // ====== 龙系统诊断 (已禁用) ======
     internal static void DiagnoseDragonSystem() { }
 
+    /// <summary>
+    /// 直接从游戏 dragon_stuff_bag 读取所有龙素材（每次调用都重新读取）
+    /// </summary>
+    private static MethodInfo? _dragonStuffCountMethod;
+
+    internal static List<KeyValuePair<int, int>> ReadDragonBagLive()
+    {
+        var result = new List<KeyValuePair<int, int>>();
+        try
+        {
+            var w = GetGameW();
+            if (w == null) return result;
+            object? dragonBag = GetProp(w, "dragon_stuff_bag");
+            if (dragonBag == null) return result;
+
+            if (_dragonStuffCountMethod == null)
+            {
+                var methods = dragonBag.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                foreach (var m in methods)
+                {
+                    if (m.Name == "StuffCount")
+                    {
+                        var p = m.GetParameters();
+                        if (p.Length == 1 && p[0].ParameterType == typeof(int))
+                        {
+                            _dragonStuffCountMethod = m;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (_dragonStuffCountMethod == null) return result;
+
+            for (int sid = 815001; sid <= 815100; sid++)
+            {
+                try
+                {
+                    var res = _dragonStuffCountMethod.Invoke(dragonBag, new object[] { sid });
+                    int count = Convert.ToInt32(res ?? 0);
+                    if (count > 0)
+                        result.Add(new KeyValuePair<int, int>(sid, count));
+                }
+                catch { }
+            }
+        }
+        catch { }
+        return result;
+    }
+
     internal static List<KeyValuePair<int, int>>? ReadDragonStuffBag()
     {
         try

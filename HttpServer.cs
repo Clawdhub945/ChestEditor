@@ -83,6 +83,10 @@ internal class HttpServer
             {
                 HandleIcon(resp, path);
             }
+            else if (path.StartsWith("/api/dragon/icon/") && method == "GET")
+            {
+                HandleDragonIcon(resp, path);
+            }
             else if (path == "/api/chests" && method == "GET")
             {
                 SendJson(resp, GetChestsJson());
@@ -334,6 +338,29 @@ internal class HttpServer
         }
 
         string filePath = $@"C:\AI\img\Icon\ui_{stuffId}.png";
+        if (!File.Exists(filePath))
+        {
+            resp.StatusCode = 404;
+            return;
+        }
+
+        resp.ContentType = "image/png";
+        var bytes = File.ReadAllBytes(filePath);
+        resp.ContentLength64 = bytes.Length;
+        resp.OutputStream.Write(bytes, 0, bytes.Length);
+    }
+
+    private static void HandleDragonIcon(HttpListenerResponse resp, string path)
+    {
+        // 路径: /api/dragon/icon/{index}  (index 0-15)
+        string idStr = path.Substring("/api/dragon/icon/".Length);
+        if (!int.TryParse(idStr, out int index) || index < 0 || index > 15)
+        {
+            resp.StatusCode = 404;
+            return;
+        }
+
+        string filePath = $@"C:\AI\img\Dragon\ic_dragon{index + 1}.png";
         if (!File.Exists(filePath))
         {
             resp.StatusCode = 404;
