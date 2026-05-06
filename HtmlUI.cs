@@ -1241,6 +1241,13 @@ async function searchMapDragons() {
   } catch(e) { toast('搜索失败', true); }
 }
 
+async function searchMapDragonEntities() {
+  try {
+    await fetch('/api/dragon/searchmap2', {method:'POST'});
+    toast('已搜索龙实体，查看BepInEx日志');
+  } catch(e) { toast('搜索失败', true); }
+}
+
 function findDragonTypeIndex(stuffId) {
   if (!stuffId) return -1;
   for (let i = 0; i < dragonTypes.length; i++) {
@@ -1438,7 +1445,8 @@ function renderDragonSoulsPanel() {
   let html = '';
   html += '<div class=""plan-section"" style=""margin-top:12px"">';
   html += '<div class=""plan-header""><span>地图龙 (' + activeSouls.length + ')</span>';
-  html += '<button class=""btn-adj"" onclick=""searchMapDragons()"" style=""font-size:11px;padding:3px 8px;width:auto;height:auto;margin-left:auto"">搜索地图龙</button></div>';
+  html += '<button class=""btn-adj"" onclick=""searchMapDragons()"" style=""font-size:11px;padding:3px 8px;width:auto;height:auto;margin-left:auto"">搜索地图龙</button>';
+  html += '<button class=""btn-adj"" onclick=""searchMapDragonEntities()"" style=""font-size:11px;padding:3px 8px;width:auto;height:auto"">搜索龙实体</button></div>';
   html += '<div class=""items"">';
   for (let i = 0; i < dragonSouls.length; i++) {
     const s = dragonSouls[i];

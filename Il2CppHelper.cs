@@ -1219,6 +1219,100 @@ internal static class Il2CppHelper
         catch (Exception ex) { return ex.Message; }
     }
 
+    /// <summary>
+    /// 搜索地图上的龙实体，读取 HP 等数值
+    /// </summary>
+    internal static void SearchMapDragonEntities()
+    {
+        try
+        {
+            var w = GetGameW();
+            if (w == null) { Plugin.LogInfo("[MapDragon] Game.w 为 null"); return; }
+
+            // 获取 dragon_soul_list 中活跃龙的 stuff_id
+            var souls = ReadDragonSouls();
+            var activeStuffIds = new HashSet<int>();
+            if (souls != null)
+            {
+                foreach (var s in souls)
+                {
+                    int isActive = s.TryGetValue("is_active", out var ia) ? Convert.ToInt32(ia ?? 0) : 0;
+                    int stuffId = s.TryGetValue("stuff_id", out var sid) ? Convert.ToInt32(sid ?? 0) : 0;
+                    if (isActive == 1 && stuffId > 0)
+                        activeStuffIds.Add(stuffId);
+                }
+            }
+            Plugin.LogInfo($"[MapDragon] 活跃龙 stuffId: {string.Join(",", activeStuffIds)}");
+
+            // 遍历所有 GameObject 搜索龙实体
+            var allGOs = UnityEngine.Resources.FindObjectsOfTypeAll<UnityEngine.GameObject>();
+            Plugin.LogInfo($"[MapDragon] 扫描 {allGOs.Length} 个 GameObject...");
+
+            CacheIl2CppApi();
+            int found = 0;
+            foreach (var go in allGOs)
+            {
+                try
+                {
+                    // 检查组件中是否有龙相关的类
+                    var components = go.GetComponents<UnityEngine.Component>();
+                    bool isDragon = false;
+                    foreach (var comp in components)
+                    {
+                        if (comp == null) continue;
+                        IntPtr compPtr = GetIl2CppPtr(comp);
+                        if (compPtr == IntPtr.Zero) continue;
+                        IntPtr compClass = (IntPtr)_il2cpp_get_class!.Invoke(null, new object[] { compPtr })!;
+                        string? className = GetIl2CppClassName(compClass);
+                        if (className != null && className.Contains("Dragon"))
+                        {
+                            isDragon = true;
+                            break;
+                        }
+                    }
+
+                    if (!isDragon) continue;
+
+                    // 找到龙实体，读取所有组件的字段
+                    Plugin.LogInfo($"[MapDragon] 找到龙 GO: {go.name}");
+                    foreach (var comp in components)
+                    {
+                        if (comp == null) continue;
+                        IntPtr compPtr = GetIl2CppPtr(comp);
+                        if (compPtr == IntPtr.Zero) continue;
+                        IntPtr compClass = (IntPtr)_il2cpp_get_class!.Invoke(null, new object[] { compPtr })!;
+                        string? className = GetIl2CppClassName(compClass);
+                        if (className == null) continue;
+
+                        var fields = GetIl2CppFields(compClass);
+                        if (fields.Count == 0) continue;
+
+                        // 只输出有实际数据的字段
+                        var fieldValues = new List<string>();
+                        foreach (var (name, offset) in fields)
+                        {
+                            if (offset == 0) continue; // 跳过静态字段
+                            try
+                            {
+                                int val = ReadIl2CppInt(compPtr, offset);
+                                if (val != 0)
+                                    fieldValues.Add($"{name}={val}");
+                            }
+                            catch { }
+                        }
+                        if (fieldValues.Count > 0)
+                            Plugin.LogInfo($"[MapDragon]   {className}: {string.Join(" ", fieldValues)}");
+                    }
+                    found++;
+                    if (found >= 20) break; // 限制输出数量
+                }
+                catch { }
+            }
+            Plugin.LogInfo($"[MapDragon] 共找到 {found} 个龙实体");
+        }
+        catch (Exception ex) { Plugin.LogError($"[MapDragon] 搜索异常: {ex.Message}"); }
+    }
+
     // 查找地图上的龙对象 - 通过 IL2CPP 原生字段读取
     internal static void SearchMapDragons()
     {
@@ -1269,7 +1363,9 @@ internal static class Il2CppHelper
                 int cloud = soul.TryGetValue("cloud", out var clv) ? Convert.ToInt32(clv ?? 0) : 0;
                 int pot = soul.TryGetValue("potentiality", out var pv) ? Convert.ToInt32(pv ?? 0) : 0;
 
-                Plugin.LogInfo($"[MapDragon] #{i}: {typeName} (stuffId={stuffId}) active={isActive} guid=\"{guid}\"{natureStr} head={head} claw={claw} shield={shield} cloud={cloud} pot={pot}");
+                // 输出所有字段
+                var allFields = string.Join(" ", soul.Select(kv => $"{kv.Key}={kv.Value}"));
+                Plugin.LogInfo($"[MapDragon] #{i}: {typeName} (stuffId={stuffId}) active={isActive} {allFields}");
             }
         }
         catch (Exception ex) { Plugin.LogError($"[MapDragon] 搜索异常: {ex.Message}"); }

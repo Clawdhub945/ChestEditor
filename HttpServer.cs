@@ -255,6 +255,11 @@ internal class HttpServer
                 Il2CppHelper.SearchMapDragons();
                 SendJson(resp, "{\"ok\":true}");
             }
+            else if (path == "/api/dragon/searchmap2" && method == "POST")
+            {
+                Il2CppHelper.SearchMapDragonEntities();
+                SendJson(resp, "{\"ok\":true}");
+            }
             else if (path == "/api/dragon/natures" && method == "GET")
             {
                 SendJson(resp, Il2CppHelper.GetDragonNaturesJson());
