@@ -1244,61 +1244,37 @@ internal static class Il2CppHelper
                     Plugin.LogInfo($"[DragonEntity] GO: {goName}");
                     found++;
 
-                    // 读取所有组件
-                    var components = go.GetComponents<UnityEngine.Component>();
-                    foreach (var comp in components)
+                    // 只输出前3个龙GO的详细信息
+                    if (found <= 3)
                     {
-                        if (comp == null) continue;
-                        IntPtr compPtr = GetIl2CppPtr(comp);
-                        if (compPtr == IntPtr.Zero) continue;
-                        IntPtr compClass = (IntPtr)_il2cpp_get_class!.Invoke(null, new object[] { compPtr })!;
-                        string? className = GetIl2CppClassName(compClass);
-                        if (className == null) continue;
-
-                        // 只输出一次每个类名的字段
-                        if (!seenClasses.Contains(className))
+                        var components = go.GetComponents<UnityEngine.Component>();
+                        foreach (var comp in components)
                         {
-                            seenClasses.Add(className);
+                            if (comp == null) continue;
+                            IntPtr compPtr = GetIl2CppPtr(comp);
+                            if (compPtr == IntPtr.Zero) continue;
+                            IntPtr compClass = (IntPtr)_il2cpp_get_class!.Invoke(null, new object[] { compPtr })!;
+                            string? className = GetIl2CppClassName(compClass);
+                            if (className == null) continue;
+
                             var fields = GetIl2CppFields(compClass);
-                            if (fields.Count > 0)
-                            {
-                                var fieldNames = fields.Where(f => f.Offset > 0).Select(f => $"{f.Name}({f.Offset})");
-                                Plugin.LogInfo($"[DragonEntity]   {className} 字段: {string.Join(", ", fieldNames)}");
-                            }
-                        }
+                            var instanceFields = fields.Where(f => f.Offset > 0).ToList();
+                            if (instanceFields.Count == 0) continue;
 
-                        // 输出有 hp/HP/health/damage/atk 字段的组件值
-                        var fields2 = GetIl2CppFields(compClass);
-                        var importantFields = fields2.Where(f =>
-                            f.Offset > 0 && (
-                            f.Name.ToLower().Contains("hp") ||
-                            f.Name.ToLower().Contains("health") ||
-                            f.Name.ToLower().Contains("damage") ||
-                            f.Name.ToLower().Contains("atk") ||
-                            f.Name.ToLower().Contains("def") ||
-                            f.Name.ToLower().Contains("level") ||
-                            f.Name.ToLower().Contains("max") ||
-                            f.Name.ToLower().Contains("cur") ||
-                            f.Name.ToLower().Contains("stuff_id") ||
-                            f.Name.ToLower().Contains("name") ||
-                            f.Name.ToLower().Contains("guid")
-                        )).ToList();
-
-                        if (importantFields.Count > 0)
-                        {
+                            // 输出所有非零字段值
                             var vals = new List<string>();
-                            foreach (var (name, offset) in importantFields)
+                            foreach (var (name, offset) in instanceFields)
                             {
                                 try
                                 {
                                     int val = ReadIl2CppInt(compPtr, offset);
-                                    if (val != 0)
+                                    if (val != 0 && val != -1 && Math.Abs(val) < 10000000)
                                         vals.Add($"{name}={val}");
                                 }
                                 catch { }
                             }
                             if (vals.Count > 0)
-                                Plugin.LogInfo($"[DragonEntity]   {className}: {string.Join(" ", vals)}");
+                                Plugin.LogInfo($"[DragonEntity]   {className}({instanceFields.Count}字段): {string.Join(" ", vals)}");
                         }
                     }
 
