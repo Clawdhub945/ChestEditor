@@ -1454,18 +1454,18 @@ function renderDragonSoulsPanel() {
     const parts = [
       {key:'head', label:'龙头'}, {key:'claw', label:'龙爪'},
       {key:'shield', label:'龙甲'}, {key:'cloud', label:'龙魂'},
+      {key:'potentiality', label:'潜力'},
     ];
-    html += '<div style=""display:flex;flex-wrap:wrap;gap:4px;align-items:center;width:100%"">';
+    html += '<div style=""display:grid;grid-template-columns:repeat(auto-fill,minmax(80px,1fr));gap:4px;width:100%"">';
     for (const p of parts) {
       const v = s[p.key] ?? 0;
-      html += '<span style=""font-size:10px;color:var(--text-muted)"">' + p.label + ':</span>';
-      html += '<input type=""number"" id=""soul_' + i + '_' + p.key + '"" value=""' + v + '"" min=""0"" max=""50"" style=""width:36px;font-size:10px;padding:1px 2px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:3px"">';
+      html += '<div style=""background:var(--bg-input);border:1px solid var(--border);border-radius:4px;padding:4px 6px;display:flex;flex-direction:column;align-items:center;gap:2px"">';
+      html += '<span style=""font-size:9px;color:var(--text-muted)"">' + p.label + '</span>';
+      html += '<div style=""display:flex;align-items:center;gap:2px"">';
+      html += '<input type=""number"" id=""soul_' + i + '_' + p.key + '"" value=""' + v + '"" min=""0"" max=""50"" style=""width:36px;font-size:10px;padding:1px 2px;background:var(--bg-secondary);color:var(--text);border:1px solid var(--border);border-radius:3px;text-align:center"">';
       html += '<button class=""btn-adj"" onclick=""setSoulProp(' + i + ',\'' + p.key + '\')"" style=""font-size:9px;padding:1px 4px;width:auto;height:auto"">设</button>';
+      html += '</div></div>';
     }
-    const pot = s.potentiality ?? 0;
-    html += '<span style=""font-size:10px;color:var(--text-muted)"">潜力:</span>';
-    html += '<input type=""number"" id=""soul_' + i + '_potentiality"" value=""' + pot + '"" min=""0"" style=""width:36px;font-size:10px;padding:1px 2px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:3px"">';
-    html += '<button class=""btn-adj"" onclick=""setSoulProp(' + i + ',\'potentiality\')"" style=""font-size:9px;padding:1px 4px;width:auto;height:auto"">设</button>';
     html += '</div>';
 
     // nature
