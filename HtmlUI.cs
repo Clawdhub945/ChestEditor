@@ -485,6 +485,11 @@ body { font-family: 'Inter', sans-serif; background: var(--bg-primary); color: v
   border: 1px solid var(--border);
   transition: all 0.15s ease;
   cursor: default;
+  min-height: 90px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
 }
 
 .item:hover {
@@ -512,6 +517,8 @@ body { font-family: 'Inter', sans-serif; background: var(--bg-primary); color: v
   overflow: hidden;
   text-overflow: ellipsis;
   margin-bottom: 2px;
+  min-height: 16px;
+  line-height: 16px;
 }
 
 .item .iid {
