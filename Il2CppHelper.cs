@@ -1228,32 +1228,20 @@ internal static class Il2CppHelper
         {
             CacheIl2CppApi();
 
-            // 龙类型名列表
-            var dragonTypeNames = new HashSet<string>();
-            foreach (var (Name, _, _) in DragonTypes)
-                dragonTypeNames.Add(Name);
-
             var allGOs = UnityEngine.Resources.FindObjectsOfTypeAll<UnityEngine.GameObject>();
             Plugin.LogInfo($"[DragonEntity] 扫描 {allGOs.Length} 个 GameObject...");
 
             int found = 0;
+            var seenClasses = new HashSet<string>();
             foreach (var go in allGOs)
             {
                 try
                 {
                     string goName = go.name;
-                    bool isDragon = false;
-                    foreach (var tn in dragonTypeNames)
-                    {
-                        if (goName.Contains(tn))
-                        {
-                            isDragon = true;
-                            break;
-                        }
-                    }
-                    if (!isDragon) continue;
+                    // 匹配包含 dragon (不区分大小写) 的 GO 名称
+                    if (!goName.ToLower().Contains("dragon")) continue;
 
-                    Plugin.LogInfo($"[DragonEntity] 找到龙 GO: {goName}");
+                    Plugin.LogInfo($"[DragonEntity] GO: {goName}");
                     found++;
 
                     // 读取所有组件
@@ -1267,27 +1255,54 @@ internal static class Il2CppHelper
                         string? className = GetIl2CppClassName(compClass);
                         if (className == null) continue;
 
-                        var fields = GetIl2CppFields(compClass);
-                        if (fields.Count == 0) continue;
-
-                        // 输出所有非零字段
-                        var fieldVals = new List<string>();
-                        foreach (var (name, offset) in fields)
+                        // 只输出一次每个类名的字段
+                        if (!seenClasses.Contains(className))
                         {
-                            if (offset == 0) continue;
-                            try
+                            seenClasses.Add(className);
+                            var fields = GetIl2CppFields(compClass);
+                            if (fields.Count > 0)
                             {
-                                int val = ReadIl2CppInt(compPtr, offset);
-                                if (val != 0 && val != -1 && Math.Abs(val) < 10000000)
-                                    fieldVals.Add($"{name}={val}");
+                                var fieldNames = fields.Where(f => f.Offset > 0).Select(f => $"{f.Name}({f.Offset})");
+                                Plugin.LogInfo($"[DragonEntity]   {className} 字段: {string.Join(", ", fieldNames)}");
                             }
-                            catch { }
                         }
-                        if (fieldVals.Count > 0)
-                            Plugin.LogInfo($"[DragonEntity]   {className}: {string.Join(" ", fieldVals)}");
+
+                        // 输出有 hp/HP/health/damage/atk 字段的组件值
+                        var fields2 = GetIl2CppFields(compClass);
+                        var importantFields = fields2.Where(f =>
+                            f.Offset > 0 && (
+                            f.Name.ToLower().Contains("hp") ||
+                            f.Name.ToLower().Contains("health") ||
+                            f.Name.ToLower().Contains("damage") ||
+                            f.Name.ToLower().Contains("atk") ||
+                            f.Name.ToLower().Contains("def") ||
+                            f.Name.ToLower().Contains("level") ||
+                            f.Name.ToLower().Contains("max") ||
+                            f.Name.ToLower().Contains("cur") ||
+                            f.Name.ToLower().Contains("stuff_id") ||
+                            f.Name.ToLower().Contains("name") ||
+                            f.Name.ToLower().Contains("guid")
+                        )).ToList();
+
+                        if (importantFields.Count > 0)
+                        {
+                            var vals = new List<string>();
+                            foreach (var (name, offset) in importantFields)
+                            {
+                                try
+                                {
+                                    int val = ReadIl2CppInt(compPtr, offset);
+                                    if (val != 0)
+                                        vals.Add($"{name}={val}");
+                                }
+                                catch { }
+                            }
+                            if (vals.Count > 0)
+                                Plugin.LogInfo($"[DragonEntity]   {className}: {string.Join(" ", vals)}");
+                        }
                     }
 
-                    if (found >= 10) break;
+                    if (found >= 20) break;
                 }
                 catch { }
             }
