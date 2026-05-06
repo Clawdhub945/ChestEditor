@@ -22,14 +22,6 @@ public partial class ChestEditorComponent
     private ChestInfo? _selectedChest;
     private int _selectedChestIndex = -1;
 
-    // 龙素材面板状态
-    private bool _showDragonPanel = true;
-    private Dictionary<int, string> _dragonCountInputs = new();
-
-    // 召唤龙状态
-    private int _summonTypeIndex;
-    private int _summonLevel = 1;
-
     // 延迟操作队列
     private Action? _pendingAction;
 
@@ -162,9 +154,6 @@ public partial class ChestEditorComponent
         }
         if (fi > 0) GUILayout.EndHorizontal();
         if (filterChanged) RefreshChestList();
-
-        // 龙素材面板
-        DrawDragonPanel();
 
         GUILayout.BeginHorizontal();
         GUILayout.Label("搜索:", GUILayout.Width(36));
@@ -349,92 +338,6 @@ public partial class ChestEditorComponent
             _showAddItemWindow = false;
 
         GUI.DragWindow();
-    }
-
-    private void DrawDragonPanel()
-    {
-        GUILayout.BeginVertical("box");
-        GUILayout.BeginHorizontal();
-        string arrow = _showDragonPanel ? "▼" : "▶";
-        if (GUILayout.Button($"{arrow} 龙素材 (驯龙素材)", _chestHeaderStyle))
-            _showDragonPanel = !_showDragonPanel;
-        GUILayout.FlexibleSpace();
-        GUILayout.EndHorizontal();
-
-        if (_showDragonPanel)
-        {
-            var cache = Il2CppHelper.GetDragonItemCache();
-
-            int[] dragonIds = { 815001, 815002, 815003, 815004, 815005 };
-            int col = 0;
-            foreach (int sid in dragonIds)
-            {
-                int count = cache.TryGetValue(sid, out int c) ? c : 0;
-                string name = ItemNames.GetName(sid);
-
-                if (col % 5 == 0) GUILayout.BeginHorizontal();
-                GUILayout.BeginVertical("box", GUILayout.Width(120));
-                string line1 = name.Length <= 6 ? name : name[..6];
-                string line2 = name.Length <= 6 ? "" : name[6..];
-                if (line2.Length > 6) line2 = line2[..6];
-                GUILayout.Label(line1, _itemCountStyle, GUILayout.Width(116), GUILayout.Height(14));
-                GUILayout.Label(line2, _itemCountStyle, GUILayout.Width(116), GUILayout.Height(14));
-                GUILayout.Label($"x{count}", _itemCountStyle, GUILayout.Width(116), GUILayout.Height(14));
-
-                GUILayout.BeginHorizontal();
-                if (!_dragonCountInputs.ContainsKey(sid))
-                    _dragonCountInputs[sid] = count.ToString();
-                _dragonCountInputs[sid] = GUILayout.TextField(_dragonCountInputs[sid], GUILayout.Width(50), GUILayout.Height(18));
-                if (GUILayout.Button("设", _addButtonStyle, GUILayout.Width(24), GUILayout.Height(18)))
-                {
-                    if (int.TryParse(_dragonCountInputs[sid], out int newCnt))
-                    {
-                        int capturedSid = sid;
-                        _pendingAction = () => Il2CppHelper.SetDragonItemQuantity(capturedSid, newCnt);
-                    }
-                }
-                GUILayout.EndHorizontal();
-
-                GUILayout.EndVertical();
-                col++;
-                if (col % 5 == 0) GUILayout.EndHorizontal();
-            }
-            if (col % 5 != 0) GUILayout.EndHorizontal();
-
-            // 召唤龙面板
-            GUILayout.Space(4);
-            var types = Il2CppHelper.DragonTypes;
-            string[] typeNames = types.Select(t => t.ChineseName).ToArray();
-
-            GUILayout.BeginHorizontal();
-            GUILayout.Label("召唤龙:", _chestHeaderStyle, GUILayout.Width(52));
-            if (GUILayout.Button(typeNames[_summonTypeIndex], GUILayout.Width(80)))
-            {
-                // 循环切换龙类型
-                _summonTypeIndex = (_summonTypeIndex + 1) % types.Length;
-            }
-            GUILayout.Label("等级:", GUILayout.Width(32));
-            if (GUILayout.Button("-", GUILayout.Width(20), GUILayout.Height(18)))
-                _summonLevel = Math.Max(1, _summonLevel - 1);
-            GUILayout.Label($"{_summonLevel}", GUILayout.Width(20));
-            if (GUILayout.Button("+", GUILayout.Width(20), GUILayout.Height(18)))
-                _summonLevel = Math.Min(10, _summonLevel + 1);
-            if (GUILayout.Button("召唤!", _addButtonStyle, GUILayout.Width(50), GUILayout.Height(18)))
-            {
-                int capturedType = _summonTypeIndex;
-                int capturedLevel = _summonLevel;
-                int dragonId = types[capturedType].BaseId + capturedLevel - 1;
-                string dragonName = types[capturedType].ChineseName;
-                _pendingAction = () =>
-                {
-                    string result = Il2CppHelper.SummonDragon(dragonId);
-                    Plugin.LogInfo($"[Dragon] 召唤 {dragonName} Lv{capturedLevel} (ID:{dragonId}) 结果: {result}");
-                };
-            }
-            GUILayout.EndHorizontal();
-        }
-
-        GUILayout.EndVertical();
     }
 
 }

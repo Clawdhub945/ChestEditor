@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Text;
@@ -78,6 +79,10 @@ internal class HttpServer
             if (path == "/" && method == "GET")
             {
                 SendHtml(resp, HtmlUI.Html);
+            }
+            else if (path == "/favicon.png" && method == "GET")
+            {
+                HandleFavicon(resp);
             }
             else if (path.StartsWith("/icon/") && method == "GET")
             {
@@ -387,50 +392,47 @@ internal class HttpServer
         return comp?.ItemsJson ?? "[]";
     }
 
+    private static readonly Dictionary<string, byte[]> _resourceCache = new();
+
+    private static byte[]? GetEmbeddedResource(string name)
+    {
+        if (_resourceCache.TryGetValue(name, out var cached)) return cached;
+        using var stream = typeof(HttpServer).Assembly.GetManifestResourceStream(name);
+        if (stream == null) return null;
+        using var ms = new MemoryStream();
+        stream.CopyTo(ms);
+        var bytes = ms.ToArray();
+        _resourceCache[name] = bytes;
+        return bytes;
+    }
+
+    private static void SendPng(HttpListenerResponse resp, byte[]? bytes)
+    {
+        if (bytes == null) { resp.StatusCode = 404; return; }
+        resp.ContentType = "image/png";
+        resp.ContentLength64 = bytes.Length;
+        resp.OutputStream.Write(bytes, 0, bytes.Length);
+    }
+
+    private static void HandleFavicon(HttpListenerResponse resp)
+    {
+        SendPng(resp, GetEmbeddedResource("ChestEditor.ic_app.png"));
+    }
+
     private static void HandleIcon(HttpListenerResponse resp, string path)
     {
         // 路径: /icon/{stuffId}
         string idStr = path.Substring(6);
-        if (!int.TryParse(idStr, out int stuffId))
-        {
-            resp.StatusCode = 404;
-            return;
-        }
-
-        string filePath = $@"C:\AI\img\Icon\ui_{stuffId}.png";
-        if (!File.Exists(filePath))
-        {
-            resp.StatusCode = 404;
-            return;
-        }
-
-        resp.ContentType = "image/png";
-        var bytes = File.ReadAllBytes(filePath);
-        resp.ContentLength64 = bytes.Length;
-        resp.OutputStream.Write(bytes, 0, bytes.Length);
+        if (!int.TryParse(idStr, out int stuffId)) { resp.StatusCode = 404; return; }
+        SendPng(resp, GetEmbeddedResource($"ChestEditor.Icon.ui_{stuffId}.png"));
     }
 
     private static void HandleDragonIcon(HttpListenerResponse resp, string path)
     {
         // 路径: /api/dragon/icon/{index}  (index 0-15)
         string idStr = path.Substring("/api/dragon/icon/".Length);
-        if (!int.TryParse(idStr, out int index) || index < 0 || index > 15)
-        {
-            resp.StatusCode = 404;
-            return;
-        }
-
-        string filePath = $@"C:\AI\img\Dragon\ic_dragon{index + 1}.png";
-        if (!File.Exists(filePath))
-        {
-            resp.StatusCode = 404;
-            return;
-        }
-
-        resp.ContentType = "image/png";
-        var bytes = File.ReadAllBytes(filePath);
-        resp.ContentLength64 = bytes.Length;
-        resp.OutputStream.Write(bytes, 0, bytes.Length);
+        if (!int.TryParse(idStr, out int index) || index < 0 || index > 15) { resp.StatusCode = 404; return; }
+        SendPng(resp, GetEmbeddedResource($"ChestEditor.Dragon.ic_dragon{index + 1}.png"));
     }
 
     private static void HandleRefresh(HttpListenerResponse resp)

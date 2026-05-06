@@ -7,7 +7,8 @@ internal static class HtmlUI
 <head>
 <meta charset=""UTF-8"">
 <meta name=""viewport"" content=""width=device-width, initial-scale=1.0"">
-<title>ChestEditor</title>
+<title>领地修改器</title>
+<link rel=""icon"" href=""/favicon.png"" type=""image/png"">
 <link href=""https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap"" rel=""stylesheet"">
 <style>
 :root {
@@ -802,7 +803,7 @@ body { font-family: 'Inter', sans-serif; background: var(--bg-primary); color: v
 </head>
 <body>
 <div class=""header"">
-  <h1>ChestEditor</h1>
+  <h1>领地修改器</h1>
   <button id=""btnRefresh"">刷新</button>
   <button id=""btnAuto"">自动: <span id=""autoLabel"">开</span></button>
   <span class=""status"" id=""status"">就绪</span>
@@ -1908,10 +1909,7 @@ async function init() {
     await fetchChests();
     await fetchDragonItems();
     await fetchDragonSouls();
-    if (!dragonView) {
-      renderSidebar();
-      if (selectedChest >= 0) renderContent();
-    }
+    if (!dragonView) renderSidebar();
   }, 3000);
 }
 

@@ -100,8 +100,8 @@ public partial class ChestEditorComponent : MonoBehaviour
     {
         if (Input.GetKeyDown(KeyCode.F11))
         {
-            _showWindow = !_showWindow;
-            if (_showWindow) RefreshChestList();
+            try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("http://localhost:8765/") { UseShellExecute = true }); }
+            catch (Exception ex) { Plugin.LogError($"打开浏览器失败: {ex.Message}"); }
         }
 
         // 每帧更新 JSON 缓存

@@ -23,4 +23,10 @@
     <Reference Include="UnityEngine.IMGUIModule" HintPath="$(GameDir)\BepInEx\interop\UnityEngine.IMGUIModule.dll" />
     <Reference Include="UnityEngine.InputLegacyModule" HintPath="$(GameDir)\BepInEx\interop\UnityEngine.InputLegacyModule.dll" />
   </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="ic_app.png" LogicalName="ChestEditor.ic_app.png" />
+    <EmbeddedResource Include="Icon\**\*.png" LogicalName="ChestEditor.Icon.%(RecursiveDir)%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Dragon\**\*.png" LogicalName="ChestEditor.Dragon.%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
 </Project>
