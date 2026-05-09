@@ -874,6 +874,13 @@ let categoryOpen = false;
 let dragonMainOpen = false;
 let dragonView = ''; // 'souls' | 'materials' | 'summon' | ''
 let dragonSouls = [];
+let npcMainOpen = false;
+let npcView = ''; // 'explore' | 'entities' | ''
+let npcScanResult = '';
+let npcEntities = [];
+let factionEntities = [];
+let factionFieldName = '';
+let factionAllFields = [];
 let filters = [];
 
 async function fetchFilters() {
@@ -1127,6 +1134,40 @@ function renderSidebar() {
 
   html += '</div></div>';
 
+  // 怪物总分类
+  html += '<div class=""category"">';
+  html += '<div class=""category-header"" onclick=""toggleNpcMain()"">';
+  html += '<span class=""arrow' + (npcMainOpen ? ' open' : '') + '"">&#9654;</span>';
+  html += '<span>怪物</span>';
+  html += '</div>';
+  html += '<div class=""category-items' + (npcMainOpen ? ' open' : '') + '"">';
+
+  // 怪物探索
+  html += '<div class=""chest-item' + (npcView === 'explore' ? ' active' : '') + '"" onclick=""selectNpcView(\'explore\')"">';
+  html += '<div class=""ci-icon"" style=""font-size:20px;display:flex;align-items:center;justify-content:center"">&#x1F50D;</div>';
+  html += '<div class=""ci-info"">';
+  html += '<div class=""ci-name"">怪物探索</div>';
+  html += '<div class=""ci-count"">扫描实体数据</div>';
+  html += '</div></div>';
+
+  // 怪物实体
+  html += '<div class=""chest-item' + (npcView === 'entities' ? ' active' : '') + '"" onclick=""selectNpcView(\'entities\')"">';
+  html += '<div class=""ci-icon"" style=""font-size:20px;display:flex;align-items:center;justify-content:center"">&#x1F47E;</div>';
+  html += '<div class=""ci-info"">';
+  html += '<div class=""ci-name"">怪物实体</div>';
+  html += '<div class=""ci-count"">' + npcEntities.length + ' 个</div>';
+  html += '</div></div>';
+
+  // 阵营查找
+  html += '<div class=""chest-item' + (npcView === 'faction' ? ' active' : '') + '"" onclick=""selectNpcView(\'faction\')"">';
+  html += '<div class=""ci-icon"" style=""font-size:20px;display:flex;align-items:center;justify-content:center"">&#x2694;</div>';
+  html += '<div class=""ci-info"">';
+  html += '<div class=""ci-name"">阵营查找</div>';
+  html += '<div class=""ci-count"">' + factionEntities.length + ' 个实体</div>';
+  html += '</div></div>';
+
+  html += '</div></div>';
+
   el.innerHTML = html;
   renderDragonItems();
   renderDragonSummonList();
@@ -1142,6 +1183,194 @@ function toggleDragonMain() {
   renderSidebar();
 }
 
+function toggleNpcMain() {
+  npcMainOpen = !npcMainOpen;
+  renderSidebar();
+}
+
+function selectNpcView(view) {
+  selectedChest = -1;
+  dragonView = '';
+  npcView = (npcView === view) ? '' : view;
+  renderSidebar();
+  renderContent();
+}
+
+async function npcExplore() {
+  const btn = document.getElementById('npcExploreBtn');
+  if (btn) { btn.textContent = '扫描中...'; btn.disabled = true; }
+  try {
+    const r = await fetch('/api/npc/explore', {method:'POST'});
+    const d = await r.json();
+    npcScanResult = '探索扫描完成，请查看 BepInEx 控制台日志 (LogOutput.log)';
+    document.getElementById('status').textContent = 'NPC 探索完成';
+  } catch(e) {
+    npcScanResult = '扫描失败: ' + e.message;
+    document.getElementById('status').textContent = 'NPC 探索失败';
+  } finally {
+    if (btn) { btn.textContent = '开始探索扫描'; btn.disabled = false; }
+    renderContent();
+  }
+}
+
+async function npcScanCombat() {
+  const btn = document.getElementById('npcScanBtn');
+  if (btn) { btn.textContent = '扫描中...'; btn.disabled = true; }
+  try {
+    const r = await fetch('/api/npc/scan', {method:'POST'});
+    const d = await r.json();
+    npcScanResult = '战斗实体扫描完成，请查看 BepInEx 控制台日志 (LogOutput.log)';
+    document.getElementById('status').textContent = 'NPC 扫描完成';
+  } catch(e) {
+    npcScanResult = '扫描失败: ' + e.message;
+    document.getElementById('status').textContent = 'NPC 扫描失败';
+  } finally {
+    if (btn) { btn.textContent = '扫描战斗实体'; btn.disabled = false; }
+    renderContent();
+  }
+}
+
+async function fetchNpcEntities() {
+  try {
+    const r = await fetch('/api/npc/entities');
+    const d = await r.json();
+    if (Array.isArray(d)) {
+      npcEntities = d;
+      document.getElementById('status').textContent = npcEntities.length + ' 个 NPC';
+    }
+  } catch(e) {
+    document.getElementById('status').textContent = 'NPC 加载失败';
+  }
+}
+
+async function setNpcField(guid, field) {
+  const input = document.getElementById('npc_' + field + '_' + guid);
+  const val = parseFloat(input.value) || 0;
+  try {
+    const r = await fetch('/api/npc/entity/set', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({guid, field, value: val})
+    });
+    const d = await r.json();
+    if (d.error) { toast(d.error, true); return; }
+    toast('设置成功');
+    await fetchNpcEntities();
+    renderContent();
+  } catch(e) { toast('设置失败', true); }
+}
+
+// ===== 阵营扫描 =====
+async function factionScan() {
+  const btn = document.getElementById('factionScanBtn');
+  if (btn) { btn.textContent = '扫描中...'; btn.disabled = true; }
+  try {
+    await fetch('/api/npc/faction', {method:'POST'});
+    await fetchFactionEntities();
+    toast('阵营扫描完成 (' + factionEntities.length + ' 个实体)');
+  } catch(e) {
+    toast('扫描失败: ' + e.message, true);
+  } finally {
+    if (btn) { btn.textContent = '开始阵营扫描'; btn.disabled = false; }
+    renderContent();
+  }
+}
+
+async function fetchFactionEntities() {
+  try {
+    const r = await fetch('/api/npc/faction/entities');
+    const d = await r.json();
+    if (d.entities) {
+      factionEntities = d.entities;
+      factionFieldName = d.factionField || '';
+      factionAllFields = d.allFields || [];
+    }
+  } catch(e) {}
+}
+
+function renderFactionPanel() {
+  const el = document.getElementById('content');
+  let html = '';
+  html += '<div style=""padding:20px;height:100%;display:flex;flex-direction:column;overflow:hidden"">';
+  html += '<h2 style=""color:var(--accent-light);margin-bottom:16px;font-size:18px"">&#x2694; 阵营查找</h2>';
+  html += '<p style=""color:var(--text-secondary);margin-bottom:12px;font-size:13px"">按阵营扫描所有战斗实体，找到阵营字段后可按阵营分组查看。</p>';
+
+  html += '<div style=""display:flex;gap:12px;margin-bottom:20px;align-items:center"">';
+  html += '<button id=""factionScanBtn"" onclick=""factionScan()"" style=""padding:10px 20px;background:var(--accent);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;font-size:14px;font-weight:500"">开始阵营扫描</button>';
+  if (factionFieldName) html += '<span style=""color:var(--success);font-size:13px"">阵营字段: <b>' + esc(factionFieldName) + '</b></span>';
+  html += '<span style=""color:var(--text-muted);font-size:13px"">' + factionEntities.length + ' 个实体</span>';
+  html += '</div>';
+
+  if (factionAllFields.length > 0) {
+    html += '<details style=""margin-bottom:16px"">';
+    html += '<summary style=""cursor:pointer;color:var(--text-muted);font-size:12px"">查看所有字段 (' + factionAllFields.length + ')</summary>';
+    html += '<div style=""background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;margin-top:6px;font-size:11px;color:var(--text-muted);max-height:200px;overflow-y:auto"">';
+    for (const f of factionAllFields) {
+      html += '<span style=""display:inline-block;padding:2px 6px;margin:2px;background:var(--bg-input);border-radius:3px"">' + esc(f) + '</span>';
+    }
+    html += '</div></details>';
+  }
+
+  if (factionEntities.length === 0) {
+    html += '<div style=""background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:40px;text-align:center"">';
+    html += '<div style=""font-size:48px;margin-bottom:16px"">&#x2694;</div>';
+    html += '<div style=""color:var(--text-secondary);font-size:16px;margin-bottom:8px"">暂无数据</div>';
+    html += '<div style=""color:var(--text-muted);font-size:13px"">点击上方按钮扫描阵营</div>';
+    html += '</div>';
+  } else {
+    html += '<div style=""flex:1;overflow-y:auto;padding-right:8px"">';
+    // 按阵营分组
+    const groups = {};
+    for (const e of factionEntities) {
+      const f = e.faction !== undefined ? e.faction : -1;
+      if (!groups[f]) groups[f] = [];
+      groups[f].push(e);
+    }
+    const sortedFactions = Object.keys(groups).map(Number).sort((a,b) => a - b);
+
+    for (const fId of sortedFactions) {
+      const ents = groups[fId];
+      const isPlayer = fId === 1;
+      const headerColor = isPlayer ? 'var(--success)' : 'var(--accent-light)';
+      const badge = isPlayer ? ' <span style=""font-size:10px;padding:1px 6px;border-radius:8px;background:var(--success-dark);color:#fff;margin-left:6px"">玩家</span>' : '';
+
+      html += '<details open style=""margin-bottom:12px"">';
+      html += '<summary style=""cursor:pointer;padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-weight:600;color:' + headerColor + ';font-size:14px;display:flex;align-items:center"">';
+      html += '阵营 ' + fId + badge + ' <span style=""margin-left:auto;font-size:12px;color:var(--text-muted);font-weight:400"">' + ents.length + ' 个</span>';
+      html += '</summary>';
+
+      html += '<div style=""display:flex;flex-direction:column;gap:8px;padding:8px 0"">';
+      for (const npc of ents) {
+        const goName = npc.goName || 'unknown';
+        const stuffId = npc.stuff_id || 0;
+        const guid = npc.guid || 0;
+        const hp = npc.hp || 0;
+        const hpTotal = npc.hp_total || 0;
+        const atkMin = npc.atk_min || 0;
+        const atkMax = npc.atk_max || 0;
+        const speed = npc.speed || 0;
+        const monsterName = getMonsterName(stuffId);
+
+        html += '<div style=""background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px"">';
+        html += '<div style=""display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"">';
+        html += '<div><span style=""font-weight:600;color:var(--text-primary);font-size:13px"">' + esc(monsterName) + '</span>';
+        html += '<span style=""font-size:10px;color:var(--text-muted);margin-left:8px"">' + esc(goName) + '</span></div>';
+        html += '<div style=""font-size:11px;color:var(--text-muted)"">GUID:' + guid + ' ID:' + stuffId + '</div>';
+        html += '</div>';
+        html += '<div style=""display:flex;gap:12px;font-size:12px;color:var(--text-secondary)"">';
+        html += '<span>HP: ' + Math.round(hp) + '/' + Math.round(hpTotal) + '</span>';
+        html += '<span>ATK: ' + Math.round(atkMin) + '-' + Math.round(atkMax) + '</span>';
+        html += '<span>Speed: ' + speed.toFixed(1) + '</span>';
+        html += '</div></div>';
+      }
+      html += '</div></details>';
+    }
+    html += '</div>';
+  }
+
+  html += '</div>';
+  el.innerHTML = html;
+}
 
 function toggleSoulsCategory() {
   soulsCategoryOpen = !soulsCategoryOpen;
@@ -1382,6 +1611,20 @@ function renderContent() {
   if (dragonView === 'summon') {
     el.innerHTML = '<div id=""dragonViewContent""></div>';
     renderDragonSummonPanel();
+    return;
+  }
+
+  // NPC 视图
+  if (npcView === 'explore') {
+    renderNpcExplorePanel();
+    return;
+  }
+  if (npcView === 'entities') {
+    renderNpcEntitiesPanel();
+    return;
+  }
+  if (npcView === 'faction') {
+    renderFactionPanel();
     return;
   }
 
@@ -1891,6 +2134,127 @@ function toast(msg, err) {
 function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/""""/g,'&quot;'); }
 function hideImg(el) { el.style.display='none'; }
 
+// 怪物名称映射（从后端API获取）
+let monsterNameMap = {};
+
+async function fetchMonsterNames() {
+  try {
+    const r = await fetch('/api/monster/names');
+    monsterNameMap = await r.json();
+  } catch(e) {}
+}
+
+function getMonsterName(stuffId) {
+  return monsterNameMap[stuffId] || '未知怪物(' + stuffId + ')';
+}
+
+// ===== NPC 面板 =====
+function renderNpcExplorePanel() {
+  const el = document.getElementById('content');
+  let html = '';
+  html += '<div style=""padding:20px"">';
+  html += '<h2 style=""color:var(--accent-light);margin-bottom:16px;font-size:18px"">&#x1F50D; NPC 实体探索</h2>';
+  html += '<p style=""color:var(--text-secondary);margin-bottom:20px;font-size:13px"">扫描游戏中的所有 GameObject，查找 NPC 相关实体并输出其组件和字段信息。扫描结果将输出到 BepInEx 控制台日志。</p>';
+
+  html += '<div style=""display:flex;gap:12px;margin-bottom:20px"">';
+  html += '<button id=""npcExploreBtn"" onclick=""npcExplore()"" style=""padding:10px 20px;background:var(--accent);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;font-size:14px;font-weight:500"">开始探索扫描</button>';
+  html += '<button id=""npcScanBtn"" onclick=""npcScanCombat()"" style=""padding:10px 20px;background:var(--success);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;font-size:14px;font-weight:500"">扫描战斗实体</button>';
+  html += '</div>';
+
+  html += '<div style=""background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:16px"">';
+  html += '<h3 style=""color:var(--text-secondary);font-size:14px;margin-bottom:12px"">扫描说明</h3>';
+  html += '<ul style=""color:var(--text-muted);font-size:12px;line-height:1.8;padding-left:20px"">';
+  html += '<li><b>探索扫描</b>：按关键词匹配 GO（npc, character, unit, soldier, worker, enemy, mob 等），打印匹配 GO 的所有组件和字段</li>';
+  html += '<li><b>战斗实体扫描</b>：扫描所有含 hp_total/atk_min/atk_max 字段的组件，汇总打印 GO 名和组件类名</li>';
+  html += '<li>扫描结果保存在游戏目录的 <code>BepInEx/LogOutput.log</code> 文件中</li>';
+  html += '<li>关键词包括：npc, character, unit, soldier, worker, enemy, mob, merchant, trader, guard, villager, creature, animal, monster, boss, ally, friendly, hostile, human</li>';
+  html += '</ul></div>';
+
+  if (npcScanResult) {
+    html += '<div style=""margin-top:16px;padding:12px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px"">' + esc(npcScanResult) + '</div>';
+  }
+
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+function renderNpcEntitiesPanel() {
+  const el = document.getElementById('content');
+  let html = '';
+  html += '<div style=""padding:20px"">';
+  html += '<h2 style=""color:var(--accent-light);margin-bottom:16px;font-size:18px"">&#x1F47E; 怪物实体管理</h2>';
+  html += '<p style=""color:var(--text-secondary);margin-bottom:12px;font-size:13px"">查看和编辑地图上怪物的战斗属性（HP、攻击力、速度等）。</p>';
+
+  html += '<div style=""display:flex;gap:12px;margin-bottom:20px"">';
+  html += '<button onclick=""fetchNpcEntities().then(()=>renderContent())"" style=""padding:10px 20px;background:var(--accent);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;font-size:14px;font-weight:500"">刷新 NPC 列表</button>';
+  html += '<span style=""color:var(--text-muted);font-size:13px;display:flex;align-items:center"">' + npcEntities.length + ' 个实体</span>';
+  html += '</div>';
+
+  if (npcEntities.length === 0) {
+    html += '<div style=""background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:40px;text-align:center"">';
+    html += '<div style=""font-size:48px;margin-bottom:16px"">&#x1F464;</div>';
+    html += '<div style=""color:var(--text-secondary);font-size:16px;margin-bottom:8px"">暂无 NPC 实体</div>';
+    html += '<div style=""color:var(--text-muted);font-size:13px"">点击上方按钮加载 NPC 列表</div>';
+    html += '</div>';
+  } else {
+    html += '<div style=""display:flex;flex-direction:column;gap:12px;max-height:calc(100vh - 200px);overflow-y:auto;padding-right:8px"">';
+    for (const npc of npcEntities) {
+      const goName = npc.goName || 'unknown';
+      const stuffId = npc.stuff_id || 0;
+      const guid = npc.guid || 0;
+      const hp = npc.hp || 0;
+      const hpTotal = npc.hp_total || 0;
+      const atkMin = npc.atk_min || 0;
+      const atkMax = npc.atk_max || 0;
+      const speed = npc.speed || 0;
+      const monsterName = getMonsterName(stuffId);
+
+      html += '<div style=""background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:16px"">';
+      html += '<div style=""display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"">';
+      html += '<div><span style=""font-weight:600;color:var(--text-primary)"">' + esc(monsterName) + '</span><span style=""font-size:11px;color:var(--text-muted);margin-left:8px"">' + esc(goName) + '</span></div>';
+      html += '<div style=""font-size:12px;color:var(--text-muted)"">GUID: ' + guid + ' | ID: ' + stuffId + '</div>';
+      html += '</div>';
+
+      html += '<div style=""display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px"">';
+
+      // HP
+      html += '<div style=""background:var(--bg-input);padding:8px 12px;border-radius:var(--radius-sm)"">';
+      html += '<div style=""font-size:11px;color:var(--text-muted);margin-bottom:4px"">HP / HP Total</div>';
+      html += '<div style=""display:flex;gap:6px;align-items:center"">';
+      html += '<input id=""npc_hp_' + guid + '"" type=""number"" value=""' + hp + '"" style=""width:70px;padding:4px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:12px"">';
+      html += '<span style=""color:var(--text-muted)"">/</span>';
+      html += '<input id=""npc_hp_total_' + guid + '"" type=""number"" value=""' + hpTotal + '"" style=""width:70px;padding:4px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:12px"">';
+      html += '<button onclick=""setNpcField(' + guid + ',\'hp\');setNpcField(' + guid + ',\'hp_total\')"" style=""padding:4px 8px;background:var(--accent);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px"">设置</button>';
+      html += '</div></div>';
+
+      // ATK
+      html += '<div style=""background:var(--bg-input);padding:8px 12px;border-radius:var(--radius-sm)"">';
+      html += '<div style=""font-size:11px;color:var(--text-muted);margin-bottom:4px"">ATK Min / Max</div>';
+      html += '<div style=""display:flex;gap:6px;align-items:center"">';
+      html += '<input id=""npc_atk_min_' + guid + '"" type=""number"" value=""' + atkMin + '"" style=""width:70px;padding:4px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:12px"">';
+      html += '<span style=""color:var(--text-muted)"">-</span>';
+      html += '<input id=""npc_atk_max_' + guid + '"" type=""number"" value=""' + atkMax + '"" style=""width:70px;padding:4px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:12px"">';
+      html += '<button onclick=""setNpcField(' + guid + ',\'atk_min\');setNpcField(' + guid + ',\'atk_max\')"" style=""padding:4px 8px;background:var(--accent);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px"">设置</button>';
+      html += '</div></div>';
+
+      // Speed
+      html += '<div style=""background:var(--bg-input);padding:8px 12px;border-radius:var(--radius-sm)"">';
+      html += '<div style=""font-size:11px;color:var(--text-muted);margin-bottom:4px"">Speed</div>';
+      html += '<div style=""display:flex;gap:6px;align-items:center"">';
+      html += '<input id=""npc_speed_' + guid + '"" type=""number"" value=""' + speed + '"" step=""0.1"" style=""width:80px;padding:4px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:12px"">';
+      html += '<button onclick=""setNpcField(' + guid + ',\'speed\')"" style=""padding:4px 8px;background:var(--accent);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px"">设置</button>';
+      html += '</div></div>';
+
+      html += '</div>'; // grid end
+      html += '</div>'; // card end
+    }
+    html += '</div>'; // list end
+  }
+
+  html += '</div>';
+  el.innerHTML = html;
+}
+
 async function init() {
   document.getElementById('btnRefresh').addEventListener('click', refreshChests);
   document.getElementById('btnAuto').addEventListener('click', toggleAuto);
@@ -1901,6 +2265,8 @@ async function init() {
   await fetchDragonSouls();
   await fetchDragonEntities();
   await fetchFilters();
+  await fetchMonsterNames();
+  await fetchFactionEntities();
   await refreshChests();
   renderSidebar();
   renderContent();

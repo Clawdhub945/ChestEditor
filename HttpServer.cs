@@ -320,6 +320,115 @@ internal class HttpServer
                 else
                     SendJson(resp, "{\"error\":\"timeout\"}");
             }
+            else if (path == "/api/npc/explore" && method == "POST")
+            {
+                // NPC 探索扫描（主线程执行）
+                Plugin.LogInfo("[HTTP] /api/npc/explore 请求");
+                var comp = ChestEditorComponent.Instance;
+                if (comp == null) { SendJson(resp, "{\"error\":\"mod not ready\"}"); return; }
+                var signal = new ManualResetEventSlim(false);
+                comp.WriteQueue.Enqueue(new ChestEditorComponent.WriteRequest { ChestIndex = -10, Signal = signal });
+                if (signal.Wait(15000))
+                    SendJson(resp, "{\"ok\":true,\"message\":\"扫描完成，请查看 BepInEx 控制台日志\"}");
+                else
+                    SendJson(resp, "{\"error\":\"timeout\"}");
+            }
+            else if (path == "/api/npc/scan" && method == "POST")
+            {
+                // NPC 战斗实体扫描（主线程执行）
+                Plugin.LogInfo("[HTTP] /api/npc/scan 请求");
+                var comp = ChestEditorComponent.Instance;
+                if (comp == null) { SendJson(resp, "{\"error\":\"mod not ready\"}"); return; }
+                var signal = new ManualResetEventSlim(false);
+                comp.WriteQueue.Enqueue(new ChestEditorComponent.WriteRequest { ChestIndex = -11, Signal = signal });
+                if (signal.Wait(15000))
+                    SendJson(resp, "{\"ok\":true,\"message\":\"扫描完成，请查看 BepInEx 控制台日志\"}");
+                else
+                    SendJson(resp, "{\"error\":\"timeout\"}");
+            }
+            else if (path == "/api/npc/entities" && method == "GET")
+            {
+                // 读取 NPC 实体
+                Plugin.LogInfo("[HTTP] /api/npc/entities 请求");
+                var comp = ChestEditorComponent.Instance;
+                if (comp == null) { SendJson(resp, "{\"error\":\"mod not ready\"}"); return; }
+                var signal = new ManualResetEventSlim(false);
+                comp.WriteQueue.Enqueue(new ChestEditorComponent.WriteRequest { ChestIndex = -12, Signal = signal });
+                if (signal.Wait(10000))
+                {
+                    Plugin.LogInfo($"[HTTP] npc entities 返回, 长度={comp.NpcEntitiesJson.Length}");
+                    SendJson(resp, comp.NpcEntitiesJson);
+                }
+                else
+                {
+                    Plugin.LogError("[HTTP] npc entities 超时");
+                    SendJson(resp, "{\"error\":\"timeout\"}");
+                }
+            }
+            else if (path == "/api/npc/faction" && method == "POST")
+            {
+                // 阵营扫描（主线程执行）
+                Plugin.LogInfo("[HTTP] /api/npc/faction 请求");
+                var comp = ChestEditorComponent.Instance;
+                if (comp == null) { SendJson(resp, "{\"error\":\"mod not ready\"}"); return; }
+                var signal = new ManualResetEventSlim(false);
+                comp.WriteQueue.Enqueue(new ChestEditorComponent.WriteRequest { ChestIndex = -14, Signal = signal });
+                if (signal.Wait(30000))
+                    SendJson(resp, "{\"ok\":true}");
+                else
+                    SendJson(resp, "{\"error\":\"timeout\"}");
+            }
+            else if (path == "/api/npc/faction/entities" && method == "GET")
+            {
+                // 读取阵营扫描结果
+                var comp = ChestEditorComponent.Instance;
+                if (comp == null) { SendJson(resp, "{\"error\":\"mod not ready\"}"); return; }
+                var signal = new ManualResetEventSlim(false);
+                comp.WriteQueue.Enqueue(new ChestEditorComponent.WriteRequest { ChestIndex = -15, Signal = signal });
+                if (signal.Wait(10000))
+                    SendJson(resp, comp.FactionEntitiesJson);
+                else
+                    SendJson(resp, "{\"error\":\"timeout\"}");
+            }
+            else if (path == "/api/monster/names" && method == "GET")
+            {
+                SendJson(resp, MonsterNames.GetAllJson());
+            }
+            else if (path == "/api/npc/entity/set" && method == "POST")
+            {
+                // 设置 NPC 实体属性
+                string body;
+                using (var reader = new StreamReader(req.InputStream, req.ContentEncoding))
+                    body = reader.ReadToEnd();
+                int guid = 0;
+                string field = "";
+                float val = 0;
+                foreach (var part in body.Trim('{', '}').Split(','))
+                {
+                    var kv = part.Split(':');
+                    if (kv.Length != 2) continue;
+                    string key = kv[0].Trim().Trim('"');
+                    string v = kv[1].Trim().Trim('"');
+                    if (key == "guid" && int.TryParse(v, out int g)) guid = g;
+                    if (key == "field") field = v;
+                    if (key == "value" && float.TryParse(v, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float fv)) val = fv;
+                }
+                if (guid == 0 || string.IsNullOrEmpty(field)) { SendJson(resp, "{\"error\":\"missing guid/field\"}"); return; }
+                var comp = ChestEditorComponent.Instance;
+                if (comp == null) { SendJson(resp, "{\"error\":\"mod not ready\"}"); return; }
+                var signal = new ManualResetEventSlim(false);
+                var writeReq = new ChestEditorComponent.WriteRequest
+                {
+                    ChestIndex = -13, ExtraIndex = guid,
+                    Count = BitConverter.SingleToInt32Bits(val),
+                    ResultJson = field, Signal = signal
+                };
+                comp.WriteQueue.Enqueue(writeReq);
+                if (signal.Wait(5000))
+                    SendJson(resp, writeReq.ResultJson ?? "{\"ok\":true}");
+                else
+                    SendJson(resp, "{\"error\":\"timeout\"}");
+            }
             else if (path == "/api/dragon/natures" && method == "GET")
             {
                 SendJson(resp, Il2CppHelper.GetDragonNaturesJson());

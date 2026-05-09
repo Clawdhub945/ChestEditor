@@ -31,6 +31,8 @@ public partial class ChestEditorComponent : MonoBehaviour
     internal volatile string ItemsJson = "[]";
     internal volatile string DragonBagJson = "[]";
     internal volatile string DragonEntitiesJson = "[]";
+    internal volatile string NpcEntitiesJson = "[]";
+    internal volatile string FactionEntitiesJson = "{}";
     internal volatile string? LastSummonResult;
 
     // 龙素材物品 ID 列表
@@ -301,6 +303,53 @@ public partial class ChestEditorComponent : MonoBehaviour
                     float val = BitConverter.Int32BitsToSingle(req.Count);
                     string result = Il2CppHelper.SetDragonEntityField(req.ExtraIndex, field, val);
                     req.ResultJson = result == "ok" ? "{\"ok\":true}" : $"{{\"error\":\"{Escape(result)}\"}}";
+                }
+                else if (req.ChestIndex == -10)
+                {
+                    // NPC 探索扫描（主线程执行避免 GC 崩溃）
+                    Plugin.LogInfo("[MainThread] 开始 NPC 探索扫描...");
+                    NpcEntityScanner.ExploreNpcEntities();
+                    Plugin.LogInfo("[MainThread] NPC 探索扫描完成");
+                    req.ResultJson = "{\"ok\":true}";
+                }
+                else if (req.ChestIndex == -11)
+                {
+                    // NPC 战斗实体扫描（主线程执行）
+                    Plugin.LogInfo("[MainThread] 开始 NPC 战斗实体扫描...");
+                    NpcEntityScanner.ScanAllCombatEntities();
+                    Plugin.LogInfo("[MainThread] NPC 战斗实体扫描完成");
+                    req.ResultJson = "{\"ok\":true}";
+                }
+                else if (req.ChestIndex == -12)
+                {
+                    // 读取 NPC 实体属性（主线程执行避免 GC 崩溃）
+                    Plugin.LogInfo("[MainThread] 开始读取 NPC 实体...");
+                    NpcEntitiesJson = NpcEntityScanner.GetNpcEntitiesJson();
+                    Plugin.LogInfo($"[MainThread] NPC 实体读取完成, JSON长度={NpcEntitiesJson.Length}");
+                    req.ResultJson = NpcEntitiesJson;
+                }
+                else if (req.ChestIndex == -13)
+                {
+                    // 设置 NPC 实体属性（主线程执行）
+                    string field = req.ResultJson ?? "";
+                    float val = BitConverter.Int32BitsToSingle(req.Count);
+                    string result = NpcEntityScanner.SetNpcEntityField(req.ExtraIndex, field, val);
+                    req.ResultJson = result == "ok" ? "{\"ok\":true}" : $"{{\"error\":\"{Escape(result)}\"}}";
+                }
+                else if (req.ChestIndex == -14)
+                {
+                    // 阵营扫描（主线程执行）
+                    Plugin.LogInfo("[MainThread] 开始阵营扫描...");
+                    NpcEntityScanner.ScanByFaction();
+                    FactionEntitiesJson = NpcEntityScanner.GetFactionEntitiesJson();
+                    Plugin.LogInfo($"[MainThread] 阵营扫描完成, JSON长度={FactionEntitiesJson.Length}");
+                    req.ResultJson = "{\"ok\":true}";
+                }
+                else if (req.ChestIndex == -15)
+                {
+                    // 读取阵营扫描结果
+                    Plugin.LogInfo("[MainThread] 读取阵营扫描结果...");
+                    req.ResultJson = FactionEntitiesJson;
                 }
                 else if (req.IsAdd)
                 {
