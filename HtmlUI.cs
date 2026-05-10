@@ -1460,17 +1460,29 @@ function renderFieldsTable(fields, ptrHash, prefix, setFn) {
   for (const k of sortedKeys) {
     const f = fields[k];
     const isFloat = f.isFloat;
+    const isString = f.isString;
+    const isPointer = f.isPointer;
     const val = f.value;
-    const typeLabel = isFloat ? 'float' : 'int';
+    const typeName = f.typeName || '';
+    const typeLabel = isPointer ? typeName : (isString ? 'string' : (isFloat ? 'float' : 'int'));
     html += '<tr style=""border-top:1px solid var(--border)"">';
     html += '<td style=""padding:4px 10px;color:var(--text-primary);font-family:monospace"">' + esc(k) + '</td>';
-    html += '<td style=""padding:4px 10px;color:var(--text-muted)"">' + typeLabel + '</td>';
-    html += '<td style=""padding:4px 10px;color:var(--text-primary);font-family:monospace"">' + (isFloat ? val.toFixed(2) : val) + '</td>';
-    html += '<td style=""padding:4px 10px;text-align:center"">';
-    html += '<div style=""display:flex;gap:4px;align-items:center;justify-content:center"">';
-    html += '<input id=""' + prefix + '_' + k + '_' + ptrHash + '"" type=""text"" value=""' + (isFloat ? val.toFixed(2) : val) + '"" style=""width:70px;padding:2px 4px;font-size:11px;background:var(--bg-input);border:1px solid var(--border);border-radius:3px;color:var(--text-primary)"">';
-    html += '<button onclick=""' + setFn.name + '(' + ptrHash + ', \'' + esc(k) + '\')"" style=""padding:2px 6px;font-size:10px;background:var(--accent);color:#fff;border:none;border-radius:3px;cursor:pointer"">OK</button>';
-    html += '</div></td></tr>';
+    html += '<td style=""padding:4px 10px;color:var(--text-muted)"">' + esc(typeLabel) + '</td>';
+    if (isPointer) {
+      html += '<td style=""padding:4px 10px;color:var(--text-muted);font-style:italic"">-</td>';
+      html += '<td style=""padding:4px 10px""></td>';
+    } else {
+      html += '<td style=""padding:4px 10px;color:var(--text-primary);font-family:monospace"">' + (isString ? esc(val || '') : (isFloat ? val.toFixed(2) : val)) + '</td>';
+      html += '<td style=""padding:4px 10px;text-align:center"">';
+      if (!isString) {
+        html += '<div style=""display:flex;gap:4px;align-items:center;justify-content:center"">';
+        html += '<input id=""' + prefix + '_' + k + '_' + ptrHash + '"" type=""text"" value=""' + (isFloat ? val.toFixed(2) : val) + '"" style=""width:70px;padding:2px 4px;font-size:11px;background:var(--bg-input);border:1px solid var(--border);border-radius:3px;color:var(--text-primary)"">';
+        html += '<button onclick=""' + setFn.name + '(' + ptrHash + ', \'' + esc(k) + '\')"" style=""padding:2px 6px;font-size:10px;background:var(--accent);color:#fff;border:none;border-radius:3px;cursor:pointer"">OK</button>';
+        html += '</div>';
+      }
+      html += '</td>';
+    }
+    html += '</tr>';
   }
   html += '</table></div>';
   return html;

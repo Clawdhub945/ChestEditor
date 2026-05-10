@@ -31,6 +31,8 @@ internal static class NpcFinder
     private static readonly Dictionary<string, Dictionary<string, FieldEntry>> _classFieldCache = new();
 
     private static readonly HashSet<string> FloatTypeNames = new() { "System.Single", "float" };
+    private static readonly HashSet<string> StringTypeNames = new() { "System.String", "String", "Il2CppSystem.String" };
+    private static readonly HashSet<string> IntTypeNames = new() { "System.Int32", "int", "System.Int64", "long", "System.Boolean", "bool", "System.Byte", "byte", "System.Int16", "short", "System.UInt32", "System.UInt64", "System.UInt16", "System.SByte", "System.IntPtr" };
 
     internal class NpcInfo
     {
@@ -48,6 +50,8 @@ internal static class NpcFinder
         public int Offset;
         public string TypeName = "";
         public bool IsFloat;
+        public bool IsString;
+        public bool IsPointer;
     }
 
     private static void CacheIl2CppApi()
@@ -154,7 +158,9 @@ internal static class NpcFinder
                     {
                         Offset = offset,
                         TypeName = typeName,
-                        IsFloat = FloatTypeNames.Contains(typeName)
+                        IsFloat = FloatTypeNames.Contains(typeName),
+                        IsString = StringTypeNames.Contains(typeName),
+                        IsPointer = !FloatTypeNames.Contains(typeName) && !StringTypeNames.Contains(typeName) && !IntTypeNames.Contains(typeName)
                     };
                 }
             }
@@ -288,10 +294,22 @@ internal static class NpcFinder
                 first = false;
                 sb.Append($"\"{Escape(kv.Key)}\":{{");
                 sb.Append($"\"isFloat\":{(kv.Value.IsFloat ? "true" : "false")},");
+                sb.Append($"\"isString\":{(kv.Value.IsString ? "true" : "false")},");
+                sb.Append($"\"isPointer\":{(kv.Value.IsPointer ? "true" : "false")},");
+                sb.Append($"\"typeName\":\"{Escape(kv.Value.TypeName)}\",");
                 sb.Append("\"value\":");
                 try
                 {
-                    if (kv.Value.IsFloat)
+                    if (kv.Value.IsPointer)
+                    {
+                        sb.Append("\"object\"");
+                    }
+                    else if (kv.Value.IsString)
+                    {
+                        string? sv = ReadIl2CppString(e.Ptr, kv.Value.Offset);
+                        sb.Append($"\"{Escape(sv ?? "")}\"");
+                    }
+                    else if (kv.Value.IsFloat)
                     {
                         float v = ReadIl2CppFloat(e.Ptr, kv.Value.Offset);
                         sb.Append(v.ToString("G"));
@@ -302,7 +320,7 @@ internal static class NpcFinder
                         sb.Append(v);
                     }
                 }
-                catch { sb.Append("0"); }
+                catch { sb.Append(kv.Value.IsPointer ? "\"object\"" : (kv.Value.IsString ? "\"\"" : "0")); }
                 sb.Append("}");
             }
             sb.Append('}');
@@ -340,4 +358,17 @@ internal static class NpcFinder
     private static unsafe float ReadIl2CppFloat(IntPtr objPtr, int offset) => *(float*)(objPtr + offset);
     private static unsafe void WriteIl2CppInt(IntPtr objPtr, int offset, int value) => *(int*)(objPtr + offset) = value;
     private static unsafe void WriteIl2CppFloat(IntPtr objPtr, int offset, float value) => *(float*)(objPtr + offset) = value;
+
+    private static unsafe string? ReadIl2CppString(IntPtr objPtr, int offset)
+    {
+        try
+        {
+            IntPtr strPtr = *(IntPtr*)(objPtr + offset);
+            if (strPtr == IntPtr.Zero) return null;
+            // IL2CPP string: chars start at offset 0x14 (20 bytes) from the string object pointer
+            IntPtr charsPtr = strPtr + 0x14;
+            return Marshal.PtrToStringUni(charsPtr);
+        }
+        catch { return null; }
+    }
 }

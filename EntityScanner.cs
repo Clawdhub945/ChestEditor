@@ -29,6 +29,8 @@ internal static class EntityScanner
 
     // 浮点类型名集合
     private static readonly HashSet<string> FloatTypeNames = new() { "System.Single", "float" };
+    private static readonly HashSet<string> StringTypeNames = new() { "System.String", "String", "Il2CppSystem.String" };
+    private static readonly HashSet<string> IntTypeNames = new() { "System.Int32", "int", "System.Int64", "long", "System.Boolean", "bool", "System.Byte", "byte", "System.Int16", "short", "System.UInt32", "System.UInt64", "System.UInt16", "System.SByte", "System.IntPtr" };
 
     internal class EntityInfo
     {
@@ -46,6 +48,8 @@ internal static class EntityScanner
         public int Offset;
         public string TypeName = "";
         public bool IsFloat;
+        public bool IsString;
+        public bool IsPointer;
     }
 
     private static void CacheIl2CppApi()
@@ -162,7 +166,9 @@ internal static class EntityScanner
                     {
                         Offset = offset,
                         TypeName = typeName,
-                        IsFloat = FloatTypeNames.Contains(typeName)
+                        IsFloat = FloatTypeNames.Contains(typeName),
+                        IsString = StringTypeNames.Contains(typeName),
+                        IsPointer = !FloatTypeNames.Contains(typeName) && !StringTypeNames.Contains(typeName) && !IntTypeNames.Contains(typeName)
                     };
                 }
             }
@@ -307,15 +313,25 @@ internal static class EntityScanner
                 first = false;
                 sb.Append($"\"{Escape(kv.Key)}\":{{");
                 sb.Append($"\"isFloat\":{(kv.Value.IsFloat ? "true" : "false")},");
+                sb.Append($"\"isString\":{(kv.Value.IsString ? "true" : "false")},");
+                sb.Append($"\"isPointer\":{(kv.Value.IsPointer ? "true" : "false")},");
+                sb.Append($"\"typeName\":\"{Escape(kv.Value.TypeName)}\",");
                 sb.Append("\"value\":");
                 try
                 {
-                    if (kv.Value.IsFloat)
+                    if (kv.Value.IsPointer)
+                        sb.Append("\"object\"");
+                    else if (kv.Value.IsString)
+                    {
+                        string? sv = ReadIl2CppString(e.Ptr, kv.Value.Offset);
+                        sb.Append($"\"{Escape(sv ?? "")}\"");
+                    }
+                    else if (kv.Value.IsFloat)
                         sb.Append(ReadIl2CppFloat(e.Ptr, kv.Value.Offset).ToString("G"));
                     else
                         sb.Append(ReadIl2CppInt(e.Ptr, kv.Value.Offset));
                 }
-                catch { sb.Append("0"); }
+                catch { sb.Append(kv.Value.IsPointer ? "\"object\"" : (kv.Value.IsString ? "\"\"" : "0")); }
                 sb.Append("}");
             }
             sb.Append('}');
@@ -370,5 +386,17 @@ internal static class EntityScanner
     private static unsafe void WriteIl2CppFloat(IntPtr objPtr, int offset, float value)
     {
         *(float*)(objPtr + offset) = value;
+    }
+
+    private static unsafe string? ReadIl2CppString(IntPtr objPtr, int offset)
+    {
+        try
+        {
+            IntPtr strPtr = *(IntPtr*)(objPtr + offset);
+            if (strPtr == IntPtr.Zero) return null;
+            IntPtr charsPtr = strPtr + 0x14;
+            return Marshal.PtrToStringUni(charsPtr);
+        }
+        catch { return null; }
     }
 }
