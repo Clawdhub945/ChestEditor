@@ -1293,7 +1293,7 @@ function renderFactionPanel() {
   let html = '';
   html += '<div style=""padding:20px;height:100%;display:flex;flex-direction:column;overflow:hidden"">';
   html += '<h2 style=""color:var(--accent-light);margin-bottom:16px;font-size:18px"">&#x2694; 阵营查找</h2>';
-  html += '<p style=""color:var(--text-secondary);margin-bottom:12px;font-size:13px"">按阵营扫描所有战斗实体，找到阵营字段后可按阵营分组查看。</p>';
+  html += '<p style=""color:var(--text-secondary);margin-bottom:12px;font-size:13px"">通过 owner_facility_guid 关联建筑类型判断阵营。FacilityBarracks=玩家(1), FacilityEnemyBarracks/FacilityBigTree=敌方(2), 未匹配=未知(-1)。</p>';
 
   html += '<div style=""display:flex;gap:12px;margin-bottom:20px;align-items:center"">';
   html += '<button id=""factionScanBtn"" onclick=""factionScan()"" style=""padding:10px 20px;background:var(--accent);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;font-size:14px;font-weight:500"">开始阵营扫描</button>';
@@ -1331,12 +1331,18 @@ function renderFactionPanel() {
     for (const fId of sortedFactions) {
       const ents = groups[fId];
       const isPlayer = fId === 1;
-      const headerColor = isPlayer ? 'var(--success)' : 'var(--accent-light)';
-      const badge = isPlayer ? ' <span style=""font-size:10px;padding:1px 6px;border-radius:8px;background:var(--success-dark);color:#fff;margin-left:6px"">玩家</span>' : '';
+      const isEnemy = fId === 2;
+      const isUnknown = fId === -1;
+      const headerColor = isPlayer ? 'var(--success)' : isEnemy ? 'var(--danger, #e74c3c)' : 'var(--text-muted)';
+      let badge = '';
+      if (isPlayer) badge = ' <span style=""font-size:10px;padding:1px 6px;border-radius:8px;background:var(--success-dark);color:#fff;margin-left:6px"">玩家</span>';
+      else if (isEnemy) badge = ' <span style=""font-size:10px;padding:1px 6px;border-radius:8px;background:var(--danger, #e74c3c);color:#fff;margin-left:6px"">敌方</span>';
+      else if (isUnknown) badge = ' <span style=""font-size:10px;padding:1px 6px;border-radius:8px;background:var(--text-muted);color:#fff;margin-left:6px"">未知</span>';
+      const factionLabel = isUnknown ? '未知来源' : '阵营 ' + fId;
 
       html += '<details open style=""margin-bottom:12px"">';
       html += '<summary style=""cursor:pointer;padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-weight:600;color:' + headerColor + ';font-size:14px;display:flex;align-items:center"">';
-      html += '阵营 ' + fId + badge + ' <span style=""margin-left:auto;font-size:12px;color:var(--text-muted);font-weight:400"">' + ents.length + ' 个</span>';
+      html += factionLabel + badge + ' <span style=""margin-left:auto;font-size:12px;color:var(--text-muted);font-weight:400"">' + ents.length + ' 个</span>';
       html += '</summary>';
 
       html += '<div style=""display:flex;flex-direction:column;gap:8px;padding:8px 0"">';

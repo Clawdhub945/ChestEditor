@@ -615,38 +615,97 @@ internal static class NpcEntityScanner
 
     // ===== 阵营扫描 =====
 
-    private static readonly string[] FactionFieldCandidates = {
-        "camp", "faction", "team", "group", "group_id", "side", "party", "camp_id",
-        "campId", "factionId", "teamId", "groupId", "sideId", "partyId",
-        "owner_camp", "owner_faction", "owner_team", "belong_camp", "belong_faction",
-        "ownerCamp", "ownerFaction", "belongCamp", "belongFaction"
-    };
-
     private static List<Dictionary<string, object>> _factionEntities = new();
     private static string _factionFieldName = "";
     private static List<string> _allDiscoveredFields = new();
 
     /// <summary>
-    /// 按阵营扫描所有战斗实体（不限类名，通过 hp_total 字段识别）
+    /// 按阵营扫描所有战斗实体（通过 owner_facility_guid 关联建筑组件类型判断阵营）
     /// </summary>
     internal static void ScanByFaction()
     {
         _factionEntities.Clear();
         _allDiscoveredFields.Clear();
-        _factionFieldName = "";
+        _factionFieldName = "owner_facility_guid";
 
         try
         {
             CacheIl2CppApi();
-            Plugin.LogInfo("[ScanByFaction] 开始扫描所有战斗实体...");
+            Plugin.LogInfo("[ScanByFaction] 开始扫描...");
 
             var allGOs = Resources.FindObjectsOfTypeAll<GameObject>();
-            Plugin.LogInfo($"[ScanByFaction] 共 {allGOs.Length} 个 GO");
 
             // 临时缓存：每个组件类的字段偏移
             var classFieldCache = new Dictionary<string, Dictionary<string, (int offset, string typeName)>>();
-            int found = 0;
 
+            // ===== 第一遍：扫描所有建筑 GO，建立 facility guid -> 阵营 映射 =====
+            // FacilityBarracks = 玩家建筑 (阵营1)
+            // FacilityEnemyBarracks = 敌方建筑 (阵营2)
+            // FacilityBigTree = 怪物巢穴 (阵营2，中立怪物)
+            var facilityFactionMap = new Dictionary<int, int>(); // facility guid -> faction
+
+            foreach (var go in allGOs)
+            {
+                try
+                {
+                    var components = go.GetComponents<Component>();
+                    foreach (var comp in components)
+                    {
+                        if (comp == null) continue;
+                        string cn = comp.GetIl2CppType().Name;
+
+                        int faction = -1;
+                        if (cn == "FacilityBarracks") faction = 1;
+                        else if (cn == "FacilityEnemyBarracks") faction = 2;
+                        else if (cn == "FacilityBigTree") faction = 2; // 树巢怪物 = 敌方
+                        else continue;
+
+                        IntPtr compPtr = GetIl2CppPtr(comp);
+                        if (compPtr == IntPtr.Zero) continue;
+
+                        // 获取字段缓存
+                        if (!classFieldCache.TryGetValue(cn, out var fieldMap))
+                        {
+                            IntPtr compClass = (IntPtr)_il2cpp_get_class!.Invoke(null, new object[] { compPtr })!;
+                            fieldMap = new Dictionary<string, (int, string)>();
+                            var seen = new HashSet<int>();
+                            IntPtr cls = compClass;
+                            int depth = 0;
+                            while (cls != IntPtr.Zero && depth < 10)
+                            {
+                                int a = cls.GetHashCode();
+                                if (seen.Contains(a)) break;
+                                seen.Add(a);
+                                foreach (var (n, o, t) in GetIl2CppFields(cls))
+                                {
+                                    if (o > 0 && !fieldMap.ContainsKey(n)) fieldMap[n] = (o, t);
+                                }
+                                try { cls = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(cls); } catch { break; }
+                                depth++;
+                            }
+                            classFieldCache[cn] = fieldMap;
+                        }
+
+                        // 读取建筑 guid
+                        if (fieldMap.ContainsKey("guid"))
+                        {
+                            int facGuid = 0;
+                            try { facGuid = ReadIl2CppInt(compPtr, fieldMap["guid"].Item1); } catch { }
+                            if (facGuid > 0 && !facilityFactionMap.ContainsKey(facGuid))
+                            {
+                                facilityFactionMap[facGuid] = faction;
+                            }
+                        }
+                        break; // 每个 GO 只取第一个建筑组件
+                    }
+                }
+                catch { }
+            }
+
+            Plugin.LogInfo($"[ScanByFaction] 建筑扫描完成: {facilityFactionMap.Count} 个建筑映射");
+
+            // ===== 第二遍：扫描所有 Monster 实体，通过 owner_facility_guid 查找阵营 =====
+            int found = 0;
             foreach (var go in allGOs)
             {
                 try
@@ -669,7 +728,7 @@ internal static class NpcEntityScanner
 
                         string className = comp.GetIl2CppType().Name;
 
-                        // 获取该类的字段缓存
+                        // 获取字段缓存
                         if (!classFieldCache.TryGetValue(className, out var fieldMap))
                         {
                             fieldMap = new Dictionary<string, (int, string)>();
@@ -681,7 +740,6 @@ internal static class NpcEntityScanner
                                 int clsAddr = cls.GetHashCode();
                                 if (seen.Contains(clsAddr)) break;
                                 seen.Add(clsAddr);
-
                                 var fields = GetIl2CppFields(cls);
                                 foreach (var (name, offset, typeName) in fields)
                                 {
@@ -694,38 +752,22 @@ internal static class NpcEntityScanner
                             classFieldCache[className] = fieldMap;
                         }
 
-                        // 检查是否有 hp_total 字段（BattleUnit 特征）
+                        // 检查是否有 hp_total 字段（BattleUnit 特征）和 owner_facility_guid
                         if (!fieldMap.ContainsKey("hp_total")) continue;
                         if (!fieldMap.ContainsKey("guid")) continue;
+                        // 排除非 Monster 类（如 Npc 模板也有 hp_total）
+                        if (!className.Contains("Monster") || className.Contains("Npc")) continue;
 
-                        // 读取 guid 判断是否有效实体
+                        // 读取 guid
                         int guid = 0;
                         try { guid = ReadIl2CppInt(compPtr, fieldMap["guid"].offset); } catch { }
                         if (guid <= 0) continue;
 
-                        // 首次发现时，记录所有字段名并查找阵营字段
+                        // 首次发现战斗实体时，记录所有字段名
                         if (_allDiscoveredFields.Count == 0)
                         {
                             _allDiscoveredFields.AddRange(fieldMap.Keys);
                             _allDiscoveredFields.Sort();
-                            Plugin.LogInfo($"[ScanByFaction] 类 {className} 共 {fieldMap.Count} 个字段:");
-                            foreach (var fn in _allDiscoveredFields)
-                                Plugin.LogInfo($"[ScanByFaction]   {fn} ({fieldMap[fn].typeName}) @ +{fieldMap[fn].offset}");
-
-                            // 查找阵营字段
-                            foreach (var candidate in FactionFieldCandidates)
-                            {
-                                if (fieldMap.ContainsKey(candidate))
-                                {
-                                    _factionFieldName = candidate;
-                                    Plugin.LogInfo($"[ScanByFaction] 找到阵营字段: {candidate}");
-                                    break;
-                                }
-                            }
-                            if (string.IsNullOrEmpty(_factionFieldName))
-                            {
-                                Plugin.LogInfo("[ScanByFaction] 未找到已知阵营字段，请查看日志中的完整字段列表确认");
-                            }
                         }
 
                         // 读取实体数据
@@ -749,15 +791,17 @@ internal static class NpcEntityScanner
                             catch { }
                         }
 
-                        // 读取阵营值
-                        if (!string.IsNullOrEmpty(_factionFieldName) && fieldMap.TryGetValue(_factionFieldName, out var ff))
+                        // 通过 owner_facility_guid 查找阵营
+                        int faction = -1;
+                        if (fieldMap.ContainsKey("owner_facility_guid"))
                         {
-                            try { dict["faction"] = ReadIl2CppInt(compPtr, ff.offset); } catch { dict["faction"] = 0; }
+                            int ownerFacGuid = 0;
+                            try { ownerFacGuid = ReadIl2CppInt(compPtr, fieldMap["owner_facility_guid"].Item1); } catch { }
+                            dict["owner_facility_guid"] = ownerFacGuid;
+                            if (ownerFacGuid > 0 && facilityFactionMap.TryGetValue(ownerFacGuid, out int facFaction))
+                                faction = facFaction;
                         }
-                        else
-                        {
-                            dict["faction"] = -1;
-                        }
+                        dict["faction"] = faction;
 
                         _factionEntities.Add(dict);
                         found++;
@@ -767,9 +811,8 @@ internal static class NpcEntityScanner
                 catch { }
             }
 
-            Plugin.LogInfo($"[ScanByFaction] 完成, 找到 {found} 个战斗实体, 阵营字段: {_factionFieldName ?? "无"}");
+            Plugin.LogInfo($"[ScanByFaction] 完成: {found} 个实体");
 
-            // 按阵营分组统计
             var groups = new Dictionary<int, int>();
             foreach (var e in _factionEntities)
             {
@@ -778,7 +821,8 @@ internal static class NpcEntityScanner
                 groups[f] = c + 1;
             }
             foreach (var kv in groups)
-                Plugin.LogInfo($"[ScanByFaction]   阵营 {kv.Key}: {kv.Value} 个实体");
+                Plugin.LogInfo($"[ScanByFaction] 阵营{kv.Key}: {kv.Value}个");
+
         }
         catch (Exception ex) { Plugin.LogError($"[ScanByFaction] 异常: {ex.Message}\n{ex.StackTrace}"); }
     }
