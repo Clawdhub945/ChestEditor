@@ -33,6 +33,8 @@ public partial class ChestEditorComponent : MonoBehaviour
     internal volatile string DragonEntitiesJson = "[]";
     internal volatile string NpcEntitiesJson = "[]";
     internal volatile string FactionEntitiesJson = "{}";
+    internal volatile string EntityScanJson = "[]";
+    internal volatile string NpcFinderJson = "[]";
     internal volatile string? LastSummonResult;
 
     // 龙素材物品 ID 列表
@@ -350,6 +352,51 @@ public partial class ChestEditorComponent : MonoBehaviour
                     // 读取阵营扫描结果
                     Plugin.LogInfo("[MainThread] 读取阵营扫描结果...");
                     req.ResultJson = FactionEntitiesJson;
+                }
+                else if (req.ChestIndex == -16)
+                {
+                    // 实体扫描（主线程执行）
+                    Plugin.LogInfo("[MainThread] 开始实体扫描...");
+                    EntityScanner.ScanEntities();
+                    EntityScanJson = EntityScanner.GetEntitiesJson();
+                    Plugin.LogInfo($"[MainThread] 实体扫描完成, JSON长度={EntityScanJson.Length}");
+                    req.ResultJson = "{\"ok\":true}";
+                }
+                else if (req.ChestIndex == -17)
+                {
+                    // 读取实体扫描结果
+                    Plugin.LogInfo("[MainThread] 读取实体扫描结果...");
+                    req.ResultJson = EntityScanJson;
+                }
+                else if (req.ChestIndex == -18)
+                {
+                    // 设置实体属性（主线程执行）
+                    string field = req.ResultJson ?? "";
+                    float val = BitConverter.Int32BitsToSingle(req.Count);
+                    string result = EntityScanner.SetEntityField(req.ExtraIndex, field, val);
+                    req.ResultJson = result == "ok" ? "{\"ok\":true}" : $"{{\"error\":\"{Escape(result)}\"}}";
+                }
+                else if (req.ChestIndex == -19)
+                {
+                    // NPC 扫描（主线程执行）
+                    Plugin.LogInfo("[MainThread] 开始 NPC 查找...");
+                    NpcFinder.ScanNpcs();
+                    NpcFinderJson = NpcFinder.GetNpcsJson();
+                    Plugin.LogInfo($"[MainThread] NPC 查找完成, JSON长度={NpcFinderJson.Length}");
+                    req.ResultJson = "{\"ok\":true}";
+                }
+                else if (req.ChestIndex == -20)
+                {
+                    // 读取 NPC 查找结果
+                    req.ResultJson = NpcFinderJson;
+                }
+                else if (req.ChestIndex == -21)
+                {
+                    // 设置 NPC 字段（主线程执行）
+                    string field = req.ResultJson ?? "";
+                    float val = BitConverter.Int32BitsToSingle(req.Count);
+                    string result = NpcFinder.SetNpcField(req.ExtraIndex, field, val);
+                    req.ResultJson = result == "ok" ? "{\"ok\":true}" : $"{{\"error\":\"{Escape(result)}\"}}";
                 }
                 else if (req.IsAdd)
                 {

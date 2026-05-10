@@ -879,6 +879,8 @@ let npcView = ''; // 'explore' | 'entities' | ''
 let npcScanResult = '';
 let npcEntities = [];
 let factionEntities = [];
+let entityScanData = [];
+let npcFinderData = [];
 let factionFieldName = '';
 let factionAllFields = [];
 let filters = [];
@@ -1166,6 +1168,22 @@ function renderSidebar() {
   html += '<div class=""ci-count"">' + factionEntities.length + ' 个实体</div>';
   html += '</div></div>';
 
+  // 实体扫描
+  html += '<div class=""chest-item' + (npcView === 'entityScan' ? ' active' : '') + '"" onclick=""selectNpcView(\'entityScan\')"">';
+  html += '<div class=""ci-icon"" style=""font-size:20px;display:flex;align-items:center;justify-content:center"">&#x1F50E;</div>';
+  html += '<div class=""ci-info"">';
+  html += '<div class=""ci-name"">实体扫描</div>';
+  html += '<div class=""ci-count"">' + entityScanData.length + ' 个实体</div>';
+  html += '</div></div>';
+
+  // 找NPC
+  html += '<div class=""chest-item' + (npcView === 'npcFinder' ? ' active' : '') + '"" onclick=""selectNpcView(\'npcFinder\')"">';
+  html += '<div class=""ci-icon"" style=""font-size:20px;display:flex;align-items:center;justify-content:center"">&#x1F464;</div>';
+  html += '<div class=""ci-info"">';
+  html += '<div class=""ci-name"">找NPC</div>';
+  html += '<div class=""ci-count"">' + npcFinderData.length + ' 个</div>';
+  html += '</div></div>';
+
   html += '</div></div>';
 
   el.innerHTML = html;
@@ -1368,6 +1386,271 @@ function renderFactionPanel() {
         html += '<span>ATK: ' + Math.round(atkMin) + '-' + Math.round(atkMax) + '</span>';
         html += '<span>Speed: ' + speed.toFixed(1) + '</span>';
         html += '</div></div>';
+      }
+      html += '</div></details>';
+    }
+    html += '</div>';
+  }
+
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+// ===== 实体扫描 =====
+async function entityScan() {
+  const btn = document.getElementById('entityScanBtn');
+  if (btn) { btn.textContent = '扫描中...'; btn.disabled = true; }
+  try {
+    await fetch('/api/entity/scan', {method:'POST'});
+    await fetchEntityScanData();
+    toast('实体扫描完成 (' + entityScanData.length + ' 个实体)');
+    document.getElementById('status').textContent = '实体扫描完成';
+  } catch(e) {
+    toast('扫描失败: ' + e.message, true);
+    document.getElementById('status').textContent = '实体扫描失败';
+  } finally {
+    if (btn) { btn.textContent = '开始扫描'; btn.disabled = false; }
+    renderContent();
+  }
+}
+
+async function fetchEntityScanData() {
+  try {
+    const r = await fetch('/api/entity/entities');
+    const d = await r.json();
+    if (Array.isArray(d)) {
+      entityScanData = d;
+    }
+  } catch(e) {}
+}
+
+async function setEntityField(guid, field) {
+  const input = document.getElementById('entity_' + field + '_' + guid);
+  const val = parseFloat(input.value) || 0;
+  try {
+    const r = await fetch('/api/entity/set', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({guid, field, value: val})
+    });
+    const d = await r.json();
+    if (d.error) { toast(d.error, true); return; }
+    toast('设置成功');
+    await fetchEntityScanData();
+    renderContent();
+  } catch(e) { toast('设置失败', true); }
+}
+
+function classifyEntity(className) {
+  if (className.startsWith('Stuff')) return 'drop';
+  if (className.startsWith('WildAnimal')) return 'animal';
+  if (className.startsWith('Facility')) return 'building';
+  if (className.startsWith('Monster')) return 'monster';
+  return 'other';
+}
+
+function renderEntityScanPanel() {
+  const el = document.getElementById('content');
+  let html = '';
+  html += '<div style=""padding:20px;height:100%;display:flex;flex-direction:column;overflow:hidden"">';
+  html += '<h2 style=""color:var(--accent-light);margin-bottom:16px;font-size:18px"">&#x1F50E; 实体扫描</h2>';
+
+  html += '<div style=""display:flex;gap:12px;margin-bottom:20px;align-items:center"">';
+  html += '<button id=""entityScanBtn"" onclick=""entityScan()"" style=""padding:10px 20px;background:var(--accent);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;font-size:14px;font-weight:500"">开始扫描</button>';
+  html += '<span style=""color:var(--text-muted);font-size:13px"">' + entityScanData.length + ' 个实体</span>';
+  html += '</div>';
+
+  if (entityScanData.length === 0) {
+    html += '<div style=""background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:40px;text-align:center"">';
+    html += '<div style=""font-size:48px;margin-bottom:16px"">&#x1F50E;</div>';
+    html += '<div style=""color:var(--text-secondary);font-size:16px;margin-bottom:8px"">暂无数据</div>';
+    html += '<div style=""color:var(--text-muted);font-size:13px"">点击上方按钮扫描实体</div>';
+    html += '</div>';
+  } else {
+    // 按类别分组
+    const groups = {drop:[], animal:[], building:[], monster:[], other:[]};
+    for (const e of entityScanData) {
+      const cat = classifyEntity(e.className || '');
+      groups[cat].push(e);
+    }
+    const cats = [
+      {key:'monster', label:'怪物', icon:'&#x1F47E;', color:'var(--danger, #e74c3c)'},
+      {key:'building', label:'建筑物', icon:'&#x1F3D7;', color:'var(--success)'},
+      {key:'drop', label:'掉落物', icon:'&#x1F4E6;', color:'var(--accent)'},
+      {key:'animal', label:'野兽', icon:'&#x1F43E;', color:'var(--warning, #f39c12)'},
+      {key:'other', label:'其他', icon:'&#x2753;', color:'var(--text-muted)'}
+    ];
+
+    html += '<div style=""flex:1;overflow-y:auto;padding-right:8px"">';
+    for (const cat of cats) {
+      const items = groups[cat.key];
+      if (items.length === 0) continue;
+      html += '<details open style=""margin-bottom:12px"">';
+      html += '<summary style=""cursor:pointer;padding:10px 14px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-weight:600;font-size:14px;display:flex;align-items:center;gap:8px"">';
+      html += '<span>' + cat.icon + '</span>';
+      html += '<span style=""color:' + cat.color + '"">' + cat.label + '</span>';
+      html += '<span style=""margin-left:auto;font-size:12px;color:var(--text-muted);font-weight:400"">' + items.length + ' 个</span>';
+      html += '</summary>';
+      html += '<div style=""display:flex;flex-direction:column;gap:6px;padding:8px 0"">';
+      for (const e of items) {
+        const goName = e.goName || 'unknown';
+        const className = e.className || '';
+        const stuffId = e.stuffId || 0;
+        const guid = e.guid || 0;
+        const fields = e.fields || {};
+        const entityName = e.name || '';
+        const displayName = entityName || goName;
+        const hp = fields.hp || 0;
+        const hpTotal = fields.hp_total || 0;
+
+        html += '<details style=""margin-bottom:4px"">';
+        html += '<summary style=""cursor:pointer;padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;display:flex;align-items:center;gap:8px"">';
+        html += '<span style=""font-weight:600;color:var(--text-primary)"">' + esc(displayName) + '</span>';
+        html += '<span style=""font-size:10px;color:var(--accent-light);padding:1px 6px;border-radius:8px;background:var(--accent-bg)"">' + esc(className) + '</span>';
+        html += '<span style=""font-size:11px;color:var(--text-muted);margin-left:auto"">GUID:' + guid + ' ID:' + stuffId + '</span>';
+        if (hpTotal > 0) html += '<span style=""font-size:11px;color:var(--text-muted)"">HP:' + Math.round(hp) + '/' + Math.round(hpTotal) + '</span>';
+        html += '</summary>';
+        html += '<div style=""padding:8px 0"">';
+        html += '<div style=""background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden"">';
+        html += '<table style=""width:100%;border-collapse:collapse;font-size:12px"">';
+        html += '<tr style=""background:var(--bg-input)""><th style=""text-align:left;padding:6px 10px;color:var(--text-muted);font-weight:500;width:30%"">字段</th><th style=""text-align:left;padding:6px 10px;color:var(--text-muted);font-weight:500;width:20%"">类型</th><th style=""text-align:left;padding:6px 10px;color:var(--text-muted);font-weight:500;width:30%"">值</th><th style=""padding:6px 10px;width:20%""></th></tr>';
+        const sortedKeys = Object.keys(fields).sort();
+        for (const k of sortedKeys) {
+          const f = fields[k];
+          const isFloat = f.IsFloat;
+          const val = isFloat ? f.FloatVal : f.IntVal;
+          const typeLabel = isFloat ? 'float' : 'int';
+          html += '<tr style=""border-top:1px solid var(--border)"">';
+          html += '<td style=""padding:4px 10px;color:var(--text-primary);font-family:monospace"">' + esc(k) + '</td>';
+          html += '<td style=""padding:4px 10px;color:var(--text-muted)"">' + typeLabel + '</td>';
+          html += '<td style=""padding:4px 10px;color:var(--text-primary);font-family:monospace"">' + (isFloat ? val.toFixed(2) : val) + '</td>';
+          html += '<td style=""padding:4px 10px;text-align:center"">';
+          html += '<div style=""display:flex;gap:4px;align-items:center;justify-content:center"">';
+          html += '<input id=""entity_' + k + '_' + guid + '"" type=""text"" value=""' + (isFloat ? val.toFixed(2) : val) + '"" style=""width:70px;padding:2px 4px;font-size:11px;background:var(--bg-input);border:1px solid var(--border);border-radius:3px;color:var(--text-primary)"">';
+          html += '<button onclick=""setEntityField(' + guid + ', \'' + esc(k) + '\')"" style=""padding:2px 6px;font-size:10px;background:var(--accent);color:#fff;border:none;border-radius:3px;cursor:pointer"">OK</button>';
+          html += '</div></td></tr>';
+        }
+        html += '</table></div></div></details>';
+      }
+      html += '</div></details>';
+    }
+    html += '</div>';
+  }
+
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+// ===== 找NPC =====
+async function npcFinderScan() {
+  const btn = document.getElementById('npcFinderScanBtn');
+  if (btn) { btn.textContent = '扫描中...'; btn.disabled = true; }
+  try {
+    await fetch('/api/npcfinder/scan', {method:'POST'});
+    await fetchNpcFinderData();
+    toast('NPC 查找完成 (' + npcFinderData.length + ' 个)');
+  } catch(e) {
+    toast('扫描失败: ' + e.message, true);
+  } finally {
+    if (btn) { btn.textContent = '开始查找'; btn.disabled = false; }
+    renderContent();
+  }
+}
+
+async function fetchNpcFinderData() {
+  try {
+    const r = await fetch('/api/npcfinder/npcs');
+    const d = await r.json();
+    if (Array.isArray(d)) npcFinderData = d;
+  } catch(e) {}
+}
+
+async function setNpcFinderField(ptrHash, field) {
+  const input = document.getElementById('npcfinder_' + field + '_' + ptrHash);
+  const val = parseFloat(input.value) || 0;
+  try {
+    const r = await fetch('/api/npcfinder/set', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ptrHash, field, value: val})
+    });
+    const d = await r.json();
+    if (d.error) { toast(d.error, true); return; }
+    toast('设置成功');
+    await fetchNpcFinderData();
+    renderContent();
+  } catch(e) { toast('设置失败', true); }
+}
+
+function renderNpcFinderPanel() {
+  const el = document.getElementById('content');
+  let html = '';
+  html += '<div style=""padding:20px;height:100%;display:flex;flex-direction:column;overflow:hidden"">';
+  html += '<h2 style=""color:var(--accent-light);margin-bottom:16px;font-size:18px"">&#x1F464; 找NPC</h2>';
+
+  html += '<div style=""display:flex;gap:12px;margin-bottom:20px;align-items:center"">';
+  html += '<button id=""npcFinderScanBtn"" onclick=""npcFinderScan()"" style=""padding:10px 20px;background:var(--accent);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;font-size:14px;font-weight:500"">开始查找</button>';
+  html += '<span style=""color:var(--text-muted);font-size:13px"">' + npcFinderData.length + ' 个 NPC</span>';
+  html += '</div>';
+
+  if (npcFinderData.length === 0) {
+    html += '<div style=""background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:40px;text-align:center"">';
+    html += '<div style=""font-size:48px;margin-bottom:16px"">&#x1F464;</div>';
+    html += '<div style=""color:var(--text-secondary);font-size:16px;margin-bottom:8px"">暂无数据</div>';
+    html += '<div style=""color:var(--text-muted);font-size:13px"">点击上方按钮查找 NPC 实体</div>';
+    html += '</div>';
+  } else {
+    // 按组件类名分组
+    const groups = {};
+    for (const e of npcFinderData) {
+      const cn = e.className || 'unknown';
+      if (!groups[cn]) groups[cn] = [];
+      groups[cn].push(e);
+    }
+    const sortedClasses = Object.keys(groups).sort();
+
+    html += '<div style=""flex:1;overflow-y:auto;padding-right:8px"">';
+    for (const cn of sortedClasses) {
+      const items = groups[cn];
+      html += '<details style=""margin-bottom:12px"">';
+      html += '<summary style=""cursor:pointer;padding:10px 14px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-weight:600;font-size:14px;display:flex;align-items:center;gap:8px"">';
+      html += '<span style=""color:var(--accent-light)"">' + esc(cn) + '</span>';
+      html += '<span style=""margin-left:auto;font-size:12px;color:var(--text-muted);font-weight:400"">' + items.length + ' 个</span>';
+      html += '</summary>';
+      html += '<div style=""display:flex;flex-direction:column;gap:6px;padding:8px 0"">';
+      for (const e of items) {
+        const goName = e.goName || 'unknown';
+        const guid = e.guid || 0;
+        const stuffId = e.stuffId || 0;
+        const ptrHash = e.ptrHash || 0;
+        const fields = e.fields || {};
+
+        html += '<details style=""margin-bottom:4px"">';
+        html += '<summary style=""cursor:pointer;padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;display:flex;align-items:center;gap:8px"">';
+        html += '<span style=""font-weight:600;color:var(--text-primary)"">' + esc(goName) + '</span>';
+        html += '<span style=""font-size:11px;color:var(--text-muted);margin-left:auto"">GUID:' + guid + ' stuffId:' + stuffId + '</span>';
+        html += '</summary>';
+        html += '<div style=""padding:8px 0"">';
+        html += '<div style=""background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden"">';
+        html += '<table style=""width:100%;border-collapse:collapse;font-size:12px"">';
+        html += '<tr style=""background:var(--bg-input)""><th style=""text-align:left;padding:6px 10px;color:var(--text-muted);font-weight:500;width:30%"">字段</th><th style=""text-align:left;padding:6px 10px;color:var(--text-muted);font-weight:500;width:20%"">类型</th><th style=""text-align:left;padding:6px 10px;color:var(--text-muted);font-weight:500;width:30%"">值</th><th style=""padding:6px 10px;width:20%""></th></tr>';
+        const sortedKeys = Object.keys(fields).sort();
+        for (const k of sortedKeys) {
+          const f = fields[k];
+          const isFloat = f.IsFloat;
+          const val = isFloat ? f.FloatVal : f.IntVal;
+          const typeLabel = isFloat ? 'float' : 'int';
+          html += '<tr style=""border-top:1px solid var(--border)"">';
+          html += '<td style=""padding:4px 10px;color:var(--text-primary);font-family:monospace"">' + esc(k) + '</td>';
+          html += '<td style=""padding:4px 10px;color:var(--text-muted)"">' + typeLabel + '</td>';
+          html += '<td style=""padding:4px 10px;color:var(--text-primary);font-family:monospace"">' + (isFloat ? val.toFixed(2) : val) + '</td>';
+          html += '<td style=""padding:4px 10px;text-align:center"">';
+          html += '<div style=""display:flex;gap:4px;align-items:center;justify-content:center"">';
+          html += '<input id=""npcfinder_' + k + '_' + ptrHash + '"" type=""text"" value=""' + (isFloat ? val.toFixed(2) : val) + '"" style=""width:70px;padding:2px 4px;font-size:11px;background:var(--bg-input);border:1px solid var(--border);border-radius:3px;color:var(--text-primary)"">';
+          html += '<button onclick=""setNpcFinderField(' + ptrHash + ', \'' + esc(k) + '\')"" style=""padding:2px 6px;font-size:10px;background:var(--accent);color:#fff;border:none;border-radius:3px;cursor:pointer"">OK</button>';
+          html += '</div></td></tr>';
+        }
+        html += '</table></div></div></details>';
       }
       html += '</div></details>';
     }
@@ -1631,6 +1914,14 @@ function renderContent() {
   }
   if (npcView === 'faction') {
     renderFactionPanel();
+    return;
+  }
+  if (npcView === 'entityScan') {
+    renderEntityScanPanel();
+    return;
+  }
+  if (npcView === 'npcFinder') {
+    renderNpcFinderPanel();
     return;
   }
 
@@ -2273,6 +2564,8 @@ async function init() {
   await fetchFilters();
   await fetchMonsterNames();
   await fetchFactionEntities();
+  await fetchEntityScanData();
+  await fetchNpcFinderData();
   await refreshChests();
   renderSidebar();
   renderContent();
