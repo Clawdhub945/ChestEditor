@@ -35,6 +35,8 @@ public partial class ChestEditorComponent : MonoBehaviour
     internal volatile string FactionEntitiesJson = "{}";
     internal volatile string EntityScanJson = "[]";
     internal volatile string NpcFinderJson = "[]";
+    internal volatile string EntityFieldsJson = "{}";
+    internal volatile string NpcFieldsJson = "{}";
     internal volatile string? LastSummonResult;
 
     // 龙素材物品 ID 列表
@@ -370,11 +372,23 @@ public partial class ChestEditorComponent : MonoBehaviour
                 }
                 else if (req.ChestIndex == -18)
                 {
-                    // 设置实体属性（主线程执行）
+                    // 设置实体属性（主线程执行，ExtraIndex=ptrHash）
                     string field = req.ResultJson ?? "";
                     float val = BitConverter.Int32BitsToSingle(req.Count);
                     string result = EntityScanner.SetEntityField(req.ExtraIndex, field, val);
                     req.ResultJson = result == "ok" ? "{\"ok\":true}" : $"{{\"error\":\"{Escape(result)}\"}}";
+                }
+                else if (req.ChestIndex == -22)
+                {
+                    // 读取单个实体字段（主线程执行，ExtraIndex=ptrHash）
+                    EntityFieldsJson = EntityScanner.GetEntityFieldsJson(req.ExtraIndex);
+                    req.ResultJson = EntityFieldsJson;
+                }
+                else if (req.ChestIndex == -23)
+                {
+                    // 读取单个NPC字段（主线程执行，ExtraIndex=ptrHash）
+                    NpcFieldsJson = NpcFinder.GetNpcFieldsJson(req.ExtraIndex);
+                    req.ResultJson = NpcFieldsJson;
                 }
                 else if (req.ChestIndex == -19)
                 {

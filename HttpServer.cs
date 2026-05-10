@@ -460,7 +460,7 @@ internal class HttpServer
                 string body;
                 using (var reader = new StreamReader(req.InputStream, req.ContentEncoding))
                     body = reader.ReadToEnd();
-                int guid = 0;
+                int ptrHash = 0;
                 string field = "";
                 float val = 0;
                 foreach (var part in body.Trim('{', '}').Split(','))
@@ -469,17 +469,17 @@ internal class HttpServer
                     if (kv.Length != 2) continue;
                     string key = kv[0].Trim().Trim('"');
                     string v = kv[1].Trim().Trim('"');
-                    if (key == "guid" && int.TryParse(v, out int g)) guid = g;
+                    if (key == "ptrHash" && int.TryParse(v, out int g)) ptrHash = g;
                     if (key == "field") field = v;
                     if (key == "value" && float.TryParse(v, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float fv)) val = fv;
                 }
-                if (guid == 0 || string.IsNullOrEmpty(field)) { SendJson(resp, "{\"error\":\"missing guid/field\"}"); return; }
+                if (ptrHash == 0 || string.IsNullOrEmpty(field)) { SendJson(resp, "{\"error\":\"missing ptrHash/field\"}"); return; }
                 var comp = ChestEditorComponent.Instance;
                 if (comp == null) { SendJson(resp, "{\"error\":\"mod not ready\"}"); return; }
                 var signal = new ManualResetEventSlim(false);
                 var writeReq = new ChestEditorComponent.WriteRequest
                 {
-                    ChestIndex = -18, ExtraIndex = guid,
+                    ChestIndex = -18, ExtraIndex = ptrHash,
                     Count = BitConverter.SingleToInt32Bits(val),
                     ResultJson = field, Signal = signal
                 };
@@ -543,6 +543,38 @@ internal class HttpServer
                 comp.WriteQueue.Enqueue(writeReq);
                 if (signal.Wait(5000))
                     SendJson(resp, writeReq.ResultJson ?? "{\"ok\":true}");
+                else
+                    SendJson(resp, "{\"error\":\"timeout\"}");
+            }
+            else if (path.StartsWith("/api/entity/fields/") && method == "GET")
+            {
+                var parts = path.Split('/');
+                if (parts.Length < 5 || !int.TryParse(parts[4], out int ph))
+                {
+                    resp.StatusCode = 400; SendJson(resp, "{\"error\":\"invalid ptrHash\"}"); return;
+                }
+                var comp = ChestEditorComponent.Instance;
+                if (comp == null) { SendJson(resp, "{\"error\":\"mod not ready\"}"); return; }
+                var signal = new ManualResetEventSlim(false);
+                comp.WriteQueue.Enqueue(new ChestEditorComponent.WriteRequest { ChestIndex = -22, ExtraIndex = ph, Signal = signal });
+                if (signal.Wait(10000))
+                    SendJson(resp, comp.EntityFieldsJson);
+                else
+                    SendJson(resp, "{\"error\":\"timeout\"}");
+            }
+            else if (path.StartsWith("/api/npcfinder/fields/") && method == "GET")
+            {
+                var parts = path.Split('/');
+                if (parts.Length < 5 || !int.TryParse(parts[4], out int ph))
+                {
+                    resp.StatusCode = 400; SendJson(resp, "{\"error\":\"invalid ptrHash\"}"); return;
+                }
+                var comp = ChestEditorComponent.Instance;
+                if (comp == null) { SendJson(resp, "{\"error\":\"mod not ready\"}"); return; }
+                var signal = new ManualResetEventSlim(false);
+                comp.WriteQueue.Enqueue(new ChestEditorComponent.WriteRequest { ChestIndex = -23, ExtraIndex = ph, Signal = signal });
+                if (signal.Wait(10000))
+                    SendJson(resp, comp.NpcFieldsJson);
                 else
                     SendJson(resp, "{\"error\":\"timeout\"}");
             }

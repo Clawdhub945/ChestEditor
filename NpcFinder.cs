@@ -40,7 +40,7 @@ internal static class NpcFinder
         public int PtrHash;
         public int Guid;
         public int StuffId;
-        public Dictionary<string, FieldEntry> Fields = new();
+        public Dictionary<string, FieldEntry> FieldMeta = new(); // offset/type only, no values
     }
 
     internal class FieldEntry
@@ -48,8 +48,6 @@ internal static class NpcFinder
         public int Offset;
         public string TypeName = "";
         public bool IsFloat;
-        public int IntVal;
-        public float FloatVal;
     }
 
     private static void CacheIl2CppApi()
@@ -210,33 +208,15 @@ internal static class NpcFinder
                         }
                         if (!isNpc) continue;
 
-                        // 获取全部字段
+                        // 获取全部字段元数据（不读值）
                         var fieldMap = GetOrCacheClassFields(compClass, className);
 
-                        // 读取所有字段值
-                        var fields = new Dictionary<string, FieldEntry>();
+                        // 只读 guid 和 stuff_id
                         int guid = 0, stuffId = 0;
-                        foreach (var kv in fieldMap)
-                        {
-                            var fe = new FieldEntry
-                            {
-                                Offset = kv.Value.Offset,
-                                TypeName = kv.Value.TypeName,
-                                IsFloat = kv.Value.IsFloat
-                            };
-                            try
-                            {
-                                if (fe.IsFloat)
-                                    fe.FloatVal = ReadIl2CppFloat(compPtr, fe.Offset);
-                                else
-                                    fe.IntVal = ReadIl2CppInt(compPtr, fe.Offset);
-                            }
-                            catch { }
-                            fields[kv.Key] = fe;
-
-                            if (kv.Key == "guid") guid = fe.IntVal;
-                            if (kv.Key == "stuff_id") stuffId = fe.IntVal;
-                        }
+                        if (fieldMap.TryGetValue("guid", out var guidFe))
+                            try { guid = ReadIl2CppInt(compPtr, guidFe.Offset); } catch { }
+                        if (fieldMap.TryGetValue("stuff_id", out var sidFe))
+                            try { stuffId = ReadIl2CppInt(compPtr, sidFe.Offset); } catch { }
 
                         var npc = new NpcInfo
                         {
@@ -246,7 +226,7 @@ internal static class NpcFinder
                             PtrHash = compPtr.GetHashCode(),
                             Guid = guid,
                             StuffId = stuffId,
-                            Fields = fields
+                            FieldMeta = fieldMap
                         };
 
                         _npcs.Add(npc);
@@ -262,7 +242,7 @@ internal static class NpcFinder
             for (int i = 0; i < Math.Min(20, _npcs.Count); i++)
             {
                 var e = _npcs[i];
-                Plugin.LogInfo($"[NpcFinder]   {e.GoName} [{e.ClassName}] guid={e.Guid} stuffId={e.StuffId} fields={e.Fields.Count}");
+                Plugin.LogInfo($"[NpcFinder]   {e.GoName} [{e.ClassName}] guid={e.Guid} stuffId={e.StuffId} fields={e.FieldMeta.Count}");
             }
         }
         catch (Exception ex) { Plugin.LogError($"[NpcFinder] 异常: {ex.Message}\n{ex.StackTrace}"); }
@@ -283,22 +263,52 @@ internal static class NpcFinder
             sb.Append($"\"ptrHash\":{e.PtrHash},");
             sb.Append($"\"guid\":{e.Guid},");
             sb.Append($"\"stuffId\":{e.StuffId},");
-            sb.Append("\"fields\":{");
-            bool f2 = true;
-            foreach (var kv in e.Fields)
-            {
-                if (!f2) sb.Append(',');
-                f2 = false;
-                sb.Append($"\"{Escape(kv.Key)}\":");
-                if (kv.Value.IsFloat)
-                    sb.Append(kv.Value.FloatVal.ToString("G"));
-                else
-                    sb.Append(kv.Value.IntVal);
-            }
-            sb.Append("}}");
+            sb.Append($"\"fieldCount\":{e.FieldMeta.Count}");
+            sb.Append('}');
         }
         sb.Append(']');
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// 按需读取单个实体的全部字段值
+    /// </summary>
+    internal static string GetNpcFieldsJson(int ptrHash)
+    {
+        foreach (var e in _npcs)
+        {
+            if (e.PtrHash != ptrHash) continue;
+
+            var sb = new System.Text.StringBuilder();
+            sb.Append('{');
+            bool first = true;
+            foreach (var kv in e.FieldMeta)
+            {
+                if (!first) sb.Append(',');
+                first = false;
+                sb.Append($"\"{Escape(kv.Key)}\":{{");
+                sb.Append($"\"isFloat\":{(kv.Value.IsFloat ? "true" : "false")},");
+                sb.Append("\"value\":");
+                try
+                {
+                    if (kv.Value.IsFloat)
+                    {
+                        float v = ReadIl2CppFloat(e.Ptr, kv.Value.Offset);
+                        sb.Append(v.ToString("G"));
+                    }
+                    else
+                    {
+                        int v = ReadIl2CppInt(e.Ptr, kv.Value.Offset);
+                        sb.Append(v);
+                    }
+                }
+                catch { sb.Append("0"); }
+                sb.Append("}");
+            }
+            sb.Append('}');
+            return sb.ToString();
+        }
+        return "{\"error\":\"not found\"}";
     }
 
     internal static string SetNpcField(int ptrHash, string fieldName, float value)
@@ -308,16 +318,13 @@ internal static class NpcFinder
             foreach (var e in _npcs)
             {
                 if (e.PtrHash != ptrHash) continue;
-                if (!e.Fields.TryGetValue(fieldName, out var fe))
+                if (!e.FieldMeta.TryGetValue(fieldName, out var fe))
                     return $"unknown field: {fieldName}";
 
                 if (fe.IsFloat)
                     WriteIl2CppFloat(e.Ptr, fe.Offset, value);
                 else
                     WriteIl2CppInt(e.Ptr, fe.Offset, (int)value);
-
-                if (fe.IsFloat) fe.FloatVal = value;
-                else fe.IntVal = (int)value;
 
                 Plugin.LogInfo($"[NpcFinder] SetNpcField ptrHash={ptrHash}, {fieldName}={value}");
                 return "ok";

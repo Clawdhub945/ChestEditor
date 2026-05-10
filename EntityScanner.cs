@@ -35,9 +35,10 @@ internal static class EntityScanner
         public string GoName = "";
         public string ClassName = "";
         public IntPtr Ptr;
+        public int PtrHash;
         public int Guid;
         public int StuffId;
-        public Dictionary<string, FieldInfo> Fields = new();
+        public Dictionary<string, FieldInfo> FieldMeta = new();
     }
 
     internal class FieldInfo
@@ -45,8 +46,6 @@ internal static class EntityScanner
         public int Offset;
         public string TypeName = "";
         public bool IsFloat;
-        public int IntVal;
-        public float FloatVal;
     }
 
     private static void CacheIl2CppApi()
@@ -230,35 +229,15 @@ internal static class EntityScanner
                         // 跳过无 guid 的模板
                         if (guid <= 0) continue;
 
-                        // 读取所有字段值
-                        var fields = new Dictionary<string, FieldInfo>();
-                        foreach (var kv in fieldMap)
-                        {
-                            var fi = new FieldInfo
-                            {
-                                Offset = kv.Value.Offset,
-                                TypeName = kv.Value.TypeName,
-                                IsFloat = kv.Value.IsFloat
-                            };
-                            try
-                            {
-                                if (fi.IsFloat)
-                                    fi.FloatVal = ReadIl2CppFloat(compPtr, fi.Offset);
-                                else
-                                    fi.IntVal = ReadIl2CppInt(compPtr, fi.Offset);
-                            }
-                            catch { }
-                            fields[kv.Key] = fi;
-                        }
-
                         var entity = new EntityInfo
                         {
                             GoName = go.name,
                             ClassName = className,
                             Ptr = compPtr,
+                            PtrHash = compPtr.GetHashCode(),
                             Guid = guid,
                             StuffId = stuffId,
-                            Fields = fields
+                            FieldMeta = fieldMap
                         };
 
                         _entities.Add(entity);
@@ -278,7 +257,7 @@ internal static class EntityScanner
             for (int i = 0; i < Math.Min(20, _entities.Count); i++)
             {
                 var e = _entities[i];
-                Plugin.LogInfo($"[EntityScanner]   {e.GoName} [{e.ClassName}] stuffId={e.StuffId} guid={e.Guid} fields={e.Fields.Count}");
+                Plugin.LogInfo($"[EntityScanner]   {e.GoName} [{e.ClassName}] stuffId={e.StuffId} guid={e.Guid} fields={e.FieldMeta.Count}");
             }
         }
         catch (Exception ex) { Plugin.LogError($"[EntityScanner] 异常: {ex.Message}\n{ex.StackTrace}"); }
@@ -299,101 +278,74 @@ internal static class EntityScanner
             sb.Append('{');
             sb.Append($"\"goName\":\"{Escape(e.GoName)}\",");
             sb.Append($"\"className\":\"{Escape(e.ClassName)}\",");
+            sb.Append($"\"ptrHash\":{e.PtrHash},");
             sb.Append($"\"guid\":{e.Guid},");
             sb.Append($"\"stuffId\":{e.StuffId},");
             sb.Append($"\"name\":\"{Escape(StuffIdNames.GetName(e.StuffId))}\",");
-            sb.Append("\"fields\":{");
-            bool f2 = true;
-            foreach (var kv in e.Fields)
-            {
-                if (!f2) sb.Append(',');
-                f2 = false;
-                sb.Append($"\"{Escape(kv.Key)}\":");
-                if (kv.Value.IsFloat)
-                    sb.Append(kv.Value.FloatVal.ToString("G"));
-                else
-                    sb.Append(kv.Value.IntVal);
-            }
-            sb.Append("}}");
+            sb.Append($"\"fieldCount\":{e.FieldMeta.Count}");
+            sb.Append('}');
         }
         sb.Append(']');
         return sb.ToString();
     }
 
     /// <summary>
+    /// 按需读取单个实体的全部字段值
+    /// </summary>
+    internal static string GetEntityFieldsJson(int ptrHash)
+    {
+        foreach (var e in _entities)
+        {
+            if (e.PtrHash != ptrHash) continue;
+
+            var sb = new System.Text.StringBuilder();
+            sb.Append('{');
+            bool first = true;
+            foreach (var kv in e.FieldMeta)
+            {
+                if (!first) sb.Append(',');
+                first = false;
+                sb.Append($"\"{Escape(kv.Key)}\":{{");
+                sb.Append($"\"isFloat\":{(kv.Value.IsFloat ? "true" : "false")},");
+                sb.Append("\"value\":");
+                try
+                {
+                    if (kv.Value.IsFloat)
+                        sb.Append(ReadIl2CppFloat(e.Ptr, kv.Value.Offset).ToString("G"));
+                    else
+                        sb.Append(ReadIl2CppInt(e.Ptr, kv.Value.Offset));
+                }
+                catch { sb.Append("0"); }
+                sb.Append("}");
+            }
+            sb.Append('}');
+            return sb.ToString();
+        }
+        return "{\"error\":\"not found\"}";
+    }
+
+    /// <summary>
     /// 设置实体字段值
     /// </summary>
-    internal static string SetEntityField(int guid, string fieldName, float value)
+    internal static string SetEntityField(int ptrHash, string fieldName, float value)
     {
         try
         {
-            // 先在缓存中查找
             foreach (var e in _entities)
             {
-                if (e.Guid != guid) continue;
-                if (!e.Fields.TryGetValue(fieldName, out var fi))
+                if (e.PtrHash != ptrHash) continue;
+                if (!e.FieldMeta.TryGetValue(fieldName, out var fi))
                     return $"unknown field: {fieldName}";
 
-                // 写入值
                 if (fi.IsFloat)
                     WriteIl2CppFloat(e.Ptr, fi.Offset, value);
                 else
                     WriteIl2CppInt(e.Ptr, fi.Offset, (int)value);
 
-                // 更新缓存
-                if (fi.IsFloat)
-                    fi.FloatVal = value;
-                else
-                    fi.IntVal = (int)value;
-
-                Plugin.LogInfo($"[EntityScanner] SetEntityField guid={guid}, {fieldName}={value}");
+                Plugin.LogInfo($"[EntityScanner] SetEntityField ptrHash={ptrHash}, {fieldName}={value}");
                 return "ok";
             }
-
-            // 缓存中没有，重新扫描查找
-            CacheIl2CppApi();
-            var allGOs = Resources.FindObjectsOfTypeAll<GameObject>();
-            foreach (var go in allGOs)
-            {
-                try
-                {
-                    var components = go.GetComponents<Component>();
-                    foreach (var comp in components)
-                    {
-                        if (comp == null) continue;
-                        IntPtr compPtr = GetIl2CppPtr(comp);
-                        if (compPtr == IntPtr.Zero) continue;
-
-                        IntPtr compClass = IntPtr.Zero;
-                        try { compClass = (IntPtr)_il2cpp_get_class!.Invoke(null, new object[] { compPtr })!; }
-                        catch { continue; }
-                        if (compClass == IntPtr.Zero) continue;
-
-                        string className = comp.GetIl2CppType().Name;
-                        var fieldMap = GetOrCacheClassFields(compClass, className);
-
-                        if (!fieldMap.TryGetValue("guid", out var guidField)) continue;
-
-                        int entityGuid = 0;
-                        try { entityGuid = ReadIl2CppInt(compPtr, guidField.Offset); } catch { }
-                        if (entityGuid != guid) continue;
-
-                        if (!fieldMap.TryGetValue(fieldName, out var targetField))
-                            return $"unknown field: {fieldName}";
-
-                        if (targetField.IsFloat)
-                            WriteIl2CppFloat(compPtr, targetField.Offset, value);
-                        else
-                            WriteIl2CppInt(compPtr, targetField.Offset, (int)value);
-
-                        Plugin.LogInfo($"[EntityScanner] SetEntityField (rescan) guid={guid}, {fieldName}={value}");
-                        return "ok";
-                    }
-                }
-                catch { }
-            }
-
-            return $"entity not found: guid={guid}";
+            return $"entity not found: ptrHash={ptrHash}";
         }
         catch (Exception ex) { return ex.Message; }
     }

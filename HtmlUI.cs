@@ -1424,21 +1424,56 @@ async function fetchEntityScanData() {
   } catch(e) {}
 }
 
-async function setEntityField(guid, field) {
-  const input = document.getElementById('entity_' + field + '_' + guid);
+async function setEntityField(ptrHash, field) {
+  const input = document.getElementById('entity_' + field + '_' + ptrHash);
   const val = parseFloat(input.value) || 0;
   try {
     const r = await fetch('/api/entity/set', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({guid, field, value: val})
+      body: JSON.stringify({ptrHash, field, value: val})
     });
     const d = await r.json();
     if (d.error) { toast(d.error, true); return; }
     toast('设置成功');
-    await fetchEntityScanData();
-    renderContent();
+    loadEntityFields(ptrHash);
   } catch(e) { toast('设置失败', true); }
+}
+
+async function loadEntityFields(ptrHash) {
+  const container = document.getElementById('entity_fields_' + ptrHash);
+  if (!container) return;
+  container.innerHTML = '<div style=""padding:8px;color:var(--text-muted);font-size:12px"">加载中...</div>';
+  try {
+    const r = await fetch('/api/entity/fields/' + ptrHash);
+    const fields = await r.json();
+    if (fields.error) { container.innerHTML = '<div style=""padding:8px;color:var(--danger);font-size:12px"">' + fields.error + '</div>'; return; }
+    container.innerHTML = renderFieldsTable(fields, ptrHash, 'entity', setEntityField);
+  } catch(e) { container.innerHTML = '<div style=""padding:8px;color:var(--danger);font-size:12px"">加载失败</div>'; }
+}
+
+function renderFieldsTable(fields, ptrHash, prefix, setFn) {
+  let html = '<div style=""background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden"">';
+  html += '<table style=""width:100%;border-collapse:collapse;font-size:12px"">';
+  html += '<tr style=""background:var(--bg-input)""><th style=""text-align:left;padding:6px 10px;color:var(--text-muted);font-weight:500;width:30%"">字段</th><th style=""text-align:left;padding:6px 10px;color:var(--text-muted);font-weight:500;width:20%"">类型</th><th style=""text-align:left;padding:6px 10px;color:var(--text-muted);font-weight:500;width:30%"">值</th><th style=""padding:6px 10px;width:20%""></th></tr>';
+  const sortedKeys = Object.keys(fields).sort();
+  for (const k of sortedKeys) {
+    const f = fields[k];
+    const isFloat = f.isFloat;
+    const val = f.value;
+    const typeLabel = isFloat ? 'float' : 'int';
+    html += '<tr style=""border-top:1px solid var(--border)"">';
+    html += '<td style=""padding:4px 10px;color:var(--text-primary);font-family:monospace"">' + esc(k) + '</td>';
+    html += '<td style=""padding:4px 10px;color:var(--text-muted)"">' + typeLabel + '</td>';
+    html += '<td style=""padding:4px 10px;color:var(--text-primary);font-family:monospace"">' + (isFloat ? val.toFixed(2) : val) + '</td>';
+    html += '<td style=""padding:4px 10px;text-align:center"">';
+    html += '<div style=""display:flex;gap:4px;align-items:center;justify-content:center"">';
+    html += '<input id=""' + prefix + '_' + k + '_' + ptrHash + '"" type=""text"" value=""' + (isFloat ? val.toFixed(2) : val) + '"" style=""width:70px;padding:2px 4px;font-size:11px;background:var(--bg-input);border:1px solid var(--border);border-radius:3px;color:var(--text-primary)"">';
+    html += '<button onclick=""' + setFn.name + '(' + ptrHash + ', \'' + esc(k) + '\')"" style=""padding:2px 6px;font-size:10px;background:var(--accent);color:#fff;border:none;border-radius:3px;cursor:pointer"">OK</button>';
+    html += '</div></td></tr>';
+  }
+  html += '</table></div>';
+  return html;
 }
 
 function classifyEntity(className) {
@@ -1497,40 +1532,18 @@ function renderEntityScanPanel() {
         const className = e.className || '';
         const stuffId = e.stuffId || 0;
         const guid = e.guid || 0;
-        const fields = e.fields || {};
+        const ptrHash = e.ptrHash || 0;
         const entityName = e.name || '';
         const displayName = entityName || goName;
-        const hp = fields.hp || 0;
-        const hpTotal = fields.hp_total || 0;
+        const fieldCount = e.fieldCount || 0;
 
-        html += '<details style=""margin-bottom:4px"">';
+        html += '<details style=""margin-bottom:4px"" ontoggle=""if(this.open)loadEntityFields(' + ptrHash + ')"">';
         html += '<summary style=""cursor:pointer;padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;display:flex;align-items:center;gap:8px"">';
         html += '<span style=""font-weight:600;color:var(--text-primary)"">' + esc(displayName) + '</span>';
         html += '<span style=""font-size:10px;color:var(--accent-light);padding:1px 6px;border-radius:8px;background:var(--accent-bg)"">' + esc(className) + '</span>';
-        html += '<span style=""font-size:11px;color:var(--text-muted);margin-left:auto"">GUID:' + guid + ' ID:' + stuffId + '</span>';
-        if (hpTotal > 0) html += '<span style=""font-size:11px;color:var(--text-muted)"">HP:' + Math.round(hp) + '/' + Math.round(hpTotal) + '</span>';
+        html += '<span style=""font-size:11px;color:var(--text-muted);margin-left:auto"">GUID:' + guid + ' ID:' + stuffId + ' (' + fieldCount + '字段)</span>';
         html += '</summary>';
-        html += '<div style=""padding:8px 0"">';
-        html += '<div style=""background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden"">';
-        html += '<table style=""width:100%;border-collapse:collapse;font-size:12px"">';
-        html += '<tr style=""background:var(--bg-input)""><th style=""text-align:left;padding:6px 10px;color:var(--text-muted);font-weight:500;width:30%"">字段</th><th style=""text-align:left;padding:6px 10px;color:var(--text-muted);font-weight:500;width:20%"">类型</th><th style=""text-align:left;padding:6px 10px;color:var(--text-muted);font-weight:500;width:30%"">值</th><th style=""padding:6px 10px;width:20%""></th></tr>';
-        const sortedKeys = Object.keys(fields).sort();
-        for (const k of sortedKeys) {
-          const f = fields[k];
-          const isFloat = f.IsFloat;
-          const val = isFloat ? f.FloatVal : f.IntVal;
-          const typeLabel = isFloat ? 'float' : 'int';
-          html += '<tr style=""border-top:1px solid var(--border)"">';
-          html += '<td style=""padding:4px 10px;color:var(--text-primary);font-family:monospace"">' + esc(k) + '</td>';
-          html += '<td style=""padding:4px 10px;color:var(--text-muted)"">' + typeLabel + '</td>';
-          html += '<td style=""padding:4px 10px;color:var(--text-primary);font-family:monospace"">' + (isFloat ? val.toFixed(2) : val) + '</td>';
-          html += '<td style=""padding:4px 10px;text-align:center"">';
-          html += '<div style=""display:flex;gap:4px;align-items:center;justify-content:center"">';
-          html += '<input id=""entity_' + k + '_' + guid + '"" type=""text"" value=""' + (isFloat ? val.toFixed(2) : val) + '"" style=""width:70px;padding:2px 4px;font-size:11px;background:var(--bg-input);border:1px solid var(--border);border-radius:3px;color:var(--text-primary)"">';
-          html += '<button onclick=""setEntityField(' + guid + ', \'' + esc(k) + '\')"" style=""padding:2px 6px;font-size:10px;background:var(--accent);color:#fff;border:none;border-radius:3px;cursor:pointer"">OK</button>';
-          html += '</div></td></tr>';
-        }
-        html += '</table></div></div></details>';
+        html += '<div id=""entity_fields_' + ptrHash + '"" style=""padding:8px 0""><div style=""padding:8px;color:var(--text-muted);font-size:12px"">点击展开加载字段...</div></div></details>';
       }
       html += '</div></details>';
     }
@@ -1577,9 +1590,20 @@ async function setNpcFinderField(ptrHash, field) {
     const d = await r.json();
     if (d.error) { toast(d.error, true); return; }
     toast('设置成功');
-    await fetchNpcFinderData();
-    renderContent();
+    loadNpcFinderFields(ptrHash);
   } catch(e) { toast('设置失败', true); }
+}
+
+async function loadNpcFinderFields(ptrHash) {
+  const container = document.getElementById('npcfinder_fields_' + ptrHash);
+  if (!container) return;
+  container.innerHTML = '<div style=""padding:8px;color:var(--text-muted);font-size:12px"">加载中...</div>';
+  try {
+    const r = await fetch('/api/npcfinder/fields/' + ptrHash);
+    const fields = await r.json();
+    if (fields.error) { container.innerHTML = '<div style=""padding:8px;color:var(--danger);font-size:12px"">' + fields.error + '</div>'; return; }
+    container.innerHTML = renderFieldsTable(fields, ptrHash, 'npcfinder', setNpcFinderField);
+  } catch(e) { container.innerHTML = '<div style=""padding:8px;color:var(--danger);font-size:12px"">加载失败</div>'; }
 }
 
 function renderNpcFinderPanel() {
@@ -1623,34 +1647,14 @@ function renderNpcFinderPanel() {
         const guid = e.guid || 0;
         const stuffId = e.stuffId || 0;
         const ptrHash = e.ptrHash || 0;
-        const fields = e.fields || {};
+        const fieldCount = e.fieldCount || 0;
 
-        html += '<details style=""margin-bottom:4px"">';
+        html += '<details style=""margin-bottom:4px"" ontoggle=""if(this.open)loadNpcFinderFields(' + ptrHash + ')"">';
         html += '<summary style=""cursor:pointer;padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;display:flex;align-items:center;gap:8px"">';
         html += '<span style=""font-weight:600;color:var(--text-primary)"">' + esc(goName) + '</span>';
-        html += '<span style=""font-size:11px;color:var(--text-muted);margin-left:auto"">GUID:' + guid + ' stuffId:' + stuffId + '</span>';
+        html += '<span style=""font-size:11px;color:var(--text-muted);margin-left:auto"">GUID:' + guid + ' stuffId:' + stuffId + ' (' + fieldCount + '字段)</span>';
         html += '</summary>';
-        html += '<div style=""padding:8px 0"">';
-        html += '<div style=""background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden"">';
-        html += '<table style=""width:100%;border-collapse:collapse;font-size:12px"">';
-        html += '<tr style=""background:var(--bg-input)""><th style=""text-align:left;padding:6px 10px;color:var(--text-muted);font-weight:500;width:30%"">字段</th><th style=""text-align:left;padding:6px 10px;color:var(--text-muted);font-weight:500;width:20%"">类型</th><th style=""text-align:left;padding:6px 10px;color:var(--text-muted);font-weight:500;width:30%"">值</th><th style=""padding:6px 10px;width:20%""></th></tr>';
-        const sortedKeys = Object.keys(fields).sort();
-        for (const k of sortedKeys) {
-          const f = fields[k];
-          const isFloat = f.IsFloat;
-          const val = isFloat ? f.FloatVal : f.IntVal;
-          const typeLabel = isFloat ? 'float' : 'int';
-          html += '<tr style=""border-top:1px solid var(--border)"">';
-          html += '<td style=""padding:4px 10px;color:var(--text-primary);font-family:monospace"">' + esc(k) + '</td>';
-          html += '<td style=""padding:4px 10px;color:var(--text-muted)"">' + typeLabel + '</td>';
-          html += '<td style=""padding:4px 10px;color:var(--text-primary);font-family:monospace"">' + (isFloat ? val.toFixed(2) : val) + '</td>';
-          html += '<td style=""padding:4px 10px;text-align:center"">';
-          html += '<div style=""display:flex;gap:4px;align-items:center;justify-content:center"">';
-          html += '<input id=""npcfinder_' + k + '_' + ptrHash + '"" type=""text"" value=""' + (isFloat ? val.toFixed(2) : val) + '"" style=""width:70px;padding:2px 4px;font-size:11px;background:var(--bg-input);border:1px solid var(--border);border-radius:3px;color:var(--text-primary)"">';
-          html += '<button onclick=""setNpcFinderField(' + ptrHash + ', \'' + esc(k) + '\')"" style=""padding:2px 6px;font-size:10px;background:var(--accent);color:#fff;border:none;border-radius:3px;cursor:pointer"">OK</button>';
-          html += '</div></td></tr>';
-        }
-        html += '</table></div></div></details>';
+        html += '<div id=""npcfinder_fields_' + ptrHash + '"" style=""padding:8px 0""><div style=""padding:8px;color:var(--text-muted);font-size:12px"">点击展开加载字段...</div></div></details>';
       }
       html += '</div></details>';
     }
