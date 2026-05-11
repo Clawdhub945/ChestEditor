@@ -1536,7 +1536,7 @@ function renderEntityScanPanel() {
     html += '</div>';
   } else {
     // 按类别分组
-    const groups = {drop:[], animal:[], building:[], monster:[], other:[]};
+    const groups = {drop:[], animal:[], building:[], monster:[], ship:[], deadbody:[], other:[]};
     for (const e of entityScanData) {
       const cat = classifyEntity(e.className || '');
       groups[cat].push(e);
