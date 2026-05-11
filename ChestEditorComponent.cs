@@ -442,6 +442,12 @@ public partial class ChestEditorComponent : MonoBehaviour
                     string result = EntityEditor.SetField(req.ExtraIndex, field, val);
                     req.ResultJson = result == "ok" ? "{\"ok\":true}" : $"{{\"error\":\"{Escape(result)}\"}}";
                 }
+                else if (req.ChestIndex == -28)
+                {
+                    // 消除实体（主线程执行）
+                    string result = EntityEditor.DestroyEntity(req.ExtraIndex);
+                    req.ResultJson = result == "ok" ? "{\"ok\":true}" : $"{{\"error\":\"{Escape(result)}\"}}";
+                }
                 else if (req.IsAdd)
                 {
                     AddAndUpdate(req.ChestIndex, req.StuffId, req.Count);

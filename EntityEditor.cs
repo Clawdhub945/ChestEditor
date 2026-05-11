@@ -393,6 +393,33 @@ internal static class EntityEditor
         catch (Exception ex) { return ex.Message; }
     }
 
+    /// <summary>
+    /// 消除实体（销毁对应的 GameObject）
+    /// </summary>
+    internal static string DestroyEntity(int ptrHash)
+    {
+        try
+        {
+            for (int i = 0; i < _entities.Count; i++)
+            {
+                var e = _entities[i];
+                if (e.PtrHash != ptrHash) continue;
+
+                var obj = Il2CppInterop.Runtime.IL2CPP.PointerToObject(e.Ptr);
+                if (obj == null) return "failed to resolve object";
+                var unityObj = obj.TryCast<UnityEngine.Object>();
+                if (unityObj == null) return "not a Unity object";
+                string name = unityObj.name;
+                UnityEngine.Object.Destroy(unityObj);
+                _entities.RemoveAt(i);
+                Plugin.LogInfo($"[EntityEditor] DestroyEntity ptrHash={ptrHash} name={name}");
+                return "ok";
+            }
+            return $"entity not found: ptrHash={ptrHash}";
+        }
+        catch (Exception ex) { return ex.Message; }
+    }
+
     private static string Escape(string s) => s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "").Replace("<", "\\u003c").Replace(">", "\\u003e");
 
     private static unsafe int ReadIl2CppInt(IntPtr objPtr, int offset) => *(int*)(objPtr + offset);
