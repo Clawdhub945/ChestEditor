@@ -37,6 +37,8 @@ public partial class ChestEditorComponent : MonoBehaviour
     internal volatile string NpcFinderJson = "[]";
     internal volatile string EntityFieldsJson = "{}";
     internal volatile string NpcFieldsJson = "{}";
+    internal volatile string EntityEditorJson = "[]";
+    internal volatile string EntityEditorFieldsJson = "{}";
     internal volatile string? LastSummonResult;
 
     // 龙素材物品 ID 列表
@@ -410,6 +412,34 @@ public partial class ChestEditorComponent : MonoBehaviour
                     string field = req.ResultJson ?? "";
                     float val = BitConverter.Int32BitsToSingle(req.Count);
                     string result = NpcFinder.SetNpcField(req.ExtraIndex, field, val);
+                    req.ResultJson = result == "ok" ? "{\"ok\":true}" : $"{{\"error\":\"{Escape(result)}\"}}";
+                }
+                else if (req.ChestIndex == -24)
+                {
+                    // 统一实体编辑器扫描（主线程执行）
+                    Plugin.LogInfo("[MainThread] 开始统一实体编辑器扫描...");
+                    EntityEditor.ScanAll();
+                    EntityEditorJson = EntityEditor.GetAllJson();
+                    Plugin.LogInfo($"[MainThread] 统一扫描完成, JSON长度={EntityEditorJson.Length}");
+                    req.ResultJson = "{\"ok\":true}";
+                }
+                else if (req.ChestIndex == -25)
+                {
+                    // 读取统一扫描结果
+                    req.ResultJson = EntityEditorJson;
+                }
+                else if (req.ChestIndex == -26)
+                {
+                    // 读取单个实体精简字段
+                    EntityEditorFieldsJson = EntityEditor.GetFieldsJson(req.ExtraIndex);
+                    req.ResultJson = EntityEditorFieldsJson;
+                }
+                else if (req.ChestIndex == -27)
+                {
+                    // 设置实体字段（主线程执行）
+                    string field = req.ResultJson ?? "";
+                    float val = BitConverter.Int32BitsToSingle(req.Count);
+                    string result = EntityEditor.SetField(req.ExtraIndex, field, val);
                     req.ResultJson = result == "ok" ? "{\"ok\":true}" : $"{{\"error\":\"{Escape(result)}\"}}";
                 }
                 else if (req.IsAdd)

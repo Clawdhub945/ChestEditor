@@ -881,6 +881,7 @@ let npcEntities = [];
 let factionEntities = [];
 let entityScanData = [];
 let npcFinderData = [];
+let entityEditorData = [];
 let factionFieldName = '';
 let factionAllFields = [];
 let filters = [];
@@ -1182,6 +1183,14 @@ function renderSidebar() {
   html += '<div class=""ci-info"">';
   html += '<div class=""ci-name"">找NPC</div>';
   html += '<div class=""ci-count"">' + (npcFinderData.length > 0 ? npcFinderData.slice(0,3).map(e => e.npcName || e.goName).join(', ') + (npcFinderData.length > 3 ? '...' : '') : '0 个') + '</div>';
+  html += '</div></div>';
+
+  // 修改
+  html += '<div class=""chest-item' + (npcView === 'editor' ? ' active' : '') + '"" onclick=""selectNpcView(\'editor\')"">';
+  html += '<div class=""ci-icon"" style=""font-size:20px;display:flex;align-items:center;justify-content:center"">&#x270F;</div>';
+  html += '<div class=""ci-info"">';
+  html += '<div class=""ci-name"">修改</div>';
+  html += '<div class=""ci-count"">' + (entityEditorData.length > 0 ? entityEditorData.length + ' 个实体' : '0 个') + '</div>';
   html += '</div></div>';
 
   html += '</div></div>';
@@ -1708,6 +1717,155 @@ function renderNpcFinderPanel() {
   el.innerHTML = html;
 }
 
+// ===== 统一实体编辑器 =====
+async function entityEditorScan() {
+  const btn = document.getElementById('entityEditorScanBtn');
+  if (btn) { btn.textContent = '扫描中...'; btn.disabled = true; }
+  try {
+    await fetch('/api/editor/scan', {method:'POST'});
+    await fetchEntityEditorData();
+    toast('统一扫描完成 (' + entityEditorData.length + ' 个实体)');
+  } catch(e) {
+    toast('扫描失败: ' + e.message, true);
+  } finally {
+    if (btn) { btn.textContent = '开始扫描'; btn.disabled = false; }
+    renderContent();
+  }
+}
+
+async function fetchEntityEditorData() {
+  try {
+    const r = await fetch('/api/editor/entities?t=' + Date.now());
+    const d = await r.json();
+    if (Array.isArray(d)) entityEditorData = d;
+  } catch(e) {}
+}
+
+async function loadEntityEditorFields(ptrHash) {
+  const container = document.getElementById('editor_fields_' + ptrHash);
+  if (!container || container.dataset.loaded) return;
+  container.innerHTML = '<div style=""padding:8px;color:var(--text-muted);font-size:12px"">加载中...</div>';
+  try {
+    const r = await fetch('/api/editor/fields/' + ptrHash + '?t=' + Date.now());
+    const fields = await r.json();
+    if (fields.error) { container.innerHTML = '<div style=""padding:8px;color:var(--danger);font-size:12px"">' + esc(fields.error) + '</div>'; return; }
+    container.innerHTML = renderEditorFieldsTable(fields, ptrHash);
+    container.dataset.loaded = '1';
+  } catch(e) {
+    container.innerHTML = '<div style=""padding:8px;color:var(--danger);font-size:12px"">加载失败</div>';
+  }
+}
+
+function renderEditorFieldsTable(fields, ptrHash) {
+  let html = '<table style=""width:100%;border-collapse:collapse;font-size:12px"">';
+  html += '<tr style=""background:var(--bg-card)""><th style=""text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)"">字段</th><th style=""text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)"">类型</th><th style=""text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)"">值</th><th style=""padding:4px 8px;border-bottom:1px solid var(--border)"">操作</th></tr>';
+  for (const [name, f] of Object.entries(fields)) {
+    const typeLabel = f.isFloat ? 'float' : (f.isString ? 'string' : 'int');
+    const val = f.value !== undefined ? f.value : '';
+    html += '<tr style=""border-bottom:1px solid var(--border-light,rgba(255,255,255,0.05))"">';
+    html += '<td style=""padding:4px 8px;color:var(--text-primary)"">' + esc(name) + '</td>';
+    html += '<td style=""padding:4px 8px;color:var(--text-muted)"">' + typeLabel + '</td>';
+    html += '<td style=""padding:4px 8px"">';
+    if (f.isString) {
+      html += '<span style=""color:var(--accent-light)"">' + esc(String(val)) + '</span>';
+    } else {
+      html += '<input id=""editor_' + name + '_' + ptrHash + '"" type=""text"" value=""' + esc(String(val)) + '"" style=""width:120px;padding:2px 6px;background:var(--bg-input,#1a1a2e);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:12px"">';
+    }
+    html += '</td>';
+    html += '<td style=""padding:4px 8px;text-align:center"">';
+    if (!f.isString) {
+      html += '<button onclick=""setEntityEditorField(' + ptrHash + ', \'' + esc(name) + '\')"" style=""padding:2px 8px;background:var(--accent);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px"">OK</button>';
+    }
+    html += '</td></tr>';
+  }
+  html += '</table>';
+  return html;
+}
+
+async function setEntityEditorField(ptrHash, field) {
+  const input = document.getElementById('editor_' + field + '_' + ptrHash);
+  const val = parseFloat(input.value) || 0;
+  try {
+    const r = await fetch('/api/editor/set', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ptrHash, field, value: val})
+    });
+    const d = await r.json();
+    if (d.error) { toast(d.error, true); return; }
+    toast('设置成功');
+    const container = document.getElementById('editor_fields_' + ptrHash);
+    if (container) container.dataset.loaded = '';
+    loadEntityEditorFields(ptrHash);
+  } catch(e) { toast('设置失败', true); }
+}
+
+function renderEntityEditorPanel() {
+  const el = document.getElementById('content');
+  let html = '';
+  html += '<div style=""padding:20px;height:100%;display:flex;flex-direction:column;overflow:hidden"">';
+  html += '<h2 style=""color:var(--accent-light);margin-bottom:16px;font-size:18px"">&#x270F; 修改</h2>';
+
+  html += '<div style=""display:flex;gap:12px;margin-bottom:20px;align-items:center"">';
+  html += '<button id=""entityEditorScanBtn"" onclick=""entityEditorScan()"" style=""padding:10px 20px;background:var(--accent);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;font-size:14px;font-weight:500"">开始扫描</button>';
+  html += '<span style=""color:var(--text-muted);font-size:13px"">' + entityEditorData.length + ' 个实体</span>';
+  html += '</div>';
+
+  if (entityEditorData.length === 0) {
+    html += '<div style=""background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:40px;text-align:center"">';
+    html += '<div style=""font-size:48px;margin-bottom:16px"">&#x270F;</div>';
+    html += '<div style=""color:var(--text-secondary);font-size:16px;margin-bottom:8px"">暂无数据</div>';
+    html += '<div style=""color:var(--text-muted);font-size:13px"">点击上方按钮扫描实体</div>';
+    html += '</div>';
+  } else {
+    // 按 className 分组
+    const groups = {};
+    for (const e of entityEditorData) {
+      const cn = e.className || 'unknown';
+      if (!groups[cn]) groups[cn] = [];
+      groups[cn].push(e);
+    }
+    const sortedClasses = Object.keys(groups).sort();
+
+    html += '<div style=""flex:1;overflow-y:auto;padding-right:8px"">';
+    for (const cn of sortedClasses) {
+      const items = groups[cn];
+      html += '<details style=""margin-bottom:12px"">';
+      html += '<summary style=""cursor:pointer;padding:10px 14px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-weight:600;font-size:14px;display:flex;align-items:center;gap:8px"">';
+      html += '<span style=""color:var(--accent-light)"">' + esc(cn) + '</span>';
+      html += '<span style=""margin-left:auto;font-size:12px;color:var(--text-muted);font-weight:400"">' + items.length + ' 个</span>';
+      html += '</summary>';
+      html += '<div style=""display:flex;flex-direction:column;gap:6px;padding:8px 0"">';
+      for (const e of items) {
+        const goName = e.goName || 'unknown';
+        const npcName = e.npcName || '';
+        const hometownKingdomId = e.hometownKingdomId || 0;
+        const guid = e.guid || 0;
+        const stuffId = e.stuffId || 0;
+        const ptrHash = e.ptrHash || 0;
+        const entityName = e.name || '';
+        const fieldCount = e.fieldCount || 0;
+        const displayName = npcName || entityName || goName;
+        const kInfo = getKingdomInfo(hometownKingdomId);
+
+        html += '<details style=""margin-bottom:4px"" ontoggle=""if(this.open)loadEntityEditorFields(' + ptrHash + ')"">';
+        html += '<summary style=""cursor:pointer;padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;display:flex;align-items:center;gap:8px"">';
+        html += '<span style=""font-weight:600;color:var(--text-primary)"">' + esc(displayName) + '</span>';
+        if (kInfo) html += '<span style=""font-size:10px;padding:1px 6px;border-radius:8px;background:' + kInfo.bg + ';color:' + kInfo.fg + '"">' + esc(kInfo.name) + '</span>';
+        if (npcName && entityName) html += '<span style=""font-size:10px;color:var(--text-muted)"">' + esc(entityName) + '</span>';
+        html += '<span style=""font-size:11px;color:var(--text-muted);margin-left:auto"">' + esc(cn) + ' GUID:' + guid + ' (' + fieldCount + '字段)</span>';
+        html += '</summary>';
+        html += '<div id=""editor_fields_' + ptrHash + '"" style=""padding:8px 0""><div style=""padding:8px;color:var(--text-muted);font-size:12px"">点击展开加载字段...</div></div></details>';
+      }
+      html += '</div></details>';
+    }
+    html += '</div>';
+  }
+
+  html += '</div>';
+  el.innerHTML = html;
+}
+
 function toggleSoulsCategory() {
   soulsCategoryOpen = !soulsCategoryOpen;
   renderSidebar();
@@ -1969,6 +2127,10 @@ function renderContent() {
   }
   if (npcView === 'npcFinder') {
     renderNpcFinderPanel();
+    return;
+  }
+  if (npcView === 'editor') {
+    renderEntityEditorPanel();
     return;
   }
 
@@ -2613,6 +2775,7 @@ async function init() {
   await fetchFactionEntities();
   await fetchEntityScanData();
   await fetchNpcFinderData();
+  await fetchEntityEditorData();
   await refreshChests();
   renderSidebar();
   renderContent();

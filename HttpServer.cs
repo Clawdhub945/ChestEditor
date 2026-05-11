@@ -578,6 +578,79 @@ internal class HttpServer
                 else
                     SendJson(resp, "{\"error\":\"timeout\"}");
             }
+            else if (path == "/api/editor/scan" && method == "POST")
+            {
+                Plugin.LogInfo("[HTTP] /api/editor/scan 请求");
+                var comp = ChestEditorComponent.Instance;
+                if (comp == null) { SendJson(resp, "{\"error\":\"mod not ready\"}"); return; }
+                var signal = new ManualResetEventSlim(false);
+                comp.WriteQueue.Enqueue(new ChestEditorComponent.WriteRequest { ChestIndex = -24, Signal = signal });
+                if (signal.Wait(30000))
+                    SendJson(resp, "{\"ok\":true}");
+                else
+                    SendJson(resp, "{\"error\":\"timeout\"}");
+            }
+            else if (path == "/api/editor/entities" && method == "GET")
+            {
+                var comp = ChestEditorComponent.Instance;
+                if (comp == null) { SendJson(resp, "{\"error\":\"mod not ready\"}"); return; }
+                var signal = new ManualResetEventSlim(false);
+                comp.WriteQueue.Enqueue(new ChestEditorComponent.WriteRequest { ChestIndex = -25, Signal = signal });
+                if (signal.Wait(10000))
+                    SendJson(resp, comp.EntityEditorJson);
+                else
+                    SendJson(resp, "{\"error\":\"timeout\"}");
+            }
+            else if (path.StartsWith("/api/editor/fields/") && method == "GET")
+            {
+                var parts = path.Split('/');
+                if (parts.Length < 5 || !int.TryParse(parts[4], out int ph))
+                {
+                    resp.StatusCode = 400; SendJson(resp, "{\"error\":\"invalid ptrHash\"}"); return;
+                }
+                var comp = ChestEditorComponent.Instance;
+                if (comp == null) { SendJson(resp, "{\"error\":\"mod not ready\"}"); return; }
+                var signal = new ManualResetEventSlim(false);
+                comp.WriteQueue.Enqueue(new ChestEditorComponent.WriteRequest { ChestIndex = -26, ExtraIndex = ph, Signal = signal });
+                if (signal.Wait(10000))
+                    SendJson(resp, comp.EntityEditorFieldsJson);
+                else
+                    SendJson(resp, "{\"error\":\"timeout\"}");
+            }
+            else if (path == "/api/editor/set" && method == "POST")
+            {
+                string body;
+                using (var reader = new StreamReader(req.InputStream, req.ContentEncoding))
+                    body = reader.ReadToEnd();
+                int ptrHash = 0;
+                string field = "";
+                float val = 0;
+                foreach (var part in body.Trim('{', '}').Split(','))
+                {
+                    var kv = part.Split(':');
+                    if (kv.Length != 2) continue;
+                    string key = kv[0].Trim().Trim('"');
+                    string v = kv[1].Trim().Trim('"');
+                    if (key == "ptrHash" && int.TryParse(v, out int g)) ptrHash = g;
+                    if (key == "field") field = v;
+                    if (key == "value" && float.TryParse(v, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float fv)) val = fv;
+                }
+                if (ptrHash == 0 || string.IsNullOrEmpty(field)) { SendJson(resp, "{\"error\":\"missing ptrHash/field\"}"); return; }
+                var comp = ChestEditorComponent.Instance;
+                if (comp == null) { SendJson(resp, "{\"error\":\"mod not ready\"}"); return; }
+                var signal = new ManualResetEventSlim(false);
+                var writeReq = new ChestEditorComponent.WriteRequest
+                {
+                    ChestIndex = -27, ExtraIndex = ptrHash,
+                    Count = BitConverter.SingleToInt32Bits(val),
+                    ResultJson = field, Signal = signal
+                };
+                comp.WriteQueue.Enqueue(writeReq);
+                if (signal.Wait(5000))
+                    SendJson(resp, writeReq.ResultJson ?? "{\"ok\":true}");
+                else
+                    SendJson(resp, "{\"error\":\"timeout\"}");
+            }
             else if (path == "/api/dragon/natures" && method == "GET")
             {
                 SendJson(resp, Il2CppHelper.GetDragonNaturesJson());
