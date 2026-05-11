@@ -1881,8 +1881,8 @@ function renderEntityEditorPanel() {
       if (kInfo) h += '<span style=""font-size:10px;padding:1px 6px;border-radius:8px;background:' + kInfo.bg + ';color:' + kInfo.fg + '"">' + esc(kInfo.name) + '</span>';
       if (npcName && entityName) h += '<span style=""font-size:10px;color:var(--text-muted)"">' + esc(entityName) + '</span>';
       h += '<span style=""font-size:11px;color:var(--text-muted);margin-left:auto"">' + esc(e.className || '') + ' GUID:' + guid + ' (' + fieldCount + '字段)</span>';
-      h += '<button onclick=""event.stopPropagation();destroyEditorEntity(' + ptrHash + ')"" style=""margin-left:8px;padding:2px 8px;background:var(--danger,#e74c3c);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px"">消除</button>';
       h += '</summary>';
+      h += '<div style=""display:flex;justify-content:flex-end;padding:0 12px 4px 0""><button onclick=""destroyEditorEntity(' + ptrHash + ')"" style=""padding:3px 12px;background:var(--danger,#e74c3c);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px"">消除</button></div>';
       h += '<div id=""editor_fields_' + ptrHash + '"" style=""padding:8px 0""><div style=""padding:8px;color:var(--text-muted);font-size:12px"">点击展开加载字段...</div></div></details>';
       return h;
     }
