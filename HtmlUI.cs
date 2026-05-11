@@ -1509,7 +1509,9 @@ function getKingdomInfo(id) {
 
 function classifyEntity(className) {
   if (className.startsWith('Stuff')) return 'drop';
-  if (className.startsWith('WildAnimal')) return 'animal';
+  if (className.includes('Animal')) return 'animal';
+  if (className.includes('Ship')) return 'ship';
+  if (className.includes('DeadBody')) return 'deadbody';
   if (className.startsWith('Facility')) return 'building';
   if (className.startsWith('Monster')) return 'monster';
   return 'other';
@@ -1543,7 +1545,9 @@ function renderEntityScanPanel() {
       {key:'monster', label:'怪物', icon:'&#x1F47E;', color:'var(--danger, #e74c3c)'},
       {key:'building', label:'建筑物', icon:'&#x1F3D7;', color:'var(--success)'},
       {key:'drop', label:'掉落物', icon:'&#x1F4E6;', color:'var(--accent)'},
-      {key:'animal', label:'野兽', icon:'&#x1F43E;', color:'var(--warning, #f39c12)'},
+      {key:'animal', label:'动物', icon:'&#x1F43E;', color:'var(--warning, #f39c12)'},
+      {key:'ship', label:'船', icon:'&#x26F5;', color:'#3498db'},
+      {key:'deadbody', label:'尸体', icon:'&#x1F480;', color:'#7f8c8d'},
       {key:'other', label:'其他', icon:'&#x2753;', color:'var(--text-muted)'}
     ];
 
