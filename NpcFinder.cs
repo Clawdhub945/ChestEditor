@@ -38,6 +38,8 @@ internal static class NpcFinder
     {
         public string GoName = "";
         public string ClassName = "";
+        public string NpcName = "";
+        public int HometownKingdomId;
         public IntPtr Ptr;
         public int PtrHash;
         public int Guid;
@@ -217,17 +219,32 @@ internal static class NpcFinder
                         // 获取全部字段元数据（不读值）
                         var fieldMap = GetOrCacheClassFields(compClass, className);
 
-                        // 只读 guid 和 stuff_id
-                        int guid = 0, stuffId = 0;
+                        // 只读 guid、stuff_id、npc_name、hometown_kingdom_id
+                        int guid = 0, stuffId = 0, hometownKingdomId = 0;
+                        string npcName = "";
                         if (fieldMap.TryGetValue("guid", out var guidFe))
                             try { guid = ReadIl2CppInt(compPtr, guidFe.Offset); } catch { }
                         if (fieldMap.TryGetValue("stuff_id", out var sidFe))
                             try { stuffId = ReadIl2CppInt(compPtr, sidFe.Offset); } catch { }
+                        if (fieldMap.TryGetValue("npc_name", out var nameFe) && nameFe.IsString)
+                            try { npcName = ReadIl2CppString(compPtr, nameFe.Offset) ?? ""; } catch { }
+                        if (fieldMap.TryGetValue("hometown_kingdom_id", out var hkFe))
+                        {
+                            try { hometownKingdomId = ReadIl2CppInt(compPtr, hkFe.Offset); } catch { }
+                            if (found < 5)
+                                Plugin.LogInfo($"[NpcFinder]   hometown_kingdom_id offset={hkFe.Offset} value={hometownKingdomId} className={className}");
+                        }
+                        else if (found < 5)
+                        {
+                            Plugin.LogInfo($"[NpcFinder]   hometown_kingdom_id NOT FOUND in fieldMap (className={className}, fields={string.Join(",", fieldMap.Keys)})");
+                        }
 
                         var npc = new NpcInfo
                         {
                             GoName = go.name,
                             ClassName = className,
+                            NpcName = npcName,
+                            HometownKingdomId = hometownKingdomId,
                             Ptr = compPtr,
                             PtrHash = compPtr.GetHashCode(),
                             Guid = guid,
@@ -248,7 +265,7 @@ internal static class NpcFinder
             for (int i = 0; i < Math.Min(20, _npcs.Count); i++)
             {
                 var e = _npcs[i];
-                Plugin.LogInfo($"[NpcFinder]   {e.GoName} [{e.ClassName}] guid={e.Guid} stuffId={e.StuffId} fields={e.FieldMeta.Count}");
+                Plugin.LogInfo($"[NpcFinder]   {e.GoName} [{e.ClassName}] guid={e.Guid} stuffId={e.StuffId} hometownKingdomId={e.HometownKingdomId} hasHkField={e.FieldMeta.ContainsKey("hometown_kingdom_id")} fields={e.FieldMeta.Count}");
             }
         }
         catch (Exception ex) { Plugin.LogError($"[NpcFinder] 异常: {ex.Message}\n{ex.StackTrace}"); }
@@ -266,6 +283,8 @@ internal static class NpcFinder
             sb.Append('{');
             sb.Append($"\"goName\":\"{Escape(e.GoName)}\",");
             sb.Append($"\"className\":\"{Escape(e.ClassName)}\",");
+            sb.Append($"\"npcName\":\"{Escape(e.NpcName)}\",");
+            sb.Append($"\"hometownKingdomId\":{e.HometownKingdomId},");
             sb.Append($"\"ptrHash\":{e.PtrHash},");
             sb.Append($"\"guid\":{e.Guid},");
             sb.Append($"\"stuffId\":{e.StuffId},");

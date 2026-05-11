@@ -1181,7 +1181,7 @@ function renderSidebar() {
   html += '<div class=""ci-icon"" style=""font-size:20px;display:flex;align-items:center;justify-content:center"">&#x1F464;</div>';
   html += '<div class=""ci-info"">';
   html += '<div class=""ci-name"">找NPC</div>';
-  html += '<div class=""ci-count"">' + npcFinderData.length + ' 个</div>';
+  html += '<div class=""ci-count"">' + (npcFinderData.length > 0 ? npcFinderData.slice(0,3).map(e => e.npcName || e.goName).join(', ') + (npcFinderData.length > 3 ? '...' : '') : '0 个') + '</div>';
   html += '</div></div>';
 
   html += '</div></div>';
@@ -1488,6 +1488,25 @@ function renderFieldsTable(fields, ptrHash, prefix, setFn) {
   return html;
 }
 
+function getKingdomInfo(id) {
+  const map = {
+    1:   {name:'我方',   bg:'var(--success-dark, #27ae60)', fg:'#fff'},
+    101: {name:'南王',   bg:'#3498db', fg:'#fff'},
+    102: {name:'宣王',   bg:'#9b59b6', fg:'#fff'},
+    103: {name:'北王',   bg:'#2980b9', fg:'#fff'},
+    104: {name:'逍遥王', bg:'#1abc9c', fg:'#fff'},
+    105: {name:'南洋王', bg:'#16a085', fg:'#fff'},
+    106: {name:'西洋王', bg:'#2c3e50', fg:'#fff'},
+    107: {name:'商王',   bg:'#d35400', fg:'#fff'},
+    97:  {name:'蛮族',   bg:'#7f8c8d', fg:'#fff'},
+    98:  {name:'强盗',   bg:'#c0392b', fg:'#fff'},
+    99:  {name:'怪物',   bg:'var(--danger, #e74c3c)', fg:'#fff'},
+    89:  {name:'蓝蚂蚁', bg:'#2980b9', fg:'#fff'},
+    88:  {name:'红蚂蚁', bg:'#e74c3c', fg:'#fff'}
+  };
+  return map[id] || null;
+}
+
 function classifyEntity(className) {
   if (className.startsWith('Stuff')) return 'drop';
   if (className.startsWith('WildAnimal')) return 'animal';
@@ -1584,10 +1603,11 @@ async function npcFinderScan() {
 
 async function fetchNpcFinderData() {
   try {
-    const r = await fetch('/api/npcfinder/npcs');
+    const r = await fetch('/api/npcfinder/npcs?t=' + Date.now());
     const d = await r.json();
+    console.log('[NpcFinder] fetched', d.length, 'npcs, sample:', d.length > 0 ? JSON.stringify({hometownKingdomId: d[0].hometownKingdomId, npcName: d[0].npcName}) : 'empty');
     if (Array.isArray(d)) npcFinderData = d;
-  } catch(e) {}
+  } catch(e) { console.error('[NpcFinder] fetch error:', e); }
 }
 
 async function setNpcFinderField(ptrHash, field) {
@@ -1620,6 +1640,7 @@ async function loadNpcFinderFields(ptrHash) {
 
 function renderNpcFinderPanel() {
   const el = document.getElementById('content');
+  console.log('[NpcFinder] render, data count:', npcFinderData.length, 'sample:', npcFinderData.length > 0 ? JSON.stringify({hometownKingdomId: npcFinderData[0].hometownKingdomId, npcName: npcFinderData[0].npcName}) : 'empty');
   let html = '';
   html += '<div style=""padding:20px;height:100%;display:flex;flex-direction:column;overflow:hidden"">';
   html += '<h2 style=""color:var(--accent-light);margin-bottom:16px;font-size:18px"">&#x1F464; 找NPC</h2>';
@@ -1656,14 +1677,20 @@ function renderNpcFinderPanel() {
       html += '<div style=""display:flex;flex-direction:column;gap:6px;padding:8px 0"">';
       for (const e of items) {
         const goName = e.goName || 'unknown';
+        const npcName = e.npcName || '';
+        const hometownKingdomId = e.hometownKingdomId || 0;
         const guid = e.guid || 0;
         const stuffId = e.stuffId || 0;
         const ptrHash = e.ptrHash || 0;
         const fieldCount = e.fieldCount || 0;
+        const displayName = npcName || goName;
+        const kInfo = getKingdomInfo(hometownKingdomId);
 
         html += '<details style=""margin-bottom:4px"" ontoggle=""if(this.open)loadNpcFinderFields(' + ptrHash + ')"">';
         html += '<summary style=""cursor:pointer;padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;display:flex;align-items:center;gap:8px"">';
-        html += '<span style=""font-weight:600;color:var(--text-primary)"">' + esc(goName) + '</span>';
+        html += '<span style=""font-weight:600;color:var(--text-primary)"">' + esc(displayName) + '</span>';
+        if (kInfo) html += '<span style=""font-size:10px;padding:1px 6px;border-radius:8px;background:' + kInfo.bg + ';color:' + kInfo.fg + '"">' + esc(kInfo.name) + '</span>';
+        if (npcName) html += '<span style=""font-size:10px;color:var(--text-muted)"">' + esc(goName) + '</span>';
         html += '<span style=""font-size:11px;color:var(--text-muted);margin-left:auto"">GUID:' + guid + ' stuffId:' + stuffId + ' (' + fieldCount + '字段)</span>';
         html += '</summary>';
         html += '<div id=""npcfinder_fields_' + ptrHash + '"" style=""padding:8px 0""><div style=""padding:8px;color:var(--text-muted);font-size:12px"">点击展开加载字段...</div></div></details>';
