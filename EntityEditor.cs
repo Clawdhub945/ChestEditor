@@ -215,11 +215,7 @@ internal static class EntityEditor
 
                         // 判断是否匹配：有 stuff_id 字段 且 stuffId>0,guid>0  OR  类名含 Npc
                         bool hasStuffId = fieldMap.ContainsKey("stuff_id");
-                        bool isNpc = false;
-                        foreach (var kw in NpcClassKeywords)
-                        {
-                            if (className.Contains(kw)) { isNpc = true; break; }
-                        }
+                        bool isNpc = className == "Npc";
 
                         if (!hasStuffId && !isNpc) continue;
 
