@@ -1744,7 +1744,11 @@ async function fetchEntityEditorData() {
 
 async function loadEntityEditorFields(ptrHash) {
   const container = document.getElementById('editor_fields_' + ptrHash);
-  if (!container || container.dataset.loaded) return;
+  if (!container) return;
+  if (container.style.display === 'none') {
+    container.style.display = 'block';
+    if (container.dataset.loaded) return;
+  }
   container.innerHTML = '<div style=""padding:8px;color:var(--text-muted);font-size:12px"">加载中...</div>';
   try {
     const r = await fetch('/api/editor/fields/' + ptrHash + '?t=' + Date.now());
@@ -1875,16 +1879,15 @@ function renderEntityEditorPanel() {
       const fieldCount = e.fieldCount || 0;
       const displayName = npcName || entityName || goName;
       const kInfo = getKingdomInfo(hometownKingdomId);
-      h += '<div style=""margin-bottom:4px;display:flex;align-items:flex-start;gap:6px"">';
-      h += '<details style=""flex:1;min-width:0"" ontoggle=""if(this.open)loadEntityEditorFields(' + ptrHash + ')"">';
-      h += '<summary style=""cursor:pointer;padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;display:flex;align-items:center;gap:8px"">';
+      h += '<div style=""margin-bottom:4px"">';
+      h += '<div style=""display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer"" onclick=""var d=this.nextElementSibling;d.open=!d.open;if(d.open)loadEntityEditorFields(' + ptrHash + ')"">';
       h += '<span style=""font-weight:600;color:var(--text-primary)"">' + esc(displayName) + '</span>';
       if (kInfo) h += '<span style=""font-size:10px;padding:1px 6px;border-radius:8px;background:' + kInfo.bg + ';color:' + kInfo.fg + '"">' + esc(kInfo.name) + '</span>';
       if (npcName && entityName) h += '<span style=""font-size:10px;color:var(--text-muted)"">' + esc(entityName) + '</span>';
-      h += '<span style=""font-size:11px;color:var(--text-muted);margin-left:auto"">' + esc(e.className || '') + ' GUID:' + guid + ' (' + fieldCount + '字段)</span>';
-      h += '</summary>';
-      h += '<div id=""editor_fields_' + ptrHash + '"" style=""padding:8px 0""><div style=""padding:8px;color:var(--text-muted);font-size:12px"">点击展开加载字段...</div></div></details>';
-      h += '<button onclick=""destroyEditorEntity(' + ptrHash + ')"" style=""flex-shrink:0;padding:6px 10px;background:var(--danger,#e74c3c);color:#fff;border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-size:11px;margin-top:0;height:34px"">消除</button>';
+      h += '<span style=""font-size:11px;color:var(--text-muted);margin-left:auto"">' + esc(e.className || '') + ' GUID:' + guid + '</span>';
+      h += '<button onclick=""event.stopPropagation();destroyEditorEntity(' + ptrHash + ')"" style=""padding:3px 10px;background:var(--danger,#e74c3c);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px;white-space:nowrap"">消除</button>';
+      h += '</div>';
+      h += '<div id=""editor_fields_' + ptrHash + '"" style=""display:none;padding:4px 0 4px 12px""></div>';
       h += '</div>';
       return h;
     }
