@@ -1869,6 +1869,7 @@ function renderEntityEditorPanel() {
 
     // NPC 子分类渲染函数
     function renderEditorEntityItem(e) {
+      console.log('[Editor] renderEditorEntityItem called for', e.goName, e.ptrHash);
       let h = '';
       const goName = e.goName || 'unknown';
       const npcName = e.npcName || '';
