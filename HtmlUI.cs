@@ -1500,6 +1500,7 @@ function renderFieldsTable(fields, ptrHash, prefix, setFn) {
 function getKingdomInfo(id) {
   const map = {
     1:   {name:'我方',   bg:'var(--success-dark, #27ae60)', fg:'#fff'},
+    100: {name:'国王',   bg:'#f1c40f', fg:'#333'},
     101: {name:'南王',   bg:'#3498db', fg:'#fff'},
     102: {name:'宣王',   bg:'#9b59b6', fg:'#fff'},
     103: {name:'北王',   bg:'#2980b9', fg:'#fff'},
