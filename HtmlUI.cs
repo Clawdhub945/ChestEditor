@@ -1845,6 +1845,70 @@ function renderEntityEditorPanel() {
       groups[cat].push(e);
     }
 
+    // NPC 子分类渲染函数
+    function renderEditorEntityItem(e) {
+      let h = '';
+      const goName = e.goName || 'unknown';
+      const npcName = e.npcName || '';
+      const hometownKingdomId = e.hometownKingdomId || 0;
+      const guid = e.guid || 0;
+      const ptrHash = e.ptrHash || 0;
+      const entityName = e.name || '';
+      const fieldCount = e.fieldCount || 0;
+      const displayName = npcName || entityName || goName;
+      const kInfo = getKingdomInfo(hometownKingdomId);
+      h += '<details style=""margin-bottom:4px"" ontoggle=""if(this.open)loadEntityEditorFields(' + ptrHash + ')"">';
+      h += '<summary style=""cursor:pointer;padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;display:flex;align-items:center;gap:8px"">';
+      h += '<span style=""font-weight:600;color:var(--text-primary)"">' + esc(displayName) + '</span>';
+      if (kInfo) h += '<span style=""font-size:10px;padding:1px 6px;border-radius:8px;background:' + kInfo.bg + ';color:' + kInfo.fg + '"">' + esc(kInfo.name) + '</span>';
+      if (npcName && entityName) h += '<span style=""font-size:10px;color:var(--text-muted)"">' + esc(entityName) + '</span>';
+      h += '<span style=""font-size:11px;color:var(--text-muted);margin-left:auto"">' + esc(e.className || '') + ' GUID:' + guid + ' (' + fieldCount + '字段)</span>';
+      h += '</summary>';
+      h += '<div id=""editor_fields_' + ptrHash + '"" style=""padding:8px 0""><div style=""padding:8px;color:var(--text-muted);font-size:12px"">点击展开加载字段...</div></div></details>';
+      return h;
+    }
+
+    function renderNpcGroup(items) {
+      const mine = [];
+      const others = {};
+      for (const e of items) {
+        const kid = e.hometownKingdomId || 0;
+        if (kid === 1) { mine.push(e); continue; }
+        if (!others[kid]) others[kid] = [];
+        others[kid].push(e);
+      }
+      let h = '';
+      // 我方
+      if (mine.length > 0) {
+        h += '<details open style=""margin-bottom:8px;margin-left:12px"">';
+        h += '<summary style=""cursor:pointer;padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-weight:600;font-size:13px;display:flex;align-items:center;gap:8px"">';
+        h += '<span style=""font-size:10px;padding:1px 6px;border-radius:8px;background:var(--success-dark, #27ae60);color:#fff"">我方</span>';
+        h += '<span style=""margin-left:auto;font-size:12px;color:var(--text-muted);font-weight:400"">' + mine.length + ' 个</span>';
+        h += '</summary>';
+        h += '<div style=""display:flex;flex-direction:column;gap:4px;padding:6px 0"">';
+        for (const e of mine) h += renderEditorEntityItem(e);
+        h += '</div></details>';
+      }
+      // 其他阵营按王国分组
+      const sortedKids = Object.keys(others).map(Number).sort((a,b) => a - b);
+      for (const kid of sortedKids) {
+        const group = others[kid];
+        const kInfo = getKingdomInfo(kid);
+        const label = kInfo ? kInfo.name : ('阵营' + kid);
+        const bg = kInfo ? kInfo.bg : 'var(--text-muted)';
+        const fg = kInfo ? kInfo.fg : '#fff';
+        h += '<details style=""margin-bottom:8px;margin-left:12px"">';
+        h += '<summary style=""cursor:pointer;padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-weight:600;font-size:13px;display:flex;align-items:center;gap:8px"">';
+        h += '<span style=""font-size:10px;padding:1px 6px;border-radius:8px;background:' + bg + ';color:' + fg + '"">' + esc(label) + '</span>';
+        h += '<span style=""margin-left:auto;font-size:12px;color:var(--text-muted);font-weight:400"">' + group.length + ' 个</span>';
+        h += '</summary>';
+        h += '<div style=""display:flex;flex-direction:column;gap:4px;padding:6px 0"">';
+        for (const e of group) h += renderEditorEntityItem(e);
+        h += '</div></details>';
+      }
+      return h;
+    }
+
     html += '<div style=""flex:1;overflow-y:auto;padding-right:8px"">';
     for (const cd of catDefs) {
       const items = groups[cd.key];
@@ -1855,29 +1919,14 @@ function renderEntityEditorPanel() {
       html += '<span style=""color:' + cd.color + '"">' + cd.label + '</span>';
       html += '<span style=""margin-left:auto;font-size:12px;color:var(--text-muted);font-weight:400"">' + items.length + ' 个</span>';
       html += '</summary>';
-      html += '<div style=""display:flex;flex-direction:column;gap:6px;padding:8px 0"">';
-      for (const e of items) {
-        const goName = e.goName || 'unknown';
-        const npcName = e.npcName || '';
-        const hometownKingdomId = e.hometownKingdomId || 0;
-        const guid = e.guid || 0;
-        const stuffId = e.stuffId || 0;
-        const ptrHash = e.ptrHash || 0;
-        const entityName = e.name || '';
-        const fieldCount = e.fieldCount || 0;
-        const displayName = npcName || entityName || goName;
-        const kInfo = getKingdomInfo(hometownKingdomId);
-
-        html += '<details style=""margin-bottom:4px"" ontoggle=""if(this.open)loadEntityEditorFields(' + ptrHash + ')"">';
-        html += '<summary style=""cursor:pointer;padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;display:flex;align-items:center;gap:8px"">';
-        html += '<span style=""font-weight:600;color:var(--text-primary)"">' + esc(displayName) + '</span>';
-        if (kInfo) html += '<span style=""font-size:10px;padding:1px 6px;border-radius:8px;background:' + kInfo.bg + ';color:' + kInfo.fg + '"">' + esc(kInfo.name) + '</span>';
-        if (npcName && entityName) html += '<span style=""font-size:10px;color:var(--text-muted)"">' + esc(entityName) + '</span>';
-        html += '<span style=""font-size:11px;color:var(--text-muted);margin-left:auto"">' + esc(e.className || '') + ' GUID:' + guid + ' (' + fieldCount + '字段)</span>';
-        html += '</summary>';
-        html += '<div id=""editor_fields_' + ptrHash + '"" style=""padding:8px 0""><div style=""padding:8px;color:var(--text-muted);font-size:12px"">点击展开加载字段...</div></div></details>';
+      if (cd.key === 'npc') {
+        html += renderNpcGroup(items);
+      } else {
+        html += '<div style=""display:flex;flex-direction:column;gap:6px;padding:8px 0"">';
+        for (const e of items) html += renderEditorEntityItem(e);
+        html += '</div>';
       }
-      html += '</div></details>';
+      html += '</details>';
     }
     html += '</div>';
   }
