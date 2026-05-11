@@ -1818,21 +1818,40 @@ function renderEntityEditorPanel() {
     html += '<div style=""color:var(--text-muted);font-size:13px"">点击上方按钮扫描实体</div>';
     html += '</div>';
   } else {
-    // 按 className 分组
-    const groups = {};
-    for (const e of entityEditorData) {
-      const cn = e.className || 'unknown';
-      if (!groups[cn]) groups[cn] = [];
-      groups[cn].push(e);
+    // 按类别分组
+    function editorClassify(cn) {
+      if (cn === 'Npc') return 'npc';
+      if (cn.startsWith('Facility')) return 'building';
+      if (cn.includes('Animal')) return 'animal';
+      if (cn.startsWith('Monster')) return 'monster';
+      if (cn.includes('Ship')) return 'ship';
+      if (cn.startsWith('Stuff')) return 'drop';
+      return 'other';
     }
-    const sortedClasses = Object.keys(groups).sort();
+    const catDefs = [
+      {key:'npc', label:'NPC', icon:'&#x1F464;', color:'#3498db'},
+      {key:'monster', label:'怪物', icon:'&#x1F47E;', color:'var(--danger, #e74c3c)'},
+      {key:'building', label:'建筑物', icon:'&#x1F3D7;', color:'var(--success)'},
+      {key:'animal', label:'动物', icon:'&#x1F43E;', color:'var(--warning, #f39c12)'},
+      {key:'ship', label:'船', icon:'&#x26F5;', color:'#3498db'},
+      {key:'drop', label:'掉落物', icon:'&#x1F4E6;', color:'var(--accent)'},
+      {key:'other', label:'其他', icon:'&#x2753;', color:'var(--text-muted)'}
+    ];
+    const groups = {};
+    for (const cd of catDefs) groups[cd.key] = [];
+    for (const e of entityEditorData) {
+      const cat = editorClassify(e.className || '');
+      groups[cat].push(e);
+    }
 
     html += '<div style=""flex:1;overflow-y:auto;padding-right:8px"">';
-    for (const cn of sortedClasses) {
-      const items = groups[cn];
+    for (const cd of catDefs) {
+      const items = groups[cd.key];
+      if (items.length === 0) continue;
       html += '<details style=""margin-bottom:12px"">';
       html += '<summary style=""cursor:pointer;padding:10px 14px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-weight:600;font-size:14px;display:flex;align-items:center;gap:8px"">';
-      html += '<span style=""color:var(--accent-light)"">' + esc(cn) + '</span>';
+      html += '<span>' + cd.icon + '</span>';
+      html += '<span style=""color:' + cd.color + '"">' + cd.label + '</span>';
       html += '<span style=""margin-left:auto;font-size:12px;color:var(--text-muted);font-weight:400"">' + items.length + ' 个</span>';
       html += '</summary>';
       html += '<div style=""display:flex;flex-direction:column;gap:6px;padding:8px 0"">';
@@ -1853,7 +1872,7 @@ function renderEntityEditorPanel() {
         html += '<span style=""font-weight:600;color:var(--text-primary)"">' + esc(displayName) + '</span>';
         if (kInfo) html += '<span style=""font-size:10px;padding:1px 6px;border-radius:8px;background:' + kInfo.bg + ';color:' + kInfo.fg + '"">' + esc(kInfo.name) + '</span>';
         if (npcName && entityName) html += '<span style=""font-size:10px;color:var(--text-muted)"">' + esc(entityName) + '</span>';
-        html += '<span style=""font-size:11px;color:var(--text-muted);margin-left:auto"">' + esc(cn) + ' GUID:' + guid + ' (' + fieldCount + '字段)</span>';
+        html += '<span style=""font-size:11px;color:var(--text-muted);margin-left:auto"">' + esc(e.className || '') + ' GUID:' + guid + ' (' + fieldCount + '字段)</span>';
         html += '</summary>';
         html += '<div id=""editor_fields_' + ptrHash + '"" style=""padding:8px 0""><div style=""padding:8px;color:var(--text-muted);font-size:12px"">点击展开加载字段...</div></div></details>';
       }
