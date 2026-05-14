@@ -679,6 +679,34 @@ internal class HttpServer
                 else
                     SendJson(resp, "{\"error\":\"timeout\"}");
             }
+            else if (path == "/api/editor/listmethods" && method == "POST")
+            {
+                string body;
+                using (var reader = new StreamReader(req.InputStream, req.ContentEncoding))
+                    body = reader.ReadToEnd();
+                int ptrHash = 0;
+                foreach (var part in body.Trim('{', '}').Split(','))
+                {
+                    var kv = part.Split(':');
+                    if (kv.Length != 2) continue;
+                    string key = kv[0].Trim().Trim('"');
+                    string v = kv[1].Trim().Trim('"');
+                    if (key == "ptrHash" && int.TryParse(v, out int g)) ptrHash = g;
+                }
+                if (ptrHash == 0) { SendJson(resp, "{\"error\":\"missing ptrHash\"}"); return; }
+                var comp = ChestEditorComponent.Instance;
+                if (comp == null) { SendJson(resp, "{\"error\":\"mod not ready\"}"); return; }
+                var signal = new ManualResetEventSlim(false);
+                var writeReq = new ChestEditorComponent.WriteRequest
+                {
+                    ChestIndex = -29, ExtraIndex = ptrHash, Signal = signal
+                };
+                comp.WriteQueue.Enqueue(writeReq);
+                if (signal.Wait(10000))
+                    SendJson(resp, writeReq.ResultJson ?? "{}");
+                else
+                    SendJson(resp, "{\"error\":\"timeout\"}");
+            }
             else if (path == "/api/dragon/natures" && method == "GET")
             {
                 SendJson(resp, Il2CppHelper.GetDragonNaturesJson());

@@ -29,4 +29,8 @@
     <EmbeddedResource Include="Icon\**\*.png" LogicalName="ChestEditor.Icon.%(RecursiveDir)%(Filename)%(Extension)" />
     <EmbeddedResource Include="Dragon\**\*.png" LogicalName="ChestEditor.Dragon.%(RecursiveDir)%(Filename)%(Extension)" />
   </ItemGroup>
+
+  <Target Name="PostBuild" AfterTargets="PostBuildEvent">
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="C:\TerritoryModTest" />
+  </Target>
 </Project>

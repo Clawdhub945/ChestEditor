@@ -1742,13 +1742,21 @@ async function fetchEntityEditorData() {
   } catch(e) {}
 }
 
-async function loadEntityEditorFields(ptrHash) {
+function toggleEditorEntity(ptrHash) {
   const container = document.getElementById('editor_fields_' + ptrHash);
   if (!container) return;
   if (container.style.display === 'none') {
     container.style.display = 'block';
-    if (container.dataset.loaded) return;
+    loadEntityEditorFields(ptrHash);
+  } else {
+    container.style.display = 'none';
   }
+}
+
+async function loadEntityEditorFields(ptrHash) {
+  const container = document.getElementById('editor_fields_' + ptrHash);
+  if (!container) return;
+  if (container.dataset.loaded) return;
   container.innerHTML = '<div style=""padding:8px;color:var(--text-muted);font-size:12px"">加载中...</div>';
   try {
     const r = await fetch('/api/editor/fields/' + ptrHash + '?t=' + Date.now());
@@ -1785,6 +1793,37 @@ function renderEditorFieldsTable(fields, ptrHash) {
   }
   html += '</table>';
   return html;
+}
+
+async function listEntityMethods(ptrHash) {
+  try {
+    const r = await fetch('/api/editor/listmethods', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ptrHash})
+    });
+    const d = await r.json();
+    if (d.error) { toast(d.error, true); return; }
+    alert(d.methods || 'no methods');
+  } catch(e) { toast('查询失败', true); }
+}
+
+async function destroyEditorEntities(ptrHashes) {
+  if (!confirm('确定一键消除 ' + ptrHashes.length + ' 个实体？此操作不可撤销。')) return;
+  let ok = 0, fail = 0;
+  for (const ph of ptrHashes) {
+    try {
+      const r = await fetch('/api/editor/destroy', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ptrHash: ph})
+      });
+      const d = await r.json();
+      if (d.error) fail++; else ok++;
+    } catch(e) { fail++; }
+  }
+  toast('消除完成: ' + ok + ' 成功' + (fail > 0 ? ', ' + fail + ' 失败' : ''));
+  await fetchEntityEditorData();
+  renderContent();
 }
 
 async function destroyEditorEntity(ptrHash) {
@@ -1869,7 +1908,6 @@ function renderEntityEditorPanel() {
 
     // NPC 子分类渲染函数
     function renderEditorEntityItem(e) {
-      console.log('[Editor] renderEditorEntityItem called for', e.goName, e.ptrHash);
       let h = '';
       const goName = e.goName || 'unknown';
       const npcName = e.npcName || '';
@@ -1881,11 +1919,12 @@ function renderEntityEditorPanel() {
       const displayName = npcName || entityName || goName;
       const kInfo = getKingdomInfo(hometownKingdomId);
       h += '<div style=""margin-bottom:4px"">';
-      h += '<div style=""display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer"" onclick=""var d=this.nextElementSibling;d.open=!d.open;if(d.open)loadEntityEditorFields(' + ptrHash + ')"">';
+      h += '<div style=""display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer"" onclick=""toggleEditorEntity(' + ptrHash + ')"">';
       h += '<span style=""font-weight:600;color:var(--text-primary)"">' + esc(displayName) + '</span>';
       if (kInfo) h += '<span style=""font-size:10px;padding:1px 6px;border-radius:8px;background:' + kInfo.bg + ';color:' + kInfo.fg + '"">' + esc(kInfo.name) + '</span>';
       if (npcName && entityName) h += '<span style=""font-size:10px;color:var(--text-muted)"">' + esc(entityName) + '</span>';
       h += '<span style=""font-size:11px;color:var(--text-muted);margin-left:auto"">' + esc(e.className || '') + ' GUID:' + guid + '</span>';
+      h += '<button onclick=""event.stopPropagation();listEntityMethods(' + ptrHash + ')"" style=""padding:3px 8px;background:var(--accent);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px;white-space:nowrap"">方法</button>';
       h += '<button onclick=""event.stopPropagation();destroyEditorEntity(' + ptrHash + ')"" style=""padding:3px 10px;background:var(--danger,#e74c3c);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px;white-space:nowrap"">消除</button>';
       h += '</div>';
       h += '<div id=""editor_fields_' + ptrHash + '"" style=""display:none;padding:4px 0 4px 12px""></div>';
@@ -1905,10 +1944,12 @@ function renderEntityEditorPanel() {
       let h = '';
       // 我方
       if (mine.length > 0) {
+        const mineHashes = mine.map(e => e.ptrHash);
         h += '<details open style=""margin-bottom:8px;margin-left:12px"">';
         h += '<summary style=""cursor:pointer;padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-weight:600;font-size:13px;display:flex;align-items:center;gap:8px"">';
         h += '<span style=""font-size:10px;padding:1px 6px;border-radius:8px;background:var(--success-dark, #27ae60);color:#fff"">我方</span>';
         h += '<span style=""margin-left:auto;font-size:12px;color:var(--text-muted);font-weight:400"">' + mine.length + ' 个</span>';
+        h += '<button onclick=""event.stopPropagation();destroyEditorEntities(' + JSON.stringify(mineHashes) + ')"" style=""padding:2px 8px;background:var(--danger,#e74c3c);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px"">一键消除</button>';
         h += '</summary>';
         h += '<div style=""display:flex;flex-direction:column;gap:4px;padding:6px 0"">';
         for (const e of mine) h += renderEditorEntityItem(e);
@@ -1922,10 +1963,12 @@ function renderEntityEditorPanel() {
         const label = kInfo ? kInfo.name : ('阵营' + kid);
         const bg = kInfo ? kInfo.bg : 'var(--text-muted)';
         const fg = kInfo ? kInfo.fg : '#fff';
+        const groupHashes = group.map(e => e.ptrHash);
         h += '<details style=""margin-bottom:8px;margin-left:12px"">';
         h += '<summary style=""cursor:pointer;padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-weight:600;font-size:13px;display:flex;align-items:center;gap:8px"">';
         h += '<span style=""font-size:10px;padding:1px 6px;border-radius:8px;background:' + bg + ';color:' + fg + '"">' + esc(label) + '</span>';
         h += '<span style=""margin-left:auto;font-size:12px;color:var(--text-muted);font-weight:400"">' + group.length + ' 个</span>';
+        h += '<button onclick=""event.stopPropagation();destroyEditorEntities(' + JSON.stringify(groupHashes) + ')"" style=""padding:2px 8px;background:var(--danger,#e74c3c);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px"">一键消除</button>';
         h += '</summary>';
         h += '<div style=""display:flex;flex-direction:column;gap:4px;padding:6px 0"">';
         for (const e of group) h += renderEditorEntityItem(e);
@@ -1938,11 +1981,13 @@ function renderEntityEditorPanel() {
     for (const cd of catDefs) {
       const items = groups[cd.key];
       if (items.length === 0) continue;
+      const catHashes = items.map(e => e.ptrHash);
       html += '<details style=""margin-bottom:12px"">';
       html += '<summary style=""cursor:pointer;padding:10px 14px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-weight:600;font-size:14px;display:flex;align-items:center;gap:8px"">';
       html += '<span>' + cd.icon + '</span>';
       html += '<span style=""color:' + cd.color + '"">' + cd.label + '</span>';
       html += '<span style=""margin-left:auto;font-size:12px;color:var(--text-muted);font-weight:400"">' + items.length + ' 个</span>';
+      html += '<button onclick=""event.stopPropagation();destroyEditorEntities(' + JSON.stringify(catHashes) + ')"" style=""padding:3px 10px;background:var(--danger,#e74c3c);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px"">一键消除</button>';
       html += '</summary>';
       if (cd.key === 'npc') {
         html += renderNpcGroup(items);

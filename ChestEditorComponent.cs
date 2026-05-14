@@ -446,7 +446,15 @@ public partial class ChestEditorComponent : MonoBehaviour
                 {
                     // 消除实体（主线程执行）
                     string result = EntityEditor.DestroyEntity(req.ExtraIndex);
+                    if (result == "ok") EntityEditorJson = EntityEditor.GetAllJson();
                     req.ResultJson = result == "ok" ? "{\"ok\":true}" : $"{{\"error\":\"{Escape(result)}\"}}";
+                }
+                else if (req.ChestIndex == -29)
+                {
+                    // 列出实体方法（调试）
+                    string methods = EntityEditor.ListMethods(req.ExtraIndex);
+                    Plugin.LogInfo($"[EntityEditor] ListMethods ptrHash={req.ExtraIndex}:\n{methods}");
+                    req.ResultJson = $"{{\"methods\":\"{Escape(methods)}\"}}";
                 }
                 else if (req.IsAdd)
                 {
