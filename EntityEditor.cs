@@ -217,7 +217,7 @@ internal static class EntityEditor
 
                         // 判断是否匹配：有 stuff_id 字段 且 stuffId>0,guid>0  OR  类名含 Npc
                         bool hasStuffId = fieldMap.ContainsKey("stuff_id");
-                        bool isNpc = className == "Npc";
+                        bool isNpc = className.Contains("Npc") && !className.Contains("NpcHelper") && !className.Contains("NpcTask") && !className.Contains("NpcFinder");
 
                         if (!hasStuffId && !isNpc) continue;
 
@@ -444,10 +444,13 @@ internal static class EntityEditor
     {
         try
         {
+            Plugin.LogInfo($"[EntityEditor] DestroyEntity called, ptrHash={ptrHash}, entities.Count={_entities.Count}");
             for (int i = 0; i < _entities.Count; i++)
             {
                 var e = _entities[i];
                 if (e.PtrHash != ptrHash) continue;
+
+                Plugin.LogInfo($"[EntityEditor] Matched entity: {e.GoName} class={e.ClassName} ptrHash={e.PtrHash}");
 
                 if (e.GoRef == null)
                     return "GameObject reference lost (rescan needed)";
@@ -460,38 +463,76 @@ internal static class EntityEditor
                 bool called = false;
 
                 // === 第一优先：NPC 类型用 LeaveMapAndDestroy ===
+                // LeaveMapAndDestroy 是虚方法，il2cpp_class_get_method_from_name 搜不到
+                // 需要用 il2cpp_class_get_methods 枚举
                 if (className.Contains("Npc") && !className.Contains("NpcHelper"))
                 {
-                    string[] zeroParamNames = { "LeaveMapAndDestroy", "LeaveMapAndDestroyWithFamily", "OnDead" };
-                    foreach (var methodName in zeroParamNames)
+                    string[] targetNames = { "LeaveMapAndDestroy", "LeaveMapAndDestroyWithFamily", "OnDead", "LeaveMap", "OnLeaveMap" };
+                    IntPtr searchCls = classPtr;
+                    int depth = 0;
+                    while (searchCls != IntPtr.Zero && depth < 15 && !called)
                     {
-                        if (called) break;
-                        IntPtr searchCls = classPtr;
-                        int depth = 0;
-                        while (searchCls != IntPtr.Zero && depth < 15 && !called)
+                        string clsName = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_name(searchCls)) ?? "?";
+                        IntPtr iter = IntPtr.Zero;
+                        IntPtr mth;
+                        while ((mth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_methods(searchCls, ref iter)) != IntPtr.Zero)
                         {
-                            string clsName = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_name(searchCls)) ?? "?";
-                            IntPtr methodPtr = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(searchCls, methodName, 0);
-                            Plugin.LogInfo($"[EntityEditor] [NPC] {methodName} depth={depth} cls={clsName} found={methodPtr != IntPtr.Zero}");
-                            if (methodPtr != IntPtr.Zero)
+                            string? mName = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_name(mth));
+                            if (mName == null) continue;
+                            foreach (var target in targetNames)
                             {
-                                try
+                                if (mName == target)
                                 {
-                                    IntPtr exception = IntPtr.Zero;
-                                    unsafe { Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(methodPtr, e.Ptr, null, ref exception); }
-                                    if (exception != IntPtr.Zero)
-                                        Plugin.LogInfo($"[EntityEditor] {methodName}() exception on {name}");
-                                    else
+                                    uint pCount = Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_param_count(mth);
+                                    Plugin.LogInfo($"[EntityEditor] [NPC] Found {mName}({pCount}p) at depth={depth} cls={clsName}");
+                                    try
                                     {
-                                        Plugin.LogInfo($"[EntityEditor] ✓ Called {methodName}() on {name}");
-                                        called = true;
+                                        IntPtr exception = IntPtr.Zero;
+                                        if (pCount == 0)
+                                        {
+                                            unsafe { Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(mth, e.Ptr, null, ref exception); }
+                                        }
+                                        else
+                                        {
+                                            // 有参数的方法，传默认值
+                                            IntPtr[] argPtrs = new IntPtr[pCount];
+                                            IntPtr[] storage = new IntPtr[pCount];
+                                            for (int a = 0; a < (int)pCount; a++)
+                                            {
+                                                IntPtr paramType = Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_param(mth, (uint)a);
+                                                string? tn = paramType != IntPtr.Zero ? Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_type_get_name(paramType)) : null;
+                                                bool isBool = tn != null && (tn == "System.Boolean" || tn == "bool");
+                                                storage[a] = isBool ? (IntPtr)1 : IntPtr.Zero;
+                                            }
+                                            unsafe
+                                            {
+                                                fixed (IntPtr* storPtr = storage)
+                                                {
+                                                    for (int a = 0; a < (int)pCount; a++)
+                                                        argPtrs[a] = (IntPtr)(&storPtr[a]);
+                                                    fixed (IntPtr* argsArr = argPtrs)
+                                                    {
+                                                        Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(mth, e.Ptr, (void**)argsArr, ref exception);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        if (exception != IntPtr.Zero)
+                                            Plugin.LogInfo($"[EntityEditor] {mName}() exception on {name}");
+                                        else
+                                        {
+                                            Plugin.LogInfo($"[EntityEditor] ✓ Called {mName}() on {name} (depth={depth})");
+                                            called = true;
+                                            break;
+                                        }
                                     }
+                                    catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] {mName}() CRASH: {ex.Message}"); }
                                 }
-                                catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] {methodName}() CRASH: {ex.Message}"); }
                             }
-                            searchCls = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(searchCls);
-                            depth++;
+                            if (called) break;
                         }
+                        searchCls = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(searchCls);
+                        depth++;
                     }
                 }
 
@@ -633,13 +674,37 @@ internal static class EntityEditor
                             }
                         }
 
-                        // Step 4: 隐藏 + 禁用 GameObject
+                        // Step 4: RecycleMySp 清理渲染资源
+                        {
+                            IntPtr rCls = classPtr;
+                            int rDepth = 0;
+                            while (rCls != IntPtr.Zero && rDepth < 10)
+                            {
+                                IntPtr rMth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(rCls, "RecycleMySp", 0);
+                                if (rMth != IntPtr.Zero)
+                                {
+                                    try
+                                    {
+                                        IntPtr ex = IntPtr.Zero;
+                                        unsafe { Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(rMth, e.Ptr, null, ref ex); }
+                                        Plugin.LogInfo($"[EntityEditor] RecycleMySp() done, ex={ex != IntPtr.Zero}");
+                                    }
+                                    catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] RecycleMySp failed: {ex.Message}"); }
+                                    break;
+                                }
+                                rCls = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(rCls);
+                                rDepth++;
+                            }
+                        }
+
+                        // Step 5: 隐藏 + 销毁 GameObject
                         try
                         {
                             e.GoRef.SetActive(false);
-                            Plugin.LogInfo($"[EntityEditor] SetActive(false) done");
+                            UnityEngine.Object.DestroyImmediate(e.GoRef);
+                            Plugin.LogInfo($"[EntityEditor] DestroyImmediate done");
                         }
-                        catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] SetActive failed: {ex.Message}"); }
+                        catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] DestroyImmediate failed: {ex.Message}"); }
 
                         Plugin.LogInfo($"[EntityEditor] Manual dismantle steps completed");
                         called = true;
