@@ -271,16 +271,17 @@ internal static class EntityEditor
                         }
 
                         // 读取 stuff_name_with_id_index（Facility 类的显示名称）
-                        // 尝试调用 GetFacilityNameWithIdIndex() 方法触发懒加载并获取结果
                         string stuffNameWithIdIndex = "";
-                        try
+                        if (className.Contains("Facility") || className.Contains("Ship") || hasStuffId)
                         {
-                            // 先尝试直接读字段（可能已被缓存）
-                            if (fieldMap.TryGetValue("stuff_name_with_id_index", out var snFe) && snFe.IsString)
-                                stuffNameWithIdIndex = ReadIl2CppString(compPtr, snFe.Offset) ?? "";
-                            // 如果字段为空，尝试调用方法触发计算
-                            if (string.IsNullOrEmpty(stuffNameWithIdIndex))
+                            try
                             {
+                                // 先尝试直接读字段（可能已被缓存）
+                                if (fieldMap.TryGetValue("stuff_name_with_id_index", out var snFe) && snFe.IsString)
+                                    stuffNameWithIdIndex = ReadIl2CppString(compPtr, snFe.Offset) ?? "";
+                                // 如果字段为空，尝试调用方法触发计算
+                                if (string.IsNullOrEmpty(stuffNameWithIdIndex))
+                                {
                                 IntPtr fnCls = compClass;
                                 int fnD = 0;
                                 while (fnCls != IntPtr.Zero && fnD < 10)
@@ -316,8 +317,9 @@ internal static class EntityEditor
                                     fnD++;
                                 }
                             }
+                            }
+                            catch { }
                         }
-                        catch { }
 
                         // 读取 soldier_type_id
                         int soldierTypeId = 0;
