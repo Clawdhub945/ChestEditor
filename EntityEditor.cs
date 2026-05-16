@@ -34,6 +34,29 @@ internal static class EntityEditor
     // NPC 类名关键词
     private static readonly string[] NpcClassKeywords = { "Npc" };
 
+    // soldier_type_id → 名称
+    private static readonly Dictionary<int, string> SoldierTypeNames = new()
+    {
+        { 0, "市民" }, { 202999, "市民" },
+        { 202501, "刀盾兵" }, { 202502, "巨盾兵" },
+        { 202401, "剑士" }, { 202405, "长枪兵" }, { 202403, "钝器兵" },
+        { 202303, "投石兵" }, { 202301, "弓箭兵" }, { 202302, "弩箭兵" }, { 202304, "火枪手" },
+        { 202601, "弓骑兵" },
+        { 202101, "骑士" }, { 202105, "皇家骑士" }, { 202103, "猪骑兵" }, { 202102, "狼骑兵" }, { 202104, "领主" },
+        { 202201, "马战车" }, { 202203, "猪战车" }, { 202202, "狼战车" },
+        { 202407, "图腾兵" }, { 202402, "大刀兵" }, { 202503, "后勤兵" }, { 202999, "民兵" },
+        { 202883, "赏金猎人" }, { 202884, "刺客" },
+        { 202899, "雇佣刀盾兵" }, { 202898, "雇佣巨盾兵" }, { 202897, "雇佣剑士" },
+        { 202896, "雇佣长枪兵" }, { 202895, "雇佣钝器兵" }, { 202894, "雇佣投石兵" },
+        { 202893, "雇佣弓箭兵" }, { 202892, "雇佣弩箭兵" }, { 202891, "雇佣弓骑兵" },
+        { 202890, "雇佣马骑兵" }, { 202889, "雇佣猪骑兵" }, { 202888, "雇佣狼骑兵" },
+        { 202887, "雇佣马战车" }, { 202886, "雇佣猪战车" }, { 202885, "雇佣狼战车" },
+        { 202701, "红精灵法师" }, { 202702, "蓝精灵法师" }, { 202703, "绿精灵法师" }, { 202704, "三眼法师" },
+        { 202404, "狼战士" },
+    };
+
+    internal static string GetSoldierTypeName(int id) => SoldierTypeNames.TryGetValue(id, out var name) ? name : "";
+
     internal class EditorEntity
     {
         public string GoName = "";
@@ -42,6 +65,7 @@ internal static class EntityEditor
         public int HometownKingdomId;
         public int TerritoryKingdomId;
         public string StuffNameWithIdIndex = "";
+        public int SoldierTypeId;
         public IntPtr Ptr;
         public int PtrHash;
         public int Guid;
@@ -295,6 +319,11 @@ internal static class EntityEditor
                         }
                         catch { }
 
+                        // 读取 soldier_type_id
+                        int soldierTypeId = 0;
+                        if (fieldMap.TryGetValue("soldier_type_id", out var stFe))
+                            try { soldierTypeId = ReadIl2CppInt(compPtr, stFe.Offset); } catch { }
+
                         seenPtrHash.Add(ptrHash);
 
                         var entity = new EditorEntity
@@ -304,6 +333,7 @@ internal static class EntityEditor
                             NpcName = npcName,
                             HometownKingdomId = hometownKingdomId,
                             StuffNameWithIdIndex = stuffNameWithIdIndex,
+                            SoldierTypeId = soldierTypeId,
                             Ptr = compPtr,
                             PtrHash = ptrHash,
                             Guid = guid,
@@ -402,6 +432,8 @@ internal static class EntityEditor
             sb.Append($"\"className\":\"{Escape(e.ClassName)}\",");
             sb.Append($"\"npcName\":\"{Escape(e.NpcName)}\",");
             sb.Append($"\"stuffNameWithIdIndex\":\"{Escape(e.StuffNameWithIdIndex)}\",");
+            sb.Append($"\"soldierTypeId\":{e.SoldierTypeId},");
+            sb.Append($"\"soldierTypeName\":\"{Escape(GetSoldierTypeName(e.SoldierTypeId))}\",");
             sb.Append($"\"hometownKingdomId\":{e.HometownKingdomId},");
             sb.Append($"\"territoryKingdomId\":{e.TerritoryKingdomId},");
             sb.Append($"\"ptrHash\":{e.PtrHash},");
