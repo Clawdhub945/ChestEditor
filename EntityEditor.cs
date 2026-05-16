@@ -2053,7 +2053,7 @@ internal static class EntityEditor
     /// <summary>
     /// 安全读取对象的指针字段（含父类搜索），使用 il2cpp_field_get_offset
     /// </summary>
-    private static IntPtr ReadFieldSafe(IntPtr objPtr, IntPtr classPtr, string fieldName)
+    internal static IntPtr ReadFieldSafe(IntPtr objPtr, IntPtr classPtr, string fieldName)
     {
         try
         {

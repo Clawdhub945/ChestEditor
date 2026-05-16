@@ -960,6 +960,82 @@ public partial class ChestEditorComponent : MonoBehaviour
     {
         try
         {
+            // 获取 Game 类 → get_main_scene() → camera_helper 字段 → CameraSetTo 方法
+            var allGOs = UnityEngine.Resources.FindObjectsOfTypeAll<UnityEngine.GameObject>();
+            foreach (var go in allGOs)
+            {
+                try
+                {
+                    var comps = go.GetComponents<Component>();
+                    foreach (var comp in comps)
+                    {
+                        if (comp == null) continue;
+                        string typeName = comp.GetIl2CppType().Name;
+                        if (typeName != "Game") continue;
+                        // 找到 Game 实例
+                        IntPtr gamePtr = GetIl2CppPtr(comp);
+                        if (gamePtr == IntPtr.Zero) continue;
+                        IntPtr gameClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(gamePtr);
+
+                        // 调用 get_main_scene()
+                        IntPtr getMainSceneMth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(gameClass, "get_main_scene", 0);
+                        if (getMainSceneMth == IntPtr.Zero) continue;
+                        IntPtr ex = IntPtr.Zero;
+                        IntPtr mainScenePtr;
+                        unsafe { mainScenePtr = (IntPtr)Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(getMainSceneMth, gamePtr, null, ref ex); }
+                        if (mainScenePtr == IntPtr.Zero) continue;
+
+                        // 读取 camera_helper 字段
+                        IntPtr mainSceneClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(mainScenePtr);
+                        IntPtr cameraHelperPtr = EntityEditor.ReadFieldSafe(mainScenePtr, mainSceneClass, "camera_helper");
+                        if (cameraHelperPtr == IntPtr.Zero) { Plugin.LogInfo("[Locate] cameraHelper is null"); break; }
+
+                        // 找 CameraSetTo 方法
+                        IntPtr chClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(cameraHelperPtr);
+                        IntPtr cameraSetToMth = IntPtr.Zero;
+                        {
+                            IntPtr chIter = IntPtr.Zero;
+                            IntPtr chM;
+                            while ((chM = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_methods(chClass, ref chIter)) != IntPtr.Zero)
+                            {
+                                string? mName = System.Runtime.InteropServices.Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_name(chM));
+                                uint pc = Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_param_count(chM);
+                                if (mName == "CameraSetTo" && pc == 3) { cameraSetToMth = chM; break; }
+                            }
+                        }
+                        if (cameraSetToMth == IntPtr.Zero) { Plugin.LogInfo("[Locate] CameraSetTo not found"); break; }
+
+                        // 调用 CameraSetTo(x, y, true)
+                        ex = IntPtr.Zero;
+                        unsafe
+                        {
+                            int boolTrue = 1;
+                            IntPtr* args = stackalloc IntPtr[3];
+                            args[0] = (IntPtr)(&targetX);
+                            args[1] = (IntPtr)(&targetY);
+                            args[2] = (IntPtr)(&boolTrue);
+                            Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(cameraSetToMth, cameraHelperPtr, (void**)args, ref ex);
+                        }
+                        Plugin.LogInfo($"[Locate] CameraSetTo({targetX}, {targetY}) ex={ex != IntPtr.Zero}");
+                        return;
+                    }
+                }
+                catch { }
+            }
+            Plugin.LogInfo("[Locate] Game instance not found, using fallback");
+            FallbackLocate(targetX, targetY);
+        }
+        catch (Exception ex)
+        {
+            Plugin.LogInfo($"[Locate] error: {ex.Message}");
+            FallbackLocate(targetX, targetY);
+        }
+    }
+
+    private static void FallbackLocate(float targetX, float targetY)
+    {
+        try
+        {
             var cam = Camera.main;
             if (cam == null) return;
             var pos = cam.transform.position;
@@ -968,5 +1044,16 @@ public partial class ChestEditorComponent : MonoBehaviour
             cam.transform.position = pos;
         }
         catch { }
+    }
+
+    private static IntPtr GetIl2CppPtr(Component comp)
+    {
+        try
+        {
+            var prop = comp.GetType().GetProperty("Pointer", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (prop != null) return (IntPtr)prop.GetValue(comp)!;
+        }
+        catch { }
+        return IntPtr.Zero;
     }
 }
