@@ -1390,12 +1390,14 @@ function renderEntityEditorPanel() {
       const goName = e.goName || 'unknown';
       const npcName = e.npcName || '';
       const hometownKingdomId = e.hometownKingdomId || 0;
+      const territoryKingdomId = e.territoryKingdomId || 0;
+      const kingdomId = hometownKingdomId || territoryKingdomId;
       const guid = e.guid || 0;
       const ptrHash = e.ptrHash || 0;
       const entityName = e.name || '';
       const fieldCount = e.fieldCount || 0;
       const displayName = npcName || entityName || goName;
-      const kInfo = getKingdomInfo(hometownKingdomId);
+      const kInfo = getKingdomInfo(kingdomId);
       h += '<div style=""margin-bottom:4px"">';
       h += '<div style=""display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer"" onclick=""toggleEditorEntity(' + ptrHash + ')"">';
       h += '<span style=""font-weight:600;color:var(--text-primary)"">' + esc(displayName) + '</span>';

@@ -40,6 +40,7 @@ internal static class EntityEditor
         public string ClassName = "";
         public string NpcName = "";
         public int HometownKingdomId;
+        public int TerritoryKingdomId;
         public IntPtr Ptr;
         public int PtrHash;
         public int Guid;
@@ -261,6 +262,47 @@ internal static class EntityEditor
                             FieldMeta = fieldMap
                         };
 
+                        // 读取实体所属 territory 的 kingdom_id
+                        try
+                        {
+                            IntPtr territoryPtr = ReadFieldSafe(compPtr, compClass, "territory");
+                            if (territoryPtr == IntPtr.Zero)
+                            {
+                                // 递归搜索父类
+                                IntPtr tCls = compClass;
+                                int tD = 0;
+                                while (tCls != IntPtr.Zero && tD < 10)
+                                {
+                                    IntPtr fi = IntPtr.Zero;
+                                    IntPtr f;
+                                    while ((f = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_fields(tCls, ref fi)) != IntPtr.Zero)
+                                    {
+                                        string? fn = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_field_get_name(f));
+                                        if (fn == "territory" || fn == "_territory")
+                                        {
+                                            int offset = (int)Il2CppInterop.Runtime.IL2CPP.il2cpp_field_get_offset(f);
+                                            if (offset >= 0x10 && offset < 0x10000)
+                                                unsafe { territoryPtr = *(IntPtr*)(compPtr + offset); }
+                                            break;
+                                        }
+                                    }
+                                    if (territoryPtr != IntPtr.Zero) break;
+                                    tCls = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(tCls);
+                                    tD++;
+                                }
+                            }
+                            if (territoryPtr != IntPtr.Zero)
+                            {
+                                IntPtr tClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(territoryPtr);
+                                entity.TerritoryKingdomId = ReadIntFieldSafe(territoryPtr, tClass, "kingdom_id", 0);
+                            }
+                        }
+                        catch { }
+
+                        // NPC 的 hometownKingdomId 优先，否则用 territory 的 kingdom_id
+                        if (entity.HometownKingdomId == 0 && entity.TerritoryKingdomId != 0)
+                            entity.HometownKingdomId = entity.TerritoryKingdomId;
+
                         _entities.Add(entity);
                         found++;
                         break; // 每个 GO 只取第一个匹配组件
@@ -309,6 +351,7 @@ internal static class EntityEditor
             sb.Append($"\"className\":\"{Escape(e.ClassName)}\",");
             sb.Append($"\"npcName\":\"{Escape(e.NpcName)}\",");
             sb.Append($"\"hometownKingdomId\":{e.HometownKingdomId},");
+            sb.Append($"\"territoryKingdomId\":{e.TerritoryKingdomId},");
             sb.Append($"\"ptrHash\":{e.PtrHash},");
             sb.Append($"\"guid\":{e.Guid},");
             sb.Append($"\"stuffId\":{e.StuffId},");
