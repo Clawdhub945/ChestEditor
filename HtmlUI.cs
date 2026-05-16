@@ -1442,7 +1442,7 @@ function renderEntityEditorPanel() {
       // 我方
       if (mine.length > 0) {
         const mineHashes = mine.map(e => e.ptrHash);
-        h += '<details open style=""margin-bottom:8px;margin-left:12px"">';
+        h += '<details style=""margin-bottom:8px;margin-left:12px"">';
         h += '<summary style=""cursor:pointer;padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-weight:600;font-size:13px;display:flex;align-items:center;gap:8px"">';
         h += '<span style=""font-size:10px;padding:1px 6px;border-radius:8px;background:var(--success-dark, #27ae60);color:#fff"">我方</span>';
         h += '<span style=""margin-left:auto;font-size:12px;color:var(--text-muted);font-weight:400"">' + mine.length + ' 个</span>';
@@ -1487,7 +1487,7 @@ function renderEntityEditorPanel() {
       // 我方（默认展开）
       if (mine.length > 0) {
         const mineHashes = mine.map(e => e.ptrHash);
-        h += '<details open style=""margin-bottom:8px;margin-left:12px"">';
+        h += '<details style=""margin-bottom:8px;margin-left:12px"">';
         h += '<summary style=""cursor:pointer;padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-weight:600;font-size:13px;display:flex;align-items:center;gap:8px"">';
         h += '<span style=""font-size:10px;padding:1px 6px;border-radius:8px;background:var(--success-dark, #27ae60);color:#fff"">我方</span>';
         h += '<span style=""margin-left:auto;font-size:12px;color:var(--text-muted);font-weight:400"">' + mine.length + ' 个</span>';
