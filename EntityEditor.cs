@@ -270,9 +270,9 @@ internal static class EntityEditor
                                 try { hometownKingdomId = ReadIl2CppInt(compPtr, hkFe.Offset); } catch { }
                         }
 
-                        // 读取 stuff_name_with_id_index（Facility 类的显示名称）
+                        // 读取 stuff_name_with_id_index（仅 Facility/Ship 类型，避免对 NPC 调用导致 native crash）
                         string stuffNameWithIdIndex = "";
-                        if (className.Contains("Facility") || className.Contains("Ship") || hasStuffId)
+                        if (className.Contains("Facility") || className.Contains("Ship"))
                         {
                             try
                             {
