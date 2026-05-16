@@ -960,76 +960,109 @@ public partial class ChestEditorComponent : MonoBehaviour
     {
         try
         {
-            // 获取 Game 类 → get_main_scene() → camera_helper 字段 → CameraSetTo 方法
-            var allGOs = UnityEngine.Resources.FindObjectsOfTypeAll<UnityEngine.GameObject>();
-            foreach (var go in allGOs)
+            // 通过 C# 反射获取 Game.get_main_scene()
+            var csharpAsm = AppDomain.CurrentDomain.GetAssemblies()
+                .FirstOrDefault(a => a.GetName().Name == "Assembly-CSharp");
+            if (csharpAsm == null) { Plugin.LogInfo("[Locate] Assembly-CSharp not found"); FallbackLocate(targetX, targetY); return; }
+
+            var gameType = csharpAsm.GetTypes().FirstOrDefault(t => t.Name == "Game");
+            if (gameType == null) { Plugin.LogInfo("[Locate] Game type not found"); FallbackLocate(targetX, targetY); return; }
+
+            var getMainScene = gameType.GetMethod("get_main_scene", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+            if (getMainScene == null) { Plugin.LogInfo("[Locate] get_main_scene not found"); FallbackLocate(targetX, targetY); return; }
+
+            var mainScene = getMainScene.Invoke(null, null);
+            if (mainScene == null) { Plugin.LogInfo("[Locate] mainScene is null"); FallbackLocate(targetX, targetY); return; }
+
+            // 获取 camera_helper
+            var cameraHelper = Il2CppHelper.GetProp(mainScene, "camera_helper");
+            if (cameraHelper == null) { Plugin.LogInfo("[Locate] cameraHelper is null"); FallbackLocate(targetX, targetY); return; }
+
+            // 调用 CameraSetTo(float, float, bool)
+            var chType = cameraHelper.GetType();
+            var cameraSetTo = chType.GetMethod("CameraSetTo",
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
+                null, new[] { typeof(float), typeof(float), typeof(bool) }, null);
+            if (cameraSetTo != null)
             {
-                try
+                cameraSetTo.Invoke(cameraHelper, new object[] { targetX, targetY, true });
+                Plugin.LogInfo($"[Locate] CameraSetTo({targetX}, {targetY}) via reflection done");
+            }
+            else
+            {
+                Plugin.LogInfo("[Locate] CameraSetTo(float,float,bool) not found, trying IL2CPP");
+                // 回退: IL2CPP 方式
+                IntPtr chPtr = GetIl2CppPtrFromObj(cameraHelper);
+                if (chPtr == IntPtr.Zero) { FallbackLocate(targetX, targetY); return; }
+                IntPtr chClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(chPtr);
+
+                // 尝试 CameraSetTo 3参数版本
+                IntPtr csMth = IntPtr.Zero;
                 {
-                    var comps = go.GetComponents<Component>();
-                    foreach (var comp in comps)
+                    IntPtr iter = IntPtr.Zero;
+                    IntPtr m;
+                    while ((m = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_methods(chClass, ref iter)) != IntPtr.Zero)
                     {
-                        if (comp == null) continue;
-                        string typeName = comp.GetIl2CppType().Name;
-                        if (typeName != "Game") continue;
-                        // 找到 Game 实例
-                        IntPtr gamePtr = GetIl2CppPtr(comp);
-                        if (gamePtr == IntPtr.Zero) continue;
-                        IntPtr gameClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(gamePtr);
-
-                        // 调用 get_main_scene()
-                        IntPtr getMainSceneMth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(gameClass, "get_main_scene", 0);
-                        if (getMainSceneMth == IntPtr.Zero) continue;
-                        IntPtr ex = IntPtr.Zero;
-                        IntPtr mainScenePtr;
-                        unsafe { mainScenePtr = (IntPtr)Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(getMainSceneMth, gamePtr, null, ref ex); }
-                        if (mainScenePtr == IntPtr.Zero) continue;
-
-                        // 读取 camera_helper 字段
-                        IntPtr mainSceneClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(mainScenePtr);
-                        IntPtr cameraHelperPtr = EntityEditor.ReadFieldSafe(mainScenePtr, mainSceneClass, "camera_helper");
-                        if (cameraHelperPtr == IntPtr.Zero) { Plugin.LogInfo("[Locate] cameraHelper is null"); break; }
-
-                        // 找 CameraSetTo 方法
-                        IntPtr chClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(cameraHelperPtr);
-                        IntPtr cameraSetToMth = IntPtr.Zero;
-                        {
-                            IntPtr chIter = IntPtr.Zero;
-                            IntPtr chM;
-                            while ((chM = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_methods(chClass, ref chIter)) != IntPtr.Zero)
-                            {
-                                string? mName = System.Runtime.InteropServices.Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_name(chM));
-                                uint pc = Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_param_count(chM);
-                                if (mName == "CameraSetTo" && pc == 3) { cameraSetToMth = chM; break; }
-                            }
-                        }
-                        if (cameraSetToMth == IntPtr.Zero) { Plugin.LogInfo("[Locate] CameraSetTo not found"); break; }
-
-                        // 调用 CameraSetTo(x, y, true)
-                        ex = IntPtr.Zero;
-                        unsafe
-                        {
-                            int boolTrue = 1;
-                            IntPtr* args = stackalloc IntPtr[3];
-                            args[0] = (IntPtr)(&targetX);
-                            args[1] = (IntPtr)(&targetY);
-                            args[2] = (IntPtr)(&boolTrue);
-                            Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(cameraSetToMth, cameraHelperPtr, (void**)args, ref ex);
-                        }
-                        Plugin.LogInfo($"[Locate] CameraSetTo({targetX}, {targetY}) ex={ex != IntPtr.Zero}");
-                        return;
+                        string? mName = System.Runtime.InteropServices.Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_name(m));
+                        if (mName == "CameraSetTo" && Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_param_count(m) == 3)
+                        { csMth = m; break; }
                     }
                 }
-                catch { }
+                if (csMth != IntPtr.Zero)
+                {
+                    IntPtr ex = IntPtr.Zero;
+                    unsafe
+                    {
+                        int boolTrue = 1;
+                        IntPtr* args = stackalloc IntPtr[3];
+                        args[0] = (IntPtr)(&targetX);
+                        args[1] = (IntPtr)(&targetY);
+                        args[2] = (IntPtr)(&boolTrue);
+                        Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(csMth, chPtr, (void**)args, ref ex);
+                    }
+                    Plugin.LogInfo($"[Locate] CameraSetTo IL2CPP ex={ex != IntPtr.Zero}");
+                }
+                else
+                {
+                    // 直接设置 camera_con.position
+                    IntPtr cameraConPtr = EntityEditor.ReadFieldSafe(chPtr, chClass, "camera_con");
+                    if (cameraConPtr != IntPtr.Zero)
+                    {
+                        var transform = Il2CppHelper.GetProp(cameraHelper, "camera_con");
+                        if (transform != null)
+                        {
+                            var tType = transform.GetType();
+                            var setPos = tType.GetMethod("set_position",
+                                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
+                                null, new[] { typeof(UnityEngine.Vector3) }, null);
+                            if (setPos != null)
+                            {
+                                setPos.Invoke(transform, new object[] { new UnityEngine.Vector3(targetX, targetY, 0) });
+                                Plugin.LogInfo($"[Locate] Transform.set_position via reflection done");
+                            }
+                        }
+                    }
+                    else
+                        FallbackLocate(targetX, targetY);
+                }
             }
-            Plugin.LogInfo("[Locate] Game instance not found, using fallback");
-            FallbackLocate(targetX, targetY);
         }
         catch (Exception ex)
         {
             Plugin.LogInfo($"[Locate] error: {ex.Message}");
             FallbackLocate(targetX, targetY);
         }
+    }
+
+    private static IntPtr GetIl2CppPtrFromObj(object obj)
+    {
+        try
+        {
+            var prop = obj.GetType().GetProperty("Pointer", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (prop != null) return (IntPtr)prop.GetValue(obj)!;
+        }
+        catch { }
+        return IntPtr.Zero;
     }
 
     private static void FallbackLocate(float targetX, float targetY)
