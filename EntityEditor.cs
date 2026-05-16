@@ -246,10 +246,14 @@ internal static class EntityEditor
                                 try { hometownKingdomId = ReadIl2CppInt(compPtr, hkFe.Offset); } catch { }
                         }
 
-                        // 读取 stuff_name_with_id_index（Facility 类的显示名称）
+                        // 读取 stuff_name_with_id_index（Facility 类的显示名称，通过属性 getter 触发懒加载）
                         string stuffNameWithIdIndex = "";
-                        if (fieldMap.TryGetValue("stuff_name_with_id_index", out var snFe) && snFe.IsString)
-                            try { stuffNameWithIdIndex = ReadIl2CppString(compPtr, snFe.Offset) ?? ""; } catch { }
+                        try
+                        {
+                            var snObj = Il2CppHelper.GetProp(comp, "stuff_name_with_id_index");
+                            if (snObj != null) stuffNameWithIdIndex = snObj.ToString() ?? "";
+                        }
+                        catch { }
 
                         seenPtrHash.Add(ptrHash);
 
