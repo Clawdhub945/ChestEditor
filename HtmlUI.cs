@@ -1519,6 +1519,85 @@ function renderEntityEditorPanel() {
       return h;
     }
 
+    function renderBuildingGroup(items) {
+      const monsterBuildNames = ['巨树', '巨型蘑菇', '巨型蜂巢'];
+      const monsterBuilds = {};
+      const normalBuilds = [];
+      for (const e of items) {
+        const dn = e.npcName || e.name || e.goName || '';
+        let matched = false;
+        for (const mn of monsterBuildNames) {
+          if (dn.includes(mn)) {
+            if (!monsterBuilds[mn]) monsterBuilds[mn] = [];
+            monsterBuilds[mn].push(e);
+            matched = true;
+            break;
+          }
+        }
+        if (!matched) normalBuilds.push(e);
+      }
+      const monsterKeys = Object.keys(monsterBuilds);
+      let h = '';
+      if (monsterKeys.length > 0) {
+        const totalMonster = monsterKeys.reduce((s, k) => s + monsterBuilds[k].length, 0);
+        h += '<details style=""margin-bottom:8px;margin-left:12px"">';
+        h += '<summary style=""cursor:pointer;padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-weight:600;font-size:13px;display:flex;align-items:center;gap:8px"">';
+        h += '<span style=""font-size:10px;padding:1px 6px;border-radius:8px;background:var(--danger, #e74c3c);color:#fff"">怪物建筑 备注：这里显示我方是因为可交互的</span>';
+        h += '<span style=""margin-left:auto;font-size:12px;color:var(--text-muted);font-weight:400"">' + totalMonster + ' 个</span>';
+        h += '<button onclick=""event.stopPropagation();destroyEditorEntities(' + JSON.stringify([].concat(...monsterKeys.map(k => monsterBuilds[k].map(e => e.ptrHash)))) + ')"" style=""padding:2px 8px;background:var(--danger,#e74c3c);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px"">一键消除</button>';
+        h += '</summary>';
+        for (const mn of monsterBuildNames) {
+          const group = monsterBuilds[mn];
+          if (!group || group.length === 0) continue;
+          const groupHashes = group.map(e => e.ptrHash);
+          h += '<details style=""margin-bottom:8px;margin-left:12px"">';
+          h += '<summary style=""cursor:pointer;padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-weight:600;font-size:13px;display:flex;align-items:center;gap:8px"">';
+          h += '<span style=""font-size:10px;padding:1px 6px;border-radius:8px;background:var(--warning, #f39c12);color:#fff"">' + esc(mn) + '</span>';
+          h += '<span style=""margin-left:auto;font-size:12px;color:var(--text-muted);font-weight:400"">' + group.length + ' 个</span>';
+          h += '<button onclick=""event.stopPropagation();destroyEditorEntities(' + JSON.stringify(groupHashes) + ')"" style=""padding:2px 8px;background:var(--danger,#e74c3c);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px"">一键消除</button>';
+          h += '</summary>';
+          h += '<div style=""display:flex;flex-direction:column;gap:4px;padding:6px 0"">';
+          for (const e of group) h += renderEditorEntityItem(e);
+          h += '</div></details>';
+        }
+        h += '</details>';
+      }
+      if (normalBuilds.length > 0) {
+        if (monsterKeys.length > 0) h += '<div style=""margin:8px 0 4px 12px;font-size:12px;font-weight:600;color:var(--text-muted)"">普通建筑 (' + normalBuilds.length + ')</div>';
+        h += renderTerritoryGroup(normalBuilds);
+      }
+      return h;
+    }
+
+    function renderAnimalGroup(items) {
+      const hasTerritory = [];
+      const noTerritory = {};
+      for (const e of items) {
+        const kid = e.territoryKingdomId || e.hometownKingdomId || 0;
+        if (kid > 0) { hasTerritory.push(e); continue; }
+        const label = e.npcName || e.name || e.goName || '未知';
+        if (!noTerritory[label]) noTerritory[label] = [];
+        noTerritory[label].push(e);
+      }
+      let h = '';
+      if (hasTerritory.length > 0) h += renderTerritoryGroup(hasTerritory);
+      const sortedLabels = Object.keys(noTerritory).sort();
+      for (const label of sortedLabels) {
+        const group = noTerritory[label];
+        const groupHashes = group.map(e => e.ptrHash);
+        h += '<details style=""margin-bottom:8px;margin-left:12px"">';
+        h += '<summary style=""cursor:pointer;padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-weight:600;font-size:13px;display:flex;align-items:center;gap:8px"">';
+        h += '<span style=""font-size:10px;padding:1px 6px;border-radius:8px;background:var(--warning, #f39c12);color:#fff"">' + esc(label) + '</span>';
+        h += '<span style=""margin-left:auto;font-size:12px;color:var(--text-muted);font-weight:400"">' + group.length + ' 个</span>';
+        h += '<button onclick=""event.stopPropagation();destroyEditorEntities(' + JSON.stringify(groupHashes) + ')"" style=""padding:2px 8px;background:var(--danger,#e74c3c);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px"">一键消除</button>';
+        h += '</summary>';
+        h += '<div style=""display:flex;flex-direction:column;gap:4px;padding:6px 0"">';
+        for (const e of group) h += renderEditorEntityItem(e);
+        h += '</div></details>';
+      }
+      return h;
+    }
+
     html += '<div style=""flex:1;overflow-y:auto;padding-right:8px"">';
     for (const cd of catDefs) {
       const items = groups[cd.key];
@@ -1533,8 +1612,12 @@ function renderEntityEditorPanel() {
       html += '</summary>';
       if (cd.key === 'npc') {
         html += renderNpcGroup(items);
-      } else if (cd.key === 'monster' || cd.key === 'building') {
+      } else if (cd.key === 'monster' || cd.key === 'ship') {
         html += renderTerritoryGroup(items);
+      } else if (cd.key === 'building') {
+        html += renderBuildingGroup(items);
+      } else if (cd.key === 'animal') {
+        html += renderAnimalGroup(items);
       } else {
         html += '<div style=""display:flex;flex-direction:column;gap:6px;padding:8px 0"">';
         for (const e of items) html += renderEditorEntityItem(e);
