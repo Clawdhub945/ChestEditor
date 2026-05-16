@@ -246,12 +246,52 @@ internal static class EntityEditor
                                 try { hometownKingdomId = ReadIl2CppInt(compPtr, hkFe.Offset); } catch { }
                         }
 
-                        // 读取 stuff_name_with_id_index（Facility 类的显示名称，通过属性 getter 触发懒加载）
+                        // 读取 stuff_name_with_id_index（Facility 类的显示名称）
+                        // 尝试调用 GetFacilityNameWithIdIndex() 方法触发懒加载并获取结果
                         string stuffNameWithIdIndex = "";
                         try
                         {
-                            var snObj = Il2CppHelper.GetProp(comp, "stuff_name_with_id_index");
-                            if (snObj != null) stuffNameWithIdIndex = snObj.ToString() ?? "";
+                            // 先尝试直接读字段（可能已被缓存）
+                            if (fieldMap.TryGetValue("stuff_name_with_id_index", out var snFe) && snFe.IsString)
+                                stuffNameWithIdIndex = ReadIl2CppString(compPtr, snFe.Offset) ?? "";
+                            // 如果字段为空，尝试调用方法触发计算
+                            if (string.IsNullOrEmpty(stuffNameWithIdIndex))
+                            {
+                                IntPtr fnCls = compClass;
+                                int fnD = 0;
+                                while (fnCls != IntPtr.Zero && fnD < 10)
+                                {
+                                    IntPtr fnIter = IntPtr.Zero;
+                                    IntPtr fnM;
+                                    while ((fnM = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_methods(fnCls, ref fnIter)) != IntPtr.Zero)
+                                    {
+                                        string? fnName = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_name(fnM));
+                                        if (fnName == "GetFacilityNameWithIdIndex" && Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_param_count(fnM) == 0)
+                                        {
+                                            IntPtr exFn = IntPtr.Zero;
+                                            try
+                                            {
+                                                IntPtr fnResult = IntPtr.Zero;
+                                                unsafe { fnResult = (IntPtr)Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(fnM, compPtr, null, ref exFn); }
+                                                if (fnResult != IntPtr.Zero)
+                                                {
+                                                    // 读取返回的 IL2CPP string
+                                                    unsafe
+                                                    {
+                                                        IntPtr charsPtr = fnResult + 0x14;
+                                                        stuffNameWithIdIndex = Marshal.PtrToStringUni(charsPtr) ?? "";
+                                                    }
+                                                }
+                                            }
+                                            catch { }
+                                            break;
+                                        }
+                                    }
+                                    if (!string.IsNullOrEmpty(stuffNameWithIdIndex)) break;
+                                    fnCls = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(fnCls);
+                                    fnD++;
+                                }
+                            }
                         }
                         catch { }
 
