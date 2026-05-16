@@ -414,6 +414,25 @@ internal static class EntityEditor
     }
 
     /// <summary>
+    /// 获取实体的世界坐标 JSON
+    /// </summary>
+    internal static string GetEntityPositionJson(int ptrHash)
+    {
+        foreach (var e in _entities)
+        {
+            if (e.PtrHash != ptrHash) continue;
+            if (e.GoRef == null) return "{\"error\":\"no GameObject\"}";
+            try
+            {
+                var pos = e.GoRef.transform.position;
+                return $"{{\"x\":{pos.x},\"y\":{pos.y}}}";
+            }
+            catch (Exception ex) { return $"{{\"error\":\"{Escape(ex.Message)}\"}}"; }
+        }
+        return "{\"error\":\"entity not found\"}";
+    }
+
+    /// <summary>
     /// 设置实体字段值
     /// </summary>
     internal static string SetField(int ptrHash, string fieldName, float value)

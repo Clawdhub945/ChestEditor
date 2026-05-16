@@ -421,6 +421,55 @@ internal class HttpServer
                 else
                     SendJson(resp, "{\"error\":\"timeout\"}");
             }
+            else if (path == "/api/editor/locate" && method == "POST")
+            {
+                string body;
+                using (var reader = new StreamReader(req.InputStream, req.ContentEncoding))
+                    body = reader.ReadToEnd();
+                int ptrHash = 0;
+                foreach (var part in body.Trim('{', '}').Split(','))
+                {
+                    var kv = part.Split(':');
+                    if (kv.Length != 2) continue;
+                    string key = kv[0].Trim().Trim('"');
+                    string v = kv[1].Trim().Trim('"');
+                    if (key == "ptrHash" && int.TryParse(v, out int g)) ptrHash = g;
+                }
+                if (ptrHash == 0) { SendJson(resp, "{\"error\":\"missing ptrHash\"}"); return; }
+                var posJson = EntityEditor.GetEntityPositionJson(ptrHash);
+                // 解析坐标并移动相机
+                float px = 0, py = 0;
+                bool parsed = false;
+                try
+                {
+                    // 简单解析 {"x":...,"y":...}
+                    var clean = posJson.Trim('{', '}').Replace("\"", "");
+                    foreach (var part in clean.Split(','))
+                    {
+                        var kv = part.Split(':');
+                        if (kv.Length != 2) continue;
+                        string key = kv[0].Trim();
+                        float.TryParse(kv[1].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float val);
+                        if (key == "x") px = val;
+                        else if (key == "y") py = val;
+                    }
+                    parsed = true;
+                }
+                catch { }
+                if (parsed)
+                {
+                    var comp = ChestEditorComponent.Instance;
+                    if (comp != null)
+                    {
+                        var signal = new ManualResetEventSlim(false);
+                        comp.WriteQueue.Enqueue(new ChestEditorComponent.WriteRequest { ChestIndex = -30, ExtraFloat1 = px, ExtraFloat2 = py, Signal = signal });
+                        signal.Wait(3000);
+                    }
+                    SendJson(resp, $"{{\"ok\":true,\"x\":{px.ToString(System.Globalization.CultureInfo.InvariantCulture)},\"y\":{py.ToString(System.Globalization.CultureInfo.InvariantCulture)}}}");
+                }
+                else
+                    SendJson(resp, posJson);
+            }
             else if (path == "/api/editor/listmethods" && method == "POST")
             {
                 string body;

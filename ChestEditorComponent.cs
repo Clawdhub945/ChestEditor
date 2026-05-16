@@ -20,6 +20,8 @@ public partial class ChestEditorComponent : MonoBehaviour
         public int Count;
         public bool IsAdd;
         public int ExtraIndex; // 计划库存操作时存储目标箱子索引, 龙素材操作时存储stuffId
+        public float ExtraFloat1; // 定位功能用: x坐标
+        public float ExtraFloat2; // 定位功能用: y坐标
         public int[]? NatureIds; // 召唤龙时的nature列表
         public string? ResultJson;
         public System.Threading.ManualResetEventSlim Signal;
@@ -345,6 +347,12 @@ public partial class ChestEditorComponent : MonoBehaviour
                     string methods = EntityEditor.ListMethods(req.ExtraIndex);
                     Plugin.LogInfo($"[EntityEditor] ListMethods ptrHash={req.ExtraIndex}:\n{methods}");
                     req.ResultJson = $"{{\"methods\":\"{Escape(methods)}\"}}";
+                }
+                else if (req.ChestIndex == -30)
+                {
+                    // 定位实体: ExtraFloat1=x, ExtraFloat2=y
+                    LocateFacility(req.ExtraFloat1, req.ExtraFloat2);
+                    req.ResultJson = $"{{\"ok\":true,\"x\":{req.ExtraFloat1.ToString(System.Globalization.CultureInfo.InvariantCulture)},\"y\":{req.ExtraFloat2.ToString(System.Globalization.CultureInfo.InvariantCulture)}}}";
                 }
                 else if (req.IsAdd)
                 {
