@@ -37,7 +37,7 @@ internal static class EntityEditor
     // soldier_type_id → 名称
     private static readonly Dictionary<int, string> SoldierTypeNames = new()
     {
-        { 0, "市民" }, { 202999, "市民" },
+        { 0, "市民" },
         { 202501, "刀盾兵" }, { 202502, "巨盾兵" },
         { 202401, "剑士" }, { 202405, "长枪兵" }, { 202403, "钝器兵" },
         { 202303, "投石兵" }, { 202301, "弓箭兵" }, { 202302, "弩箭兵" }, { 202304, "火枪手" },
@@ -208,13 +208,15 @@ internal static class EntityEditor
     /// </summary>
     internal static void ScanAll()
     {
-        _entities.Clear();
+        try { _entities.Clear(); } catch (Exception ex) { Plugin.LogError($"[EntityEditor] Clear error: {ex.Message}"); return; }
         try
         {
-            CacheIl2CppApi();
+            try { CacheIl2CppApi(); } catch (Exception ex) { Plugin.LogError($"[EntityEditor] CacheIl2CppApi error: {ex.Message}"); return; }
             Plugin.LogInfo("[EntityEditor] 开始统一扫描...");
 
-            var allGOs = Resources.FindObjectsOfTypeAll<GameObject>();
+            GameObject[] allGOs;
+            try { allGOs = Resources.FindObjectsOfTypeAll<GameObject>(); }
+            catch (Exception ex) { Plugin.LogError($"[EntityEditor] FindObjectsOfTypeAll error: {ex.Message}"); return; }
             Plugin.LogInfo($"[EntityEditor] 共 {allGOs.Length} 个 GameObject");
 
             var seenPtrHash = new HashSet<int>();
