@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using UnityEngine;
@@ -713,35 +714,436 @@ internal static class EntityEditor
                             Plugin.LogInfo($"[EntityEditor] Could not get BuildHelper instance");
                     }
 
-                // === 第三优先：通用 0 参数销毁方法（非NPC/非Facility） ===
+                // === 第三优先：通用销毁方法（非NPC/非Facility） ===
+                // 动物、船、掉落物等：先在自身类链搜索虚方法，再搜索管理器类
                 if (!called && !className.Contains("Npc") && !IsFacilityClass(className))
                 {
-                    string[] zeroParamNames = { "LeaveMapAndDestroy", "LeaveMapAndDestroyWithFamily", "OnDead" };
-                    foreach (var methodName in zeroParamNames)
+                    // 3a: 在实体自身的类继承链中搜索销毁相关虚方法
+                    string[] targetNames = { "LeaveMapAndDestroy", "LeaveMapAndDestroyWithFamily", "OnDead", "LeaveMap", "OnLeaveMap", "Despawn", "RecycleSelf", "Dead", "Die", "OnDie", "OnDestroy", "BeforeRecycle" };
+                    IntPtr searchCls = classPtr;
+                    int depth = 0;
+                    // 先记录找到的方法名用于日志
+                    var foundMethods = new List<(string name, uint paramCount, IntPtr methodPtr, int d, string cls)>();
+                    while (searchCls != IntPtr.Zero && depth < 15)
+                    {
+                        string clsName = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_name(searchCls)) ?? "?";
+                        IntPtr iter = IntPtr.Zero;
+                        IntPtr mth;
+                        while ((mth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_methods(searchCls, ref iter)) != IntPtr.Zero)
+                        {
+                            string? mName = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_name(mth));
+                            if (mName == null) continue;
+                            uint pc = Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_param_count(mth);
+                            foreach (var target in targetNames)
+                            {
+                                if (mName == target)
+                                {
+                                    foundMethods.Add((mName, pc, mth, depth, clsName));
+                                    break;
+                                }
+                            }
+                        }
+                        searchCls = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(searchCls);
+                        depth++;
+                    }
+
+                    Plugin.LogInfo($"[EntityEditor] [Generic] {className}: found {foundMethods.Count} target methods in class hierarchy");
+                    foreach (var fm in foundMethods)
+                        Plugin.LogInfo($"[EntityEditor] [Generic]   {fm.cls}.{fm.name}({fm.paramCount}p) depth={fm.d}");
+
+                    // 尝试调用找到的方法（优先 0 参数的）
+                    foreach (var fm in foundMethods.OrderBy(f => f.paramCount))
                     {
                         if (called) break;
-                        IntPtr searchCls = classPtr;
-                        int depth = 0;
-                        while (searchCls != IntPtr.Zero && depth < 15 && !called)
+                        try
                         {
-                            string clsName = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_name(searchCls)) ?? "?";
-                            IntPtr methodPtr = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(searchCls, methodName, 0);
-                            if (methodPtr != IntPtr.Zero)
+                            IntPtr exception = IntPtr.Zero;
+                            if (fm.paramCount == 0)
                             {
+                                unsafe { Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(fm.methodPtr, e.Ptr, null, ref exception); }
+                            }
+                            else
+                            {
+                                IntPtr[] argPtrs = new IntPtr[fm.paramCount];
+                                IntPtr[] storage = new IntPtr[fm.paramCount];
+                                for (int a = 0; a < (int)fm.paramCount; a++)
+                                {
+                                    IntPtr paramType = Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_param(fm.methodPtr, (uint)a);
+                                    string? tn = paramType != IntPtr.Zero ? Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_type_get_name(paramType)) : null;
+                                    bool isBool = tn != null && (tn == "System.Boolean" || tn == "bool");
+                                    storage[a] = isBool ? (IntPtr)1 : IntPtr.Zero;
+                                }
+                                unsafe
+                                {
+                                    fixed (IntPtr* storPtr = storage)
+                                    {
+                                        for (int a = 0; a < (int)fm.paramCount; a++)
+                                            argPtrs[a] = (IntPtr)(&storPtr[a]);
+                                        fixed (IntPtr* argsArr = argPtrs)
+                                        {
+                                            Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(fm.methodPtr, e.Ptr, (void**)argsArr, ref exception);
+                                        }
+                                    }
+                                }
+                            }
+                            if (exception != IntPtr.Zero)
+                                Plugin.LogInfo($"[EntityEditor] {fm.name}() exception on {name}");
+                            else
+                            {
+                                Plugin.LogInfo($"[EntityEditor] ✓ Called {fm.name}() on {name} (depth={fm.d})");
+                                called = true;
+                            }
+                        }
+                        catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] {fm.name}() CRASH: {ex.Message}"); }
+                    }
+
+                    // 3b: 如果自身类没有找到，列出所有方法（0-2参数）用于调试
+                    if (!called)
+                    {
+                        Plugin.LogInfo($"[EntityEditor] [Generic] Listing ALL methods (0-2p) on {className} hierarchy for debugging:");
+                        IntPtr debugCls = classPtr;
+                        int debugDepth = 0;
+                        int methodCount = 0;
+                        while (debugCls != IntPtr.Zero && debugDepth < 10)
+                        {
+                            string dClsName = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_name(debugCls)) ?? "?";
+                            IntPtr dIter = IntPtr.Zero;
+                            IntPtr dMth;
+                            while ((dMth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_methods(debugCls, ref dIter)) != IntPtr.Zero)
+                            {
+                                string? dName = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_name(dMth));
+                                if (dName == null) continue;
+                                uint dPc = Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_param_count(dMth);
+                                if (dPc <= 2)
+                                {
+                                    uint dIflags = 0;
+                                    uint dFlags = Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_flags(dMth, ref dIflags);
+                                    bool dStatic = (dFlags & 0x10) != 0;
+                                    Plugin.LogInfo($"[EntityEditor] [Generic]   {dClsName}.{dName}({dPc}p) static={dStatic} depth={debugDepth}");
+                                    methodCount++;
+                                    if (methodCount >= 80) break;
+                                }
+                            }
+                            if (methodCount >= 80) break;
+                            debugCls = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(debugCls);
+                            debugDepth++;
+                        }
+                        Plugin.LogInfo($"[EntityEditor] [Generic] Total: {methodCount} methods listed");
+
+                        // 3c: StuffOnMap 专用：手动执行完整删除流程
+                        if (!called && (className.Contains("StuffOnMap") || className.Contains("DropItem")))
+                        {
+                            Plugin.LogInfo($"[EntityEditor] [StuffOnMap] Manual destroy (field enumeration)...");
+                            IntPtr mapStuffHelper = FindMapStuffHelper();
+                            bool dicRemoved = false;
+                            if (mapStuffHelper != IntPtr.Zero)
+                            {
+                                IntPtr mshClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(mapStuffHelper);
+                                IntPtr mshAreaMap = ReadFieldSafe(mapStuffHelper, mshClass, "area_map");
+                                Plugin.LogInfo($"[EntityEditor] [StuffOnMap] MapStuffHelper.area_map={mshAreaMap.ToInt64():X}");
+                                if (mshAreaMap != IntPtr.Zero)
+                                {
+                                    IntPtr areaMapClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(mshAreaMap);
+
+                                    // 读取 guid
+                                    int guid = 0;
+                                    if (e.FieldMeta.TryGetValue("guid", out var guidFe))
+                                        try { guid = ReadIl2CppInt(e.Ptr, guidFe.Offset); } catch { }
+                                    Plugin.LogInfo($"[EntityEditor] [StuffOnMap] entity guid={guid}");
+
+                                    // Step A: 从 stuff_on_map_dic 移除
+                                    IntPtr dicPtr = ReadFieldSafe(mshAreaMap, areaMapClass, "stuff_on_map_dic");
+                                    if (dicPtr != IntPtr.Zero && guid != 0)
+                                    {
+                                        IntPtr dicClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(dicPtr);
+                                        IntPtr removeMth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(dicClass, "Remove", 1);
+                                        if (removeMth != IntPtr.Zero)
+                                        {
+                                            try
+                                            {
+                                                IntPtr exRm = IntPtr.Zero;
+                                                unsafe
+                                                {
+                                                    int guidArg = guid;
+                                                    IntPtr* rmArgs = stackalloc IntPtr[1];
+                                                    rmArgs[0] = (IntPtr)(&guidArg);
+                                                    Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(removeMth, dicPtr, (void**)rmArgs, ref exRm);
+                                                }
+                                                Plugin.LogInfo($"[EntityEditor] [StuffOnMap] dic.Remove({guid}) ex={exRm != IntPtr.Zero}");
+                                            }
+                                            catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] [StuffOnMap] dic.Remove failed: {ex.Message}"); }
+                                        }
+                                    }
+
+                                    // Step B: 从 stuff_on_map_dic_by_pos 移除
+                                    // 通过 IL2CPP 字段枚举找到 _pos_point 字段（在父类 Item3dClickable 上）
+                                    IntPtr dicByPosPtr = ReadFieldSafe(mshAreaMap, areaMapClass, "stuff_on_map_dic_by_pos");
+                                    Plugin.LogInfo($"[EntityEditor] [StuffOnMap] stuff_on_map_dic_by_pos={dicByPosPtr.ToInt64():X}");
+                                    if (dicByPosPtr != IntPtr.Zero)
+                                    {
+                                        int posPointOffset = -1;
+                                        IntPtr posSearchCls = classPtr;
+                                        int posSearchD = 0;
+                                        while (posSearchCls != IntPtr.Zero && posSearchD < 10)
+                                        {
+                                            IntPtr fi = IntPtr.Zero;
+                                            IntPtr f;
+                                            while ((f = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_fields(posSearchCls, ref fi)) != IntPtr.Zero)
+                                            {
+                                                string? fn = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_field_get_name(f));
+                                                if (fn == "_pos_point")
+                                                {
+                                                    int offset = (int)Il2CppInterop.Runtime.IL2CPP.il2cpp_field_get_offset(f);
+                                                    if (offset >= 0x10 && offset < 0x10000)
+                                                    {
+                                                        posPointOffset = offset;
+                                                        Plugin.LogInfo($"[EntityEditor] [StuffOnMap] Found _pos_point at offset=0x{offset:X} on {Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_name(posSearchCls))}");
+                                                    }
+                                                    break;
+                                                }
+                                            }
+                                            if (posPointOffset >= 0) break;
+                                            posSearchCls = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(posSearchCls);
+                                            posSearchD++;
+                                        }
+
+                                        if (posPointOffset >= 0)
+                                        {
+                                            int px = 0, py = 0;
+                                            unsafe
+                                            {
+                                                px = *(int*)(e.Ptr + posPointOffset);
+                                                py = *(int*)(e.Ptr + posPointOffset + 4);
+                                            }
+                                            Plugin.LogInfo($"[EntityEditor] [StuffOnMap] _pos_point=({px},{py})");
+
+                                            // MyListDic.Remove(Point, item) — 枚举找虚方法
+                                            IntPtr dicByPosClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(dicByPosPtr);
+                                            IntPtr removeMth = IntPtr.Zero;
+                                            {
+                                                IntPtr rIter = IntPtr.Zero;
+                                                IntPtr rM;
+                                                while ((rM = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_methods(dicByPosClass, ref rIter)) != IntPtr.Zero)
+                                                {
+                                                    string? rName = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_name(rM));
+                                                    uint rPc = Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_param_count(rM);
+                                                    if (rName == "Remove" && rPc == 2) { removeMth = rM; break; }
+                                                }
+                                            }
+                                            if (removeMth != IntPtr.Zero)
+                                            {
+                                                try
+                                                {
+                                                    IntPtr exRm = IntPtr.Zero;
+                                                    unsafe
+                                                    {
+                                                        int* pointData = stackalloc int[2];
+                                                        pointData[0] = px;
+                                                        pointData[1] = py;
+                                                        IntPtr* rmArgs = stackalloc IntPtr[2];
+                                                        rmArgs[0] = (IntPtr)pointData;
+                                                        rmArgs[1] = e.Ptr;
+                                                        Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(removeMth, dicByPosPtr, (void**)rmArgs, ref exRm);
+                                                    }
+                                                    Plugin.LogInfo($"[EntityEditor] [StuffOnMap] dic_by_pos.Remove(({px},{py}), entity) ex={exRm != IntPtr.Zero}");
+                                                    dicRemoved = true;
+                                                }
+                                                catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] [StuffOnMap] dic_by_pos.Remove failed: {ex.Message}"); }
+                                            }
+                                            else
+                                                Plugin.LogInfo($"[EntityEditor] [StuffOnMap] MyListDic.Remove(2p) not found");
+                                        }
+                                        else
+                                            Plugin.LogInfo($"[EntityEditor] [StuffOnMap] _pos_point field not found in class hierarchy");
+                                    }
+
+                                    // Step C: 从 stuff_on_map_list 移除
+                                    IntPtr listPtr = ReadFieldSafe(mshAreaMap, areaMapClass, "stuff_on_map_list");
+                                    if (listPtr != IntPtr.Zero)
+                                    {
+                                        IntPtr listClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(listPtr);
+                                        IntPtr removeMth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(listClass, "Remove", 1);
+                                        if (removeMth != IntPtr.Zero)
+                                        {
+                                            try
+                                            {
+                                                IntPtr exRm = IntPtr.Zero;
+                                                unsafe
+                                                {
+                                                    IntPtr* rmArgs = stackalloc IntPtr[1];
+                                                    rmArgs[0] = e.Ptr;
+                                                    Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(removeMth, listPtr, (void**)rmArgs, ref exRm);
+                                                }
+                                                Plugin.LogInfo($"[EntityEditor] [StuffOnMap] list.Remove(entity) ex={exRm != IntPtr.Zero}");
+                                            }
+                                            catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] [StuffOnMap] list.Remove failed: {ex.Message}"); }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Step D: 设置 is_dead 标记
+                            if (e.FieldMeta.TryGetValue("is_dead", out var isDeadFe))
+                            {
+                                try { WriteIl2CppInt(e.Ptr, isDeadFe.Offset, 1); Plugin.LogInfo($"[EntityEditor] [StuffOnMap] Set is_dead=1"); } catch { }
+                            }
+
+                            // Step E: 隐藏实体 — 优先用 RecycleToCache，但如果字典移除可能失败则用 GameObject.SetActive(false)
+                            // RecycleToCache 在状态不一致时可能触发 native crash，所以只在字典移除成功后调用
+                            if (dicRemoved)
+                            {
+                                IntPtr rtCls = classPtr;
+                                int rtD = 0;
+                                while (rtCls != IntPtr.Zero && rtD < 10)
+                                {
+                                    IntPtr rtMth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(rtCls, "RecycleToCache", 0);
+                                    if (rtMth != IntPtr.Zero)
+                                    {
+                                        try
+                                        {
+                                            IntPtr exRt = IntPtr.Zero;
+                                            unsafe { Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(rtMth, e.Ptr, null, ref exRt); }
+                                            Plugin.LogInfo($"[EntityEditor] [StuffOnMap] RecycleToCache() ex={exRt != IntPtr.Zero}");
+                                        }
+                                        catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] [StuffOnMap] RecycleToCache failed: {ex.Message}"); }
+                                        break;
+                                    }
+                                    rtCls = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(rtCls);
+                                    rtD++;
+                                }
+                            }
+                            else
+                            {
+                                // 字典移除可能失败，只做视觉隐藏
+                                try
+                                {
+                                    e.GoRef.SetActive(false);
+                                    Plugin.LogInfo($"[EntityEditor] [StuffOnMap] SetActive(false) — dic removal may have failed");
+                                }
+                                catch { }
+                            }
+                            called = true;
+                        }
+
+                        // 3d: 尝试通过其他管理器类删除
+                        if (!called)
+                            Plugin.LogInfo($"[EntityEditor] [Generic] No destroy method on {className}, trying manager classes...");
+                        // 根据类名推断可能的管理器
+                        string[] mgrCandidates;
+                        if (className.Contains("Animal"))
+                            mgrCandidates = new[] { "AnimalHelper", "NpcHelper", "AnimalManager", "AnimalCtrl" };
+                        else if (className.Contains("Ship"))
+                            mgrCandidates = new[] { "ShipHelper", "ShipManager", "VehicleHelper", "VehicleManager" };
+                        else if (className.Contains("StuffOnMap") || className.Contains("DropItem"))
+                            mgrCandidates = new[] { "MapStuffHelper", "StuffOnMapHelper", "DropItemHelper", "StuffOnMapManager", "MapItemHelper", "StuffManager", "StuffHelper", "ItemDropHelper" };
+                        else
+                            mgrCandidates = new[] { "NpcHelper", "EntityManager", "PrefabManager" };
+
+                        foreach (var mgrName in mgrCandidates)
+                        {
+                            if (called) break;
+                            IntPtr mgrClass = FindClassByName(mgrName);
+                            if (mgrClass == IntPtr.Zero)
+                            {
+                                Plugin.LogInfo($"[EntityEditor] [Generic] Manager class {mgrName} not found");
+                                continue;
+                            }
+                            IntPtr mgrInst = FindClassInstance(mgrClass);
+                            if (mgrInst == IntPtr.Zero)
+                            {
+                                Plugin.LogInfo($"[EntityEditor] [Generic] Manager {mgrName} instance not found");
+                                continue;
+                            }
+                            Plugin.LogInfo($"[EntityEditor] [Generic] Found manager {mgrName}, searching remove methods...");
+
+                            // 枚举管理器的方法，查找包含 Remove/Despawn/Kill/Delete 的方法
+                            string[] removeKeywords = { "Remove", "Despawn", "Delete", "Kill", "Destroy", "Clear", "Release", "Recycle" };
+                            IntPtr mIter = IntPtr.Zero;
+                            IntPtr mMth;
+                            while ((mMth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_methods(mgrClass, ref mIter)) != IntPtr.Zero)
+                            {
+                                string? mName = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_name(mMth));
+                                if (mName == null) continue;
+                                bool matches = false;
+                                foreach (var kw in removeKeywords)
+                                {
+                                    if (mName.Contains(kw, StringComparison.OrdinalIgnoreCase)) { matches = true; break; }
+                                }
+                                if (!matches) continue;
+
+                                uint mPc = Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_param_count(mMth);
+                                // 获取参数类型信息
+                                string paramInfo = "";
+                                for (int pi = 0; pi < (int)mPc; pi++)
+                                {
+                                    IntPtr pt = Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_param(mMth, (uint)pi);
+                                    string? ptn = pt != IntPtr.Zero ? Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_type_get_name(pt)) : "?";
+                                    if (pi > 0) paramInfo += ", ";
+                                    paramInfo += ptn;
+                                }
+                                // 检查是否是静态方法 (METHOD_ATTRIBUTE_STATIC = 0x10)
+                                uint iflags = 0;
+                                uint methodFlags = Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_flags(mMth, ref iflags);
+                                bool isStatic = (methodFlags & 0x10) != 0;
+                                Plugin.LogInfo($"[EntityEditor] [Generic]   {mgrName}.{mName}({mPc}p) params=({paramInfo}) static={isStatic}");
+
+                                if (mPc != 1) continue; // 只尝试 1 参数的（传入实体指针）
+
+                                // 获取参数类型名，检查是否兼容
+                                IntPtr paramType = Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_param(mMth, 0);
+                                string? paramTypeName = paramType != IntPtr.Zero ? Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_type_get_name(paramType)) : null;
+                                Plugin.LogInfo($"[EntityEditor] [Generic]   param0 type={paramTypeName}, entity class={className}");
+
                                 try
                                 {
                                     IntPtr exception = IntPtr.Zero;
-                                    unsafe { Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(methodPtr, e.Ptr, null, ref exception); }
+                                    if (isStatic)
+                                    {
+                                        // 静态方法：不传 this，只传参数
+                                        IntPtr[] argPtrs = new IntPtr[1];
+                                        IntPtr[] storage = new IntPtr[1];
+                                        storage[0] = e.Ptr;
+                                        unsafe
+                                        {
+                                            fixed (IntPtr* storPtr = storage)
+                                            {
+                                                argPtrs[0] = (IntPtr)(&storPtr[0]);
+                                                fixed (IntPtr* argsArr = argPtrs)
+                                                {
+                                                    Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(mMth, IntPtr.Zero, (void**)argsArr, ref exception);
+                                                }
+                                            }
+                                        }
+                                    }
+                                    else
+                                    {
+                                        // 实例方法
+                                        IntPtr[] argPtrs = new IntPtr[1];
+                                        IntPtr[] storage = new IntPtr[1];
+                                        storage[0] = e.Ptr;
+                                        unsafe
+                                        {
+                                            fixed (IntPtr* storPtr = storage)
+                                            {
+                                                argPtrs[0] = (IntPtr)(&storPtr[0]);
+                                                fixed (IntPtr* argsArr = argPtrs)
+                                                {
+                                                    Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(mMth, mgrInst, (void**)argsArr, ref exception);
+                                                }
+                                            }
+                                        }
+                                    }
                                     if (exception == IntPtr.Zero)
                                     {
-                                        Plugin.LogInfo($"[EntityEditor] ✓ Called {methodName}() on {name}");
+                                        Plugin.LogInfo($"[EntityEditor] ✓ Called {mgrName}.{mName}(entity) on {name}");
                                         called = true;
                                     }
+                                    else
+                                        Plugin.LogInfo($"[EntityEditor] {mgrName}.{mName}(entity) IL2CPP exception (ptr={exception.ToInt64():X})");
                                 }
-                                catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] {methodName}() CRASH: {ex.Message}"); }
+                                catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] {mgrName}.{mName}(entity) CRASH: {ex.Message}"); }
+                                if (called) break;
                             }
-                            searchCls = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(searchCls);
-                            depth++;
                         }
                     }
                 }
@@ -801,11 +1203,12 @@ internal static class EntityEditor
                     }
                 }
 
-                // === 兜底：BeforeDestroy + 隐藏视觉 + DestroyImmediate ===
+                // === 兜底：BeforeDestroy + 从管理器移除 + 隐藏视觉 + DestroyImmediate ===
                 if (!called)
                 {
                     Plugin.LogInfo($"[EntityEditor] No game destroy method worked, trying fallback...");
-                    // BeforeDestroy 清理
+
+                    // Step 1: BeforeDestroy 清理
                     {
                         IntPtr bdCls = classPtr;
                         int bdDepth = 0;
@@ -827,7 +1230,11 @@ internal static class EntityEditor
                             bdDepth++;
                         }
                     }
-                    // 隐藏视觉
+
+                    // Step 2: 从 PrefabManager 等管理器中移除引用
+                    RemoveFromManagers(e.Ptr, classPtr, className);
+
+                    // Step 3: 隐藏视觉
                     string[] hideNames = { "SetBodyViewVisible", "SetBodyLogicVisible" };
                     foreach (var hideName in hideNames)
                     {
@@ -864,7 +1271,8 @@ internal static class EntityEditor
                             hDepth++;
                         }
                     }
-                    // RecycleMySp
+
+                    // Step 4: RecycleMySp 清理渲染资源
                     IntPtr cls2 = classPtr;
                     int d2 = 0;
                     while (cls2 != IntPtr.Zero && d2 < 15)
@@ -883,7 +1291,8 @@ internal static class EntityEditor
                         cls2 = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(cls2);
                         d2++;
                     }
-                    // DestroyImmediate
+
+                    // Step 5: 隐藏 + 销毁 GameObject
                     try
                     {
                         e.GoRef.SetActive(false);
@@ -1183,6 +1592,63 @@ internal static class EntityEditor
     }
 
     /// <summary>
+    /// 通过 Game.get_main_scene() → area_map → map_stuff_helper 获取 MapStuffHelper 指针
+    /// IDA: Game.get_main_scene() -> main_scene.area_map -> area_map.map_stuff_helper
+    /// </summary>
+    private static IntPtr FindMapStuffHelper()
+    {
+        try
+        {
+            Plugin.LogInfo($"[EntityEditor] Finding MapStuffHelper via Game chain...");
+
+            // Step 1: Game.get_main_scene()
+            IntPtr gameClass = FindClassByName("Game");
+            if (gameClass == IntPtr.Zero) return IntPtr.Zero;
+
+            IntPtr getMainSceneMth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(gameClass, "get_main_scene", 0);
+            if (getMainSceneMth == IntPtr.Zero)
+            {
+                string[] altNames = { "GetMainScene", "get_MainScene", "main_scene", "get_instance", "get_Instance" };
+                foreach (var alt in altNames)
+                {
+                    getMainSceneMth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(gameClass, alt, 0);
+                    if (getMainSceneMth != IntPtr.Zero) break;
+                }
+            }
+            if (getMainSceneMth == IntPtr.Zero) return IntPtr.Zero;
+
+            IntPtr exception = IntPtr.Zero;
+            IntPtr mainScene = IntPtr.Zero;
+            try
+            {
+                unsafe { mainScene = (IntPtr)Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(getMainSceneMth, IntPtr.Zero, null, ref exception); }
+            }
+            catch { return IntPtr.Zero; }
+            if (mainScene == IntPtr.Zero) return IntPtr.Zero;
+
+            // Step 2: main_scene.fields.area_map
+            IntPtr mainSceneClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(mainScene);
+            IntPtr areaMapPtr = ReadFieldSafe(mainScene, mainSceneClass, "area_map");
+            if (areaMapPtr == IntPtr.Zero) return IntPtr.Zero;
+
+            // Step 3: area_map.fields.map_stuff_helper
+            IntPtr areaMapClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(areaMapPtr);
+            IntPtr mapStuffHelperPtr = ReadFieldSafe(areaMapPtr, areaMapClass, "map_stuff_helper");
+            if (mapStuffHelperPtr != IntPtr.Zero)
+            {
+                IntPtr mshClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(mapStuffHelperPtr);
+                string? mshClassName = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_name(mshClass));
+                Plugin.LogInfo($"[EntityEditor] ✓ Got MapStuffHelper, class={mshClassName}");
+            }
+            else
+                Plugin.LogInfo($"[EntityEditor] area_map.map_stuff_helper is null");
+            return mapStuffHelperPtr;
+        }
+        catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] FindMapStuffHelper error: {ex.Message}"); }
+        return IntPtr.Zero;
+    }
+
+    /// <summary>
     /// 安全读取对象的指针字段（含父类搜索），使用 il2cpp_field_get_offset
     /// </summary>
     private static IntPtr ReadFieldSafe(IntPtr objPtr, IntPtr classPtr, string fieldName)
@@ -1250,6 +1716,194 @@ internal static class EntityEditor
             depth++;
         }
         return IntPtr.Zero;
+    }
+
+    /// <summary>
+    /// 从游戏管理器（PrefabManager 等）中移除实体引用，防止 OnGameExit 时空引用
+    /// </summary>
+    private static void RemoveFromManagers(IntPtr entityPtr, IntPtr classPtr, string className)
+    {
+        try
+        {
+            // 查找 PrefabManager 类
+            string[] managerNames = { "PrefabManager", "EntityManager", "NpcManager", "AnimalManager", "VehicleManager", "DropItemManager" };
+            foreach (var mgrName in managerNames)
+            {
+                IntPtr mgrClass = FindClassByName(mgrName);
+                if (mgrClass == IntPtr.Zero) continue;
+
+                // 获取管理器实例
+                IntPtr mgrInst = FindClassInstance(mgrClass);
+                if (mgrInst == IntPtr.Zero) continue;
+
+                Plugin.LogInfo($"[EntityEditor] Found manager {mgrName}, scanning for entity references...");
+
+                // 遍历管理器的所有字段，查找 List/Dictionary/数组
+                IntPtr fi = IntPtr.Zero;
+                IntPtr f;
+                while ((f = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_fields(mgrClass, ref fi)) != IntPtr.Zero)
+                {
+                    string? fn = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_field_get_name(f));
+                    IntPtr ft = Il2CppInterop.Runtime.IL2CPP.il2cpp_field_get_type(f);
+                    string? ftn = ft != IntPtr.Zero ? Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_type_get_name(ft)) : null;
+                    if (fn == null || ftn == null) continue;
+
+                    int offset = (int)Il2CppInterop.Runtime.IL2CPP.il2cpp_field_get_offset(f);
+                    if (offset < 0x10 || offset > 0x10000) continue;
+
+                    // 检查是否是 List 或 Dictionary 类型
+                    bool isList = ftn.Contains("List<");
+                    bool isDict = ftn.Contains("Dictionary<");
+
+                    if (isList)
+                    {
+                        unsafe
+                        {
+                            IntPtr listPtr = *(IntPtr*)(mgrInst + offset);
+                            if (listPtr == IntPtr.Zero) continue;
+
+                            // 尝试调用 List.Remove(entity)
+                            IntPtr listClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(listPtr);
+                            IntPtr removeMth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(listClass, "Remove", 1);
+                            if (removeMth != IntPtr.Zero)
+                            {
+                                try
+                                {
+                                    IntPtr ex = IntPtr.Zero;
+                                    IntPtr[] args = new IntPtr[1];
+                                    IntPtr[] stor = new IntPtr[1];
+                                    stor[0] = entityPtr;
+                                    fixed (IntPtr* sp = stor)
+                                    {
+                                        args[0] = (IntPtr)(&sp[0]);
+                                        fixed (IntPtr* ap = args)
+                                        {
+                                            Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(removeMth, listPtr, (void**)ap, ref ex);
+                                        }
+                                    }
+                                    Plugin.LogInfo($"[EntityEditor] Removed from {mgrName}.{fn} (List), ex={ex != IntPtr.Zero}");
+                                }
+                                catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] Remove from {mgrName}.{fn} failed: {ex.Message}"); }
+                            }
+
+                            // 也尝试 RemoveAll(Predicate)
+                            IntPtr removeAllMth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(listClass, "RemoveAll", 1);
+                            if (removeAllMth != IntPtr.Zero)
+                            {
+                                Plugin.LogInfo($"[EntityEditor] {mgrName}.{fn} has RemoveAll(1p)");
+                            }
+                        }
+                    }
+                    else if (isDict)
+                    {
+                        unsafe
+                        {
+                            IntPtr dictPtr = *(IntPtr*)(mgrInst + offset);
+                            if (dictPtr == IntPtr.Zero) continue;
+
+                            // 尝试读取实体的 guid/stuff_id 作为 key 来移除
+                            IntPtr dictClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(dictPtr);
+
+                            // 尝试调用 ContainsKey + Remove
+                            IntPtr containsKeyMth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(dictClass, "ContainsKey", 1);
+                            IntPtr removeMth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(dictClass, "Remove", 1);
+
+                            if (containsKeyMth != IntPtr.Zero && removeMth != IntPtr.Zero)
+                            {
+                                Plugin.LogInfo($"[EntityEditor] {mgrName}.{fn} is Dictionary, has ContainsKey+Remove");
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 特殊处理：查找并清理所有包含该实体引用的 List
+            // 遍历场景中所有 GameObject 的组件，查找引用了该实体的字段
+            CleanupReferencesInScene(entityPtr, className);
+        }
+        catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] RemoveFromManagers error: {ex.Message}"); }
+    }
+
+    /// <summary>
+    /// 遍历场景中的管理器组件，清理对已销毁实体的引用
+    /// </summary>
+    private static void CleanupReferencesInScene(IntPtr entityPtr, string className)
+    {
+        try
+        {
+            // 查找 PrefabManager 组件
+            var allGOs = Resources.FindObjectsOfTypeAll<GameObject>();
+            foreach (var go in allGOs)
+            {
+                try
+                {
+                    var comps = go.GetComponents<Component>();
+                    foreach (var comp in comps)
+                    {
+                        if (comp == null) continue;
+                        string cn = comp.GetIl2CppType().Name;
+
+                        // 只处理管理器类
+                        if (!cn.Contains("Manager") && !cn.Contains("Controller") && !cn.Contains("Helper"))
+                            continue;
+
+                        IntPtr compPtr = GetIl2CppPtr(comp);
+                        if (compPtr == IntPtr.Zero) continue;
+
+                        IntPtr compClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(compPtr);
+
+                        // 查找并清理 List 字段
+                        IntPtr fi = IntPtr.Zero;
+                        IntPtr f;
+                        while ((f = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_fields(compClass, ref fi)) != IntPtr.Zero)
+                        {
+                            string? fn = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_field_get_name(f));
+                            IntPtr ft = Il2CppInterop.Runtime.IL2CPP.il2cpp_field_get_type(f);
+                            string? ftn = ft != IntPtr.Zero ? Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_type_get_name(ft)) : null;
+                            if (fn == null || ftn == null) continue;
+
+                            int offset = (int)Il2CppInterop.Runtime.IL2CPP.il2cpp_field_get_offset(f);
+                            if (offset < 0x10 || offset > 0x10000) continue;
+
+                            // 检查是否是 List 类型且包含实体类型名
+                            if (ftn.Contains("List<") && (ftn.Contains(className) || ftn.Contains("Entity") || ftn.Contains("Npc") || ftn.Contains("Animal")))
+                            {
+                                unsafe
+                                {
+                                    IntPtr listPtr = *(IntPtr*)(compPtr + offset);
+                                    if (listPtr == IntPtr.Zero) continue;
+
+                                    IntPtr listClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(listPtr);
+                                    IntPtr removeMth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(listClass, "Remove", 1);
+                                    if (removeMth != IntPtr.Zero)
+                                    {
+                                        try
+                                        {
+                                            IntPtr ex = IntPtr.Zero;
+                                            IntPtr[] args = new IntPtr[1];
+                                            IntPtr[] stor = new IntPtr[1];
+                                            stor[0] = entityPtr;
+                                            fixed (IntPtr* sp = stor)
+                                            {
+                                                args[0] = (IntPtr)(&sp[0]);
+                                                fixed (IntPtr* ap = args)
+                                                {
+                                                    Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(removeMth, listPtr, (void**)ap, ref ex);
+                                                }
+                                            }
+                                            Plugin.LogInfo($"[EntityEditor] Cleaned {cn}.{fn} (List), ex={ex != IntPtr.Zero}");
+                                        }
+                                        catch { }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                catch { }
+            }
+        }
+        catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] CleanupReferencesInScene error: {ex.Message}"); }
     }
 
     /// <summary>
