@@ -1410,10 +1410,11 @@ function renderEntityEditorPanel() {
       const entityName = e.name || '';
       const fieldCount = e.fieldCount || 0;
       const displayName = npcName || entityName || goName;
+      const stuffNameWithIdIndex = e.stuffNameWithIdIndex || '';
       const kInfo = getKingdomInfo(kingdomId);
       h += '<div style=""margin-bottom:4px"">';
       h += '<div style=""display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer"" onclick=""toggleEditorEntity(' + ptrHash + ')"">';
-      h += '<span style=""font-weight:600;color:var(--text-primary)"">' + esc(displayName) + '</span>';
+      h += '<span style=""font-weight:600;color:var(--text-primary)"">' + esc(displayName) + (stuffNameWithIdIndex ? ' <span style=""font-weight:400;color:var(--text-muted)"">(' + esc(stuffNameWithIdIndex) + ')</span>' : '') + '</span>';
       if (kInfo) h += '<span style=""font-size:10px;padding:1px 6px;border-radius:8px;background:' + kInfo.bg + ';color:' + kInfo.fg + '"">' + esc(kInfo.name) + '</span>';
       if (npcName && entityName) h += '<span style=""font-size:10px;color:var(--text-muted)"">' + esc(entityName) + '</span>';
       h += '<span style=""font-size:11px;color:var(--text-muted);margin-left:auto"">' + esc(e.className || '') + ' GUID:' + guid + '</span>';

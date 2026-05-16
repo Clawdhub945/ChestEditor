@@ -41,6 +41,7 @@ internal static class EntityEditor
         public string NpcName = "";
         public int HometownKingdomId;
         public int TerritoryKingdomId;
+        public string StuffNameWithIdIndex = "";
         public IntPtr Ptr;
         public int PtrHash;
         public int Guid;
@@ -245,6 +246,11 @@ internal static class EntityEditor
                                 try { hometownKingdomId = ReadIl2CppInt(compPtr, hkFe.Offset); } catch { }
                         }
 
+                        // 读取 stuff_name_with_id_index（Facility 类的显示名称）
+                        string stuffNameWithIdIndex = "";
+                        if (fieldMap.TryGetValue("stuff_name_with_id_index", out var snFe) && snFe.IsString)
+                            try { stuffNameWithIdIndex = ReadIl2CppString(compPtr, snFe.Offset) ?? ""; } catch { }
+
                         seenPtrHash.Add(ptrHash);
 
                         var entity = new EditorEntity
@@ -253,6 +259,7 @@ internal static class EntityEditor
                             ClassName = className,
                             NpcName = npcName,
                             HometownKingdomId = hometownKingdomId,
+                            StuffNameWithIdIndex = stuffNameWithIdIndex,
                             Ptr = compPtr,
                             PtrHash = ptrHash,
                             Guid = guid,
@@ -350,6 +357,7 @@ internal static class EntityEditor
             sb.Append($"\"goName\":\"{Escape(e.GoName)}\",");
             sb.Append($"\"className\":\"{Escape(e.ClassName)}\",");
             sb.Append($"\"npcName\":\"{Escape(e.NpcName)}\",");
+            sb.Append($"\"stuffNameWithIdIndex\":\"{Escape(e.StuffNameWithIdIndex)}\",");
             sb.Append($"\"hometownKingdomId\":{e.HometownKingdomId},");
             sb.Append($"\"territoryKingdomId\":{e.TerritoryKingdomId},");
             sb.Append($"\"ptrHash\":{e.PtrHash},");
