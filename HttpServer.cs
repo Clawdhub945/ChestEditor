@@ -320,6 +320,54 @@ internal class HttpServer
                 else
                     SendJson(resp, "{\"error\":\"timeout\"}");
             }
+            else if (path == "/api/techtree/diagnose" && method == "GET")
+            {
+                SendJson(resp, Il2CppHelper.DiagnoseTechTree());
+            }
+            else if (path == "/api/techtree" && method == "GET")
+            {
+                SendJson(resp, Il2CppHelper.GetTechTreeJson());
+            }
+            else if (path == "/api/techtree/toggle" && method == "POST")
+            {
+                string body;
+                using (var reader = new StreamReader(req.InputStream, req.ContentEncoding))
+                    body = reader.ReadToEnd();
+                int techId = 0;
+                bool unlock = true;
+                foreach (var part in body.Trim('{', '}').Split(','))
+                {
+                    var kv = part.Split(':');
+                    if (kv.Length != 2) continue;
+                    string key = kv[0].Trim().Trim('"');
+                    string v = kv[1].Trim().Trim('"');
+                    if (key == "techId" && int.TryParse(v, out int v1)) techId = v1;
+                    if (key == "unlock") unlock = v == "true";
+                }
+                if (techId == 0) { SendJson(resp, "{\"error\":\"missing techId\"}"); return; }
+                SendJson(resp, Il2CppHelper.ToggleTechUnlock(techId, unlock));
+            }
+            else if (path == "/api/techtree/unlockall" && method == "POST")
+            {
+                SendJson(resp, Il2CppHelper.UnlockAllTechs());
+            }
+            else if (path == "/api/techtree/research" && method == "POST")
+            {
+                string body;
+                using (var reader = new StreamReader(req.InputStream, req.ContentEncoding))
+                    body = reader.ReadToEnd();
+                int techId = 0;
+                foreach (var part in body.Trim('{', '}').Split(','))
+                {
+                    var kv = part.Split(':');
+                    if (kv.Length != 2) continue;
+                    string key = kv[0].Trim().Trim('"');
+                    string v = kv[1].Trim().Trim('"');
+                    if (key == "techId" && int.TryParse(v, out int v1)) techId = v1;
+                }
+                if (techId == 0) { SendJson(resp, "{\"error\":\"missing techId\"}"); return; }
+                SendJson(resp, Il2CppHelper.SetResearchTech(techId));
+            }
             else if (path == "/api/editor/scan" && method == "POST")
             {
                 Plugin.LogInfo("[HTTP] /api/editor/scan 请求");
@@ -495,6 +543,85 @@ internal class HttpServer
                 comp.WriteQueue.Enqueue(writeReq);
                 if (signal.Wait(10000))
                     SendJson(resp, writeReq.ResultJson ?? "{}");
+                else
+                    SendJson(resp, "{\"error\":\"timeout\"}");
+            }
+            // ====== NPC 面板 API ======
+            else if (path == "/api/npc/scan" && method == "POST")
+            {
+                Plugin.LogInfo("[HTTP] /api/npc/scan 请求");
+                var comp = ChestEditorComponent.Instance;
+                if (comp == null) { SendJson(resp, "{\"error\":\"mod not ready\"}"); return; }
+                var signal = new ManualResetEventSlim(false);
+                comp.WriteQueue.Enqueue(new ChestEditorComponent.WriteRequest { ChestIndex = -31, Signal = signal });
+                if (signal.Wait(30000))
+                    SendJson(resp, comp.NpcListJson);
+                else
+                    SendJson(resp, "{\"error\":\"timeout\"}");
+            }
+            else if (path == "/api/npc/list" && method == "GET")
+            {
+                var comp = ChestEditorComponent.Instance;
+                SendJson(resp, comp != null ? comp.NpcListJson : "[]");
+            }
+            else if (path.StartsWith("/api/npc/fields/") && method == "GET")
+            {
+                var parts = path.Split('/');
+                if (parts.Length < 5 || !int.TryParse(parts[4], out int ph))
+                {
+                    SendJson(resp, "{\"error\":\"invalid ptrHash\"}");
+                    return;
+                }
+                var comp = ChestEditorComponent.Instance;
+                if (comp == null) { SendJson(resp, "{\"error\":\"mod not ready\"}"); return; }
+                var signal = new ManualResetEventSlim(false);
+                comp.WriteQueue.Enqueue(new ChestEditorComponent.WriteRequest { ChestIndex = -32, ExtraIndex = ph, Signal = signal });
+                if (signal.Wait(10000))
+                {
+                    var json = comp.NpcFieldsJson;
+                    Plugin.LogInfo($"[HTTP] /api/npc/fields/{ph} 返回 {json.Length} 字节");
+                    SendJson(resp, json);
+                }
+                else
+                    SendJson(resp, "{\"error\":\"timeout\"}");
+            }
+            else if (path == "/api/npc/set" && method == "POST")
+            {
+                string body;
+                using (var reader = new StreamReader(req.InputStream, req.ContentEncoding))
+                    body = reader.ReadToEnd();
+                int ptrHash = 0;
+                string field = "";
+                float value = 0;
+                foreach (var part in body.Trim('{', '}').Split(','))
+                {
+                    var kv = part.Split(':');
+                    if (kv.Length != 2) continue;
+                    string key = kv[0].Trim().Trim('"');
+                    string v = kv[1].Trim().Trim('"');
+                    if (key == "ptrHash" && int.TryParse(v, out int g)) ptrHash = g;
+                    else if (key == "field") field = v;
+                    else if (key == "value") float.TryParse(v, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out value);
+                }
+                if (ptrHash == 0 || string.IsNullOrEmpty(field))
+                {
+                    SendJson(resp, "{\"error\":\"missing ptrHash or field\"}");
+                    return;
+                }
+                var comp = ChestEditorComponent.Instance;
+                if (comp == null) { SendJson(resp, "{\"error\":\"mod not ready\"}"); return; }
+                var signal = new ManualResetEventSlim(false);
+                var writeReq = new ChestEditorComponent.WriteRequest
+                {
+                    ChestIndex = -33,
+                    ExtraIndex = ptrHash,
+                    Count = BitConverter.SingleToInt32Bits(value),
+                    ResultJson = field,
+                    Signal = signal
+                };
+                comp.WriteQueue.Enqueue(writeReq);
+                if (signal.Wait(10000))
+                    SendJson(resp, writeReq.ResultJson ?? "{\"ok\":true}");
                 else
                     SendJson(resp, "{\"error\":\"timeout\"}");
             }

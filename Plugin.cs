@@ -14,7 +14,7 @@ public class Plugin : BasePlugin
 {
     public const string PLUGIN_GUID = "claude.chesteditor";
     public const string PLUGIN_NAME = "ChestEditor";
-    public const string PLUGIN_VERSION = "1.0.0";
+    public const string PLUGIN_VERSION = "1.1.0";
 
     private Harmony? _harmony;
     private static HttpServer? _httpServer;
@@ -28,6 +28,12 @@ public class Plugin : BasePlugin
 
         _harmony = new Harmony(PLUGIN_GUID);
         SaveLoadPatches.Apply(_harmony);
+        try
+        {
+            EntityEditor.LoadModificationsFromDisk();
+            LogInfo("[Plugin] LoadModificationsFromDisk 完成");
+        }
+        catch (Exception ex) { LogError($"[Plugin] LoadModificationsFromDisk 失败: {ex}"); }
 
         // 注册 IL2CPP 组件并创建 GameObject
         ClassInjector.RegisterTypeInIl2Cpp<ChestEditorComponent>();

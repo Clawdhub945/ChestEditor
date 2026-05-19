@@ -378,6 +378,77 @@ body { font-family: 'Inter', sans-serif; background: var(--bg-primary); color: v
   color: var(--text-muted);
 }
 
+.tech-card {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  width: 88px;
+  padding: 8px 4px 6px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s;
+  text-align: center;
+  position: relative;
+  vertical-align: top;
+}
+.tech-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+}
+.tech-card .tc-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  background: var(--bg-input);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  margin-bottom: 4px;
+  border: 2px solid var(--border);
+}
+.tech-card .tc-icon img {
+  width: 44px;
+  height: 44px;
+  image-rendering: pixelated;
+}
+.tech-card .tc-name {
+  font-size: 10px;
+  line-height: 1.3;
+  max-height: 2.6em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  word-break: break-all;
+}
+.tech-card .tc-cost {
+  font-size: 9px;
+  opacity: 0.6;
+  margin-top: 2px;
+}
+.tech-card .tc-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  font-size: 8px;
+  padding: 1px 4px;
+  border-radius: 6px;
+  font-weight: 600;
+}
+.tech-card .tc-tip {
+  position: absolute;
+  bottom: 2px;
+  left: 2px;
+  right: 2px;
+  font-size: 8px;
+  color: var(--warning);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .content {
   flex: 1;
   display: flex;
@@ -875,6 +946,10 @@ let dragonMainOpen = false;
 let dragonView = ''; // 'souls' | 'materials' | 'summon' | ''
 let dragonSouls = [];
 let npcMainOpen = false;
+let npcPanelOpen = false;
+let npcListData = [];
+let techTreeOpen = false;
+let techTreeData = null;
 let npcView = ''; // 'explore' | 'entities' | ''
 let entityEditorData = [];
 let filters = [];
@@ -1130,6 +1205,21 @@ function renderSidebar() {
 
   html += '</div></div>';
 
+  // NPC 分类（与容器同级）
+  html += '<div class=""category"">';
+  html += '<div class=""category-header"" onclick=""toggleNpcPanel()"">';
+  html += '<span class=""arrow' + (npcPanelOpen ? ' open' : '') + '"">&#9654;</span>';
+  html += '<span>NPC</span>';
+  html += '<span style=""margin-left:auto;font-size:11px;color:var(--text-muted)"">' + npcListData.length + '</span>';
+  html += '</div>';
+  html += '<div class=""category-items' + (npcPanelOpen ? ' open' : '') + '"">';
+  html += '<div class=""chest-item' + (npcPanelOpen ? ' active' : '') + '"" onclick=""openNpcPanel()"">';
+  html += '<div class=""ci-icon"" style=""font-size:20px;display:flex;align-items:center;justify-content:center"">&#x1F464;</div>';
+  html += '<div class=""ci-info"">';
+  html += '<div class=""ci-name"">我方 NPC</div>';
+  html += '<div class=""ci-count"">' + (npcListData.length > 0 ? npcListData.length + ' 个' : '点击扫描') + '</div>';
+  html += '</div></div></div></div>';
+
   // 怪物总分类
   html += '<div class=""category"">';
   html += '<div class=""category-header"" onclick=""toggleNpcMain()"">';
@@ -1146,6 +1236,21 @@ function renderSidebar() {
   html += '<div class=""ci-count"">' + (entityEditorData.length > 0 ? entityEditorData.length + ' 个实体' : '0 个') + '</div>';
   html += '</div></div>';
 
+  html += '</div></div>';
+
+  // 科技树
+  html += '<div class=""category"">';
+  html += '<div class=""category-header"" onclick=""toggleTechTree()"">';
+  html += '<span class=""arrow' + (techTreeOpen ? ' open' : '') + '"">&#9654;</span>';
+  html += '<span>科技树</span>';
+  html += '</div>';
+  html += '<div class=""category-items' + (techTreeOpen ? ' open' : '') + '"">';
+  html += '<div class=""chest-item' + (techTreeOpen ? ' active' : '') + '"" onclick=""openTechTree()"">';
+  html += '<div class=""ci-icon"" style=""font-size:20px;display:flex;align-items:center;justify-content:center"">&#x1F333;</div>';
+  html += '<div class=""ci-info"">';
+  html += '<div class=""ci-name"">查看科技树</div>';
+  html += '<div class=""ci-count"">点击查看/修改</div>';
+  html += '</div></div>';
   html += '</div></div>';
 
   el.innerHTML = html;
@@ -1166,6 +1271,534 @@ function toggleDragonMain() {
 function toggleNpcMain() {
   npcMainOpen = !npcMainOpen;
   renderSidebar();
+}
+
+function toggleNpcPanel() {
+  npcPanelOpen = !npcPanelOpen;
+  renderSidebar();
+}
+
+async function openNpcPanel() {
+  selectedChest = -1;
+  dragonView = '';
+  npcView = '';
+  npcPanelOpen = true;
+  renderSidebar();
+  const el = document.getElementById('content');
+  el.innerHTML = '<div style=""padding:40px;text-align:center;color:var(--text-muted)"">扫描我方 NPC 中...</div>';
+  try {
+    const r = await fetch('/api/npc/scan', {method:'POST'});
+    npcListData = await r.json();
+    renderSidebar();
+    renderNpcPanel();
+  } catch(e) {
+    el.innerHTML = '<div style=""padding:40px;text-align:center;color:var(--danger)"">扫描失败: ' + esc(e.message) + '</div>';
+  }
+}
+
+function renderNpcPanel() {
+  const el = document.getElementById('content');
+  let html = '';
+  html += '<div style=""padding:20px;height:100%;box-sizing:border-box;display:flex;flex-direction:column;overflow:hidden"">';
+  html += '<div style=""display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-shrink:0"">';
+  html += '<h2 style=""color:var(--accent-light);margin:0;font-size:18px"">&#x1F464; 我方 NPC</h2>';
+  html += '<span style=""color:var(--text-muted);font-size:13px"">' + npcListData.length + ' 个</span>';
+  html += '<button onclick=""openNpcPanel()"" style=""padding:6px 16px;background:var(--accent);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;font-size:13px;margin-left:auto"">重新扫描</button>';
+  html += '</div>';
+
+  if (npcListData.length === 0) {
+    html += '<div style=""background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:40px;text-align:center"">';
+    html += '<div style=""font-size:48px;margin-bottom:16px"">&#x1F464;</div>';
+    html += '<div style=""color:var(--text-secondary);font-size:16px;margin-bottom:8px"">未发现我方 NPC</div>';
+    html += '<div style=""color:var(--text-muted);font-size:13px"">确保游戏已加载存档且有己方 NPC 存在</div>';
+    html += '</div>';
+  } else {
+    const workers = [], citizens = [], soldiers = [];
+    for (const npc of npcListData) {
+      const st = npc.soldierTypeName || '';
+      if (st === '民兵') workers.push(npc);
+      else if (st === '市民') citizens.push(npc);
+      else soldiers.push(npc);
+    }
+    const groups = [
+      {label:'民兵', icon:'&#x1F6E1;', color:'#f39c12', items:workers},
+      {label:'市民', icon:'&#x1F3D7;', color:'#27ae60', items:citizens},
+      {label:'士兵', icon:'&#x2694;', color:'#3498db', items:soldiers}
+    ];
+    html += '<div style=""flex:1;overflow-y:auto;min-height:0"">';
+    for (const g of groups) {
+      if (g.items.length === 0) continue;
+      html += '<details style=""margin-bottom:8px"">';
+      html += '<summary style=""cursor:pointer;padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-weight:600;font-size:13px;display:flex;align-items:center;gap:8px"">';
+      html += '<span style=""font-size:10px;padding:1px 6px;border-radius:8px;background:' + g.color + ';color:#fff"">' + g.icon + ' ' + g.label + '</span>';
+      html += '<span style=""margin-left:auto;font-size:12px;color:var(--text-muted);font-weight:400"">' + g.items.length + ' 个</span>';
+      html += '</summary>';
+      html += '<div style=""padding:6px 0"">';
+      for (const npc of g.items) {
+        html += '<div style=""margin-bottom:6px"">' + renderNpcCard(npc) + '</div>';
+      }
+      html += '</div></details>';
+    }
+    html += '</div>';
+  }
+
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+function renderNpcCard(npc) {
+  const ptrHash = npc.ptrHash || 0;
+  const displayName = npc.npcName || npc.name || ('NPC#' + npc.guid);
+  const soldierType = npc.soldierTypeName || '';
+  const fieldCount = npc.fieldCount || 0;
+  let h = '';
+
+  h += '<div style=""background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius)"">';
+
+  // 头部：名称 + 兵种
+  h += '<div style=""display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--border)"">';
+  h += '<span style=""font-weight:600;color:var(--text-primary);font-size:14px"">' + esc(displayName) + '</span>';
+  if (soldierType) h += '<span style=""font-size:11px;padding:1px 8px;border-radius:8px;background:var(--accent);color:#fff"">' + esc(soldierType) + '</span>';
+  h += '<span style=""font-size:11px;color:var(--text-muted);margin-left:auto"">GUID:' + npc.guid + '</span>';
+  h += '<button onclick=""event.stopPropagation();locateEditorEntity(' + ptrHash + ')"" style=""padding:3px 8px;background:var(--info,#3498db);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px"">定位</button>';
+  h += '</div>';
+
+  // 重点字段：speed, hp, hp_total
+  h += '<div style=""display:flex;gap:12px;padding:10px 14px;flex-wrap:wrap"">';
+  h += renderNpcFieldInput(ptrHash, 'speed', '速度', npc.speed, {isFloat:true});
+  h += renderNpcFieldInput(ptrHash, 'hp', '血量', npc.hp, {isFloat:true});
+  h += renderNpcFieldInput(ptrHash, 'hp_total', '血量上限', npc.hpTotal, {isFloat:true});
+  h += '</div>';
+
+  // 其他字段折叠（懒加载）
+  if (fieldCount > 3) {
+    h += '<details style=""border-top:1px solid var(--border)"" ontoggle=""loadNpcFields(this,' + ptrHash + ')"">';
+    h += '<summary style=""cursor:pointer;padding:8px 14px;font-size:12px;color:var(--text-muted);user-select:none"">其他字段 (' + (fieldCount - 3) + ')</summary>';
+    h += '<div id=""npc-fields-' + ptrHash + '"" style=""padding:6px 14px 10px;color:var(--text-muted);font-size:12px"">点击展开加载...</div>';
+    h += '</details>';
+  }
+
+  h += '</div>';
+  return h;
+}
+
+async function loadNpcFields(details, ptrHash) {
+  if (!details.open) return;
+  const container = document.getElementById('npc-fields-' + ptrHash);
+  if (!container || container.dataset.loaded) return;
+  container.dataset.loaded = '1';
+  container.innerHTML = '加载中...';
+  try {
+    const r = await fetch('/api/npc/fields/' + ptrHash + '?t=' + Date.now());
+    const fields = await r.json();
+    const allKeys = Object.keys(fields);
+    console.log('[NPC fields] ptrHash=' + ptrHash + ' keys=' + allKeys.length + ' error=' + (fields.error || 'none'));
+    if (fields.error || allKeys.length === 0) {
+      container.innerHTML = '<span style=""color:var(--danger)"">实体已失效 (ptrHash: ' + ptrHash + ')，请<a href=""javascript:void(0)"" onclick=""openNpcPanel()"" style=""color:var(--accent)"">重新扫描</a></span>';
+      const summary = details.querySelector('summary');
+      if (summary) summary.textContent = '其他字段 (已失效)';
+      return;
+    }
+    const mainFields = new Set(['speed', 'hp', 'hp_total']);
+    const numKeys = allKeys.filter(k => !mainFields.has(k) && !fields[k].isString);
+    const strKeys = allKeys.filter(k => fields[k].isString);
+    let h = '';
+    if (numKeys.length > 0) {
+      h += '<div style=""display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px"">';
+      for (const key of numKeys) {
+        const f = fields[key];
+        h += renderNpcFieldInput(ptrHash, key, key, f.value, f);
+      }
+      h += '</div>';
+    }
+    if (strKeys.length > 0) {
+      for (const key of strKeys) {
+        const f = fields[key];
+        h += '<div style=""display:flex;align-items:center;gap:8px;font-size:12px;margin-bottom:2px"">';
+        h += '<span style=""color:var(--text-muted);min-width:100px"">' + esc(key) + '</span>';
+        h += '<span style=""color:var(--text-primary)"">' + esc(String(f.value || '')) + '</span>';
+        h += '</div>';
+      }
+    }
+    container.innerHTML = h || '<span style=""color:var(--text-muted)"">无其他字段</span>';
+    const summary = details.querySelector('summary');
+    if (summary) summary.textContent = '其他字段 (' + (numKeys.length + strKeys.length) + ')';
+  } catch(e) {
+    container.innerHTML = '<span style=""color:var(--danger)"">加载失败</span>';
+  }
+}
+
+var _npcFieldInputId = 0;
+function renderNpcFieldInput(ptrHash, field, label, value, fieldMeta) {
+  const isFloat = fieldMeta && fieldMeta.isFloat;
+  const displayVal = (typeof value === 'number') ? (isFloat ? value.toFixed(2) : value) : (value || 0);
+  const inputId = 'npc_inp_' + (++_npcFieldInputId);
+  let h = '';
+  h += '<div style=""display:flex;align-items:center;gap:4px;background:var(--bg-input, #1a1a2e);border:1px solid var(--border);border-radius:6px;padding:4px 8px"">';
+  h += '<span style=""font-size:11px;color:var(--text-muted);white-space:nowrap"">' + esc(label) + '</span>';
+  h += '<input id=""' + inputId + '"" type=""number"" step=""' + (isFloat ? '0.1' : '1') + '"" value=""' + displayVal + '"" ';
+  h += 'style=""width:70px;background:transparent;border:none;color:var(--text-primary);font-size:12px;text-align:right;outline:none"" ';
+  h += 'onfocus=""this.select()"" />';
+  h += '<button onclick=""setNpcField(' + ptrHash + ',\'' + esc(field) + '\',document.getElementById(\'' + inputId + '\').value,' + (isFloat ? 'true' : 'false') + ')"" style=""padding:2px 6px;background:var(--accent);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px;white-space:nowrap"">OK</button>';
+  h += '</div>';
+  return h;
+}
+
+async function setNpcField(ptrHash, field, value, isFloat) {
+  const v = isFloat ? parseFloat(value) : parseInt(value);
+  if (isNaN(v)) return;
+  try {
+    const r = await fetch('/api/npc/set', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ptrHash, field, value: v})
+    });
+    const data = await r.json();
+    if (data.error) { toast('设置失败: ' + data.error, true); return; }
+    // 更新本地数据
+    for (const npc of npcListData) {
+      if (npc.ptrHash === ptrHash) {
+        if (field === 'speed') npc.speed = v;
+        else if (field === 'hp') npc.hp = v;
+        else if (field === 'hp_total') npc.hpTotal = v;
+        if (npc.fields && npc.fields[field]) npc.fields[field].value = v;
+        break;
+      }
+    }
+    toast(field + ' = ' + v);
+  } catch(e) { toast('设置失败', true); }
+}
+
+var TECH_TREE=[{""i"":902022,""d"":0,""p"":0,""s"":0},{""i"":902035,""d"":902022,""p"":100,""s"":0},{""i"":902024,""d"":902035,""p"":200,""s"":30},{""i"":902034,""d"":902022,""p"":100,""s"":0},{""i"":902023,""d"":902034,""p"":200,""s"":30},{""i"":902037,""d"":902034,""p"":60,""s"":0},{""i"":902038,""d"":902037,""p"":200,""s"":30},{""i"":902084,""d"":902038,""p"":200,""s"":50},{""i"":902036,""d"":902022,""p"":40,""s"":0},{""i"":902160,""d"":902036,""p"":200,""s"":50},{""i"":902017,""d"":902036,""p"":200,""s"":0},{""i"":902020,""d"":902017,""p"":200,""s"":50},{""i"":902018,""d"":902036,""p"":200,""s"":0},{""i"":902109,""d"":902018,""p"":200,""s"":50},{""i"":902019,""d"":902036,""p"":200,""s"":50},{""i"":902021,""d"":902019,""p"":200,""s"":50},{""i"":902012,""d"":902036,""p"":100,""s"":0},{""i"":902039,""d"":902012,""p"":200,""s"":30},{""i"":902116,""d"":902039,""p"":200,""s"":50},{""i"":902013,""d"":0,""p"":100,""s"":0},{""i"":902005,""d"":0,""p"":100,""s"":0,""t"":""完成主线剧情过程中解锁""},{""i"":902004,""d"":902013,""p"":100,""s"":0},{""i"":902007,""d"":902013,""p"":100,""s"":0},{""i"":902156,""d"":902007,""p"":200,""s"":500},{""i"":902113,""d"":902013,""p"":100,""s"":100},{""i"":902154,""d"":902113,""p"":100,""s"":200},{""i"":902155,""d"":902154,""p"":100,""s"":300},{""i"":902153,""d"":902155,""p"":100,""s"":0},{""i"":902130,""d"":902013,""p"":100,""s"":0},{""i"":902131,""d"":902130,""p"":200,""s"":1000},{""i"":902010,""d"":902013,""p"":100,""s"":0},{""i"":902011,""d"":902010,""p"":200,""s"":50},{""i"":902157,""d"":902011,""p"":200,""s"":100},{""i"":902158,""d"":902157,""p"":200,""s"":100},{""i"":902159,""d"":902158,""p"":200,""s"":200},{""i"":902147,""d"":902011,""p"":1000,""s"":2000},{""i"":902003,""d"":902013,""p"":100,""s"":0},{""i"":902099,""d"":902005,""p"":500,""s"":0},{""i"":902140,""d"":902099,""p"":500,""s"":1000},{""i"":902065,""d"":902005,""p"":300,""s"":0},{""i"":902066,""d"":902065,""p"":300,""s"":100},{""i"":902144,""d"":902005,""p"":100,""s"":0},{""i"":902061,""d"":902004,""p"":100,""s"":0},{""i"":902152,""d"":902061,""p"":1000,""s"":2000},{""i"":902075,""d"":902003,""p"":50,""s"":0},{""i"":902104,""d"":902003,""p"":500,""s"":1000},{""i"":902122,""d"":902104,""p"":500,""s"":2000},{""i"":902135,""d"":902003,""p"":500,""s"":100},{""i"":902136,""d"":902135,""p"":500,""s"":200},{""i"":902137,""d"":902136,""p"":500,""s"":300},{""i"":902138,""d"":902137,""p"":500,""s"":400},{""i"":902139,""d"":902138,""p"":500,""s"":500},{""i"":902002,""d"":902003,""p"":300,""s"":0},{""i"":902091,""d"":902002,""p"":300,""s"":100},{""i"":902014,""d"":902003,""p"":300,""s"":100},{""i"":902015,""d"":902003,""p"":100,""s"":100},{""i"":902102,""d"":902014,""p"":500,""s"":1000},{""i"":902063,""d"":902003,""p"":200,""s"":0},{""i"":902064,""d"":902063,""p"":300,""s"":0},{""i"":902009,""d"":0,""p"":100,""s"":0,""t"":""完成主线剧情过程中解锁""},{""i"":902161,""d"":902009,""p"":100,""s"":100},{""i"":902008,""d"":902009,""p"":400,""s"":50},{""i"":902112,""d"":902008,""p"":500,""s"":100},{""i"":902114,""d"":902112,""p"":500,""s"":100},{""i"":902016,""d"":902009,""p"":400,""s"":0},{""i"":902106,""d"":902016,""p"":500,""s"":0},{""i"":902134,""d"":902016,""p"":500,""s"":0},{""i"":902141,""d"":902106,""p"":500,""s"":1000},{""i"":902032,""d"":902009,""p"":400,""s"":100},{""i"":902033,""d"":902009,""p"":400,""s"":100},{""i"":902060,""d"":902114,""p"":500,""s"":500},{""i"":902120,""d"":902032,""p"":500,""s"":500},{""i"":902150,""d"":902120,""p"":500,""s"":500},{""i"":902059,""d"":902033,""p"":500,""s"":500},{""i"":902151,""d"":902059,""p"":500,""s"":500},{""i"":902111,""d"":902009,""p"":800,""s"":0},{""i"":902082,""d"":902111,""p"":500,""s"":500},{""i"":902083,""d"":902082,""p"":1000,""s"":500},{""i"":902125,""d"":902083,""p"":2000,""s"":1000},{""i"":902146,""d"":902125,""p"":2000,""s"":1000},{""i"":902126,""d"":902083,""p"":2000,""s"":1000},{""i"":902124,""d"":902082,""p"":1000,""s"":500},{""i"":902077,""d"":902009,""p"":500,""s"":0},{""i"":902117,""d"":902077,""p"":100,""s"":0},{""i"":902078,""d"":902077,""p"":1000,""s"":0},{""i"":902080,""d"":902077,""p"":500,""s"":0},{""i"":902110,""d"":902080,""p"":800,""s"":0},{""i"":902149,""d"":902110,""p"":500,""s"":500},{""i"":902081,""d"":902078,""p"":1000,""s"":0},{""i"":902025,""d"":"""",""p"":100,""s"":0},{""i"":902090,""d"":902025,""p"":500,""s"":200},{""i"":902143,""d"":902090,""p"":200,""s"":500},{""i"":902074,""d"":902025,""p"":200,""s"":0},{""i"":902115,""d"":902074,""p"":100,""s"":100},{""i"":902142,""d"":902115,""p"":500,""s"":1000},{""i"":902133,""d"":902142,""p"":9999,""s"":0,""t"":""完成主线剧情过程中解锁""},{""i"":902068,""d"":902046,""p"":5000,""s"":0,""t"":""据说藏在某个神秘的地方""},{""i"":902069,""d"":902047,""p"":5000,""s"":0,""t"":""据说藏在某个神秘的地方""},{""i"":902070,""d"":902048,""p"":5000,""s"":0,""t"":""据说藏在某个神秘的地方""},{""i"":902071,""d"":902068,""p"":8000,""s"":0,""t"":""据说藏在某个神秘的地方""},{""i"":902072,""d"":902069,""p"":8000,""s"":0,""t"":""据说藏在某个神秘的地方""},{""i"":902073,""d"":902070,""p"":8000,""s"":0,""t"":""据说藏在某个神秘的地方""},{""i"":902052,""d"":902025,""p"":100,""s"":100},{""i"":902053,""d"":902052,""p"":200,""s"":200},{""i"":902057,""d"":902053,""p"":200,""s"":500},{""i"":902127,""d"":902053,""p"":8000,""s"":5000},{""i"":902055,""d"":902052,""p"":200,""s"":200},{""i"":902056,""d"":902055,""p"":200,""s"":300},{""i"":902128,""d"":902055,""p"":200,""s"":500},{""i"":902108,""d"":902052,""p"":200,""s"":200},{""i"":902103,""d"":902052,""p"":1000,""s"":1000},{""i"":902129,""d"":902103,""p"":1000,""s"":2000},{""i"":902092,""d"":902025,""p"":1000,""s"":1000},{""i"":902097,""d"":902092,""p"":500,""s"":500},{""i"":902123,""d"":902092,""p"":1000,""s"":1000},{""i"":902098,""d"":902097,""p"":1000,""s"":1000},{""i"":902100,""d"":902098,""p"":2000,""s"":3000},{""i"":902094,""d"":902025,""p"":500,""s"":1000},{""i"":902093,""d"":902094,""p"":1000,""s"":2000},{""i"":902095,""d"":902093,""p"":1000,""s"":3000},{""i"":902049,""d"":902025,""p"":200,""s"":0},{""i"":902050,""d"":902025,""p"":200,""s"":0},{""i"":902051,""d"":902025,""p"":200,""s"":0},{""i"":902026,""d"":902049,""p"":200,""s"":100},{""i"":902027,""d"":902050,""p"":200,""s"":100},{""i"":902028,""d"":902051,""p"":200,""s"":100},{""i"":902029,""d"":902026,""p"":300,""s"":300},{""i"":902030,""d"":902027,""p"":300,""s"":300},{""i"":902031,""d"":902028,""p"":300,""s"":300},{""i"":902040,""d"":902029,""p"":400,""s"":500},{""i"":902041,""d"":902030,""p"":400,""s"":500},{""i"":902042,""d"":902031,""p"":400,""s"":500},{""i"":902043,""d"":902040,""p"":1000,""s"":800},{""i"":902044,""d"":902041,""p"":1000,""s"":800},{""i"":902045,""d"":902042,""p"":1000,""s"":800},{""i"":902046,""d"":902043,""p"":1000,""s"":1000},{""i"":902047,""d"":902044,""p"":1000,""s"":1000},{""i"":902048,""d"":902045,""p"":1000,""s"":1000},{""i"":902132,""d"":"""",""p"":0,""s"":0},{""i"":902096,""d"":902132,""p"":9999,""s"":0,""t"":""在世界某个地方""},{""i"":902101,""d"":902096,""p"":9999,""s"":0,""t"":""在世界某个地方""},{""i"":902105,""d"":902101,""p"":9999,""s"":0,""t"":""在世界某个地方""},{""i"":902118,""d"":902105,""p"":9999,""s"":0,""t"":""在世界某个地方""},{""i"":902119,""d"":902118,""p"":9999,""s"":0,""t"":""在世界某个地方""},{""i"":902148,""d"":902119,""p"":9999,""s"":0,""t"":""在世界某个地方""},{""i"":902085,""d"":902132,""p"":9999,""s"":0,""t"":""无法研究解锁，需完成主线任务“宝石的秘密”后，由王国工匠传授""},{""i"":902086,""d"":902085,""p"":9999,""s"":0,""t"":""无法研究解锁，需完成主线任务“宝石的秘密”后，由王国工匠传授""},{""i"":902087,""d"":902086,""p"":9999,""s"":0,""t"":""无法研究解锁，需完成主线任务“宝石的秘密”后，由王国工匠传授""},{""i"":902088,""d"":902087,""p"":9999,""s"":0,""t"":""无法研究解锁，需完成主线任务“宝石的秘密”后，由王国工匠传授""},{""i"":902089,""d"":902088,""p"":9999,""s"":0,""t"":""无法研究解锁，需完成主线任务“宝石的秘密”后，由王国工匠传授""},{""i"":902162,""d"":902089,""p"":9999,""s"":0,""t"":""在世界某个地方""},{""i"":902145,""d"":902162,""p"":9999,""s"":0,""t"":""在世界某个地方""}];
+var TECH_INFO={""1"":{""d"":[""供奉雕像，触发神奇魔法""],""f"":[105024],""s"":[]},""902002"":{""d"":[""让居民可以上山采集资源""],""f"":[102004],""s"":[]},""902003"":{""d"":[""进一步提高居民移动速度"",""建造更结实的墙""],""f"":[102002,102006,102013],""s"":[]},""902004"":{""d"":[""临时存储产品，然后批量运输，节省时间""],""f"":[103008],""s"":[]},""902005"":{""d"":[""与旅行商人进行交易"",""指定商人从什么位置，进入地图""],""f"":[103004,103006],""s"":[]},""902006"":{""d"":[""布施食物，招揽流民""],""f"":[103010],""s"":[]},""902007"":{""d"":[""酿造美酒，提升居民幸福"",""取水用于酿造""],""f"":[105012,105019],""s"":[]},""902008"":{""d"":[""让居民接受教育培训，提升工作效率，增加产量""],""f"":[104002,104015],""s"":[]},""902009"":{""d"":[""先知传递信仰，可提高居民幸福度，收集信仰之力，使用魔法。""],""f"":[104004,104031],""s"":[]},""902010"":{""d"":[""为居民提供医疗诊断"",""加快居民恢复身体健康"",""采集草药""],""f"":[104007,104008,105009],""s"":[]},""902011"":{""d"":[""炼制药物，增强居民体质，延年益寿""],""f"":[105025],""s"":[]},""902012"":{""d"":[""砍伐与植树并重，实现木材的可持续产出""],""f"":[105008],""s"":[]},""902013"":{""d"":[""制造工具和武器等"",""将皮毛制作成衣服""],""f"":[105010,105011],""s"":[]},""902014"":{""d"":[""在山地边缘建造矿井，开采铁矿，煤炭，或稀有金属矿""],""f"":[105013],""s"":[]},""902015"":{""d"":[""挖掘埋在地下的石料""],""f"":[105014],""s"":[]},""902016"":{""d"":[""安葬去世居民，减轻家属悲伤"",""组织附近居民集中就餐，提供特定食物"",""举办篝火晚会，让居民更容易找到另一半""],""f"":[104005,104016,104011],""s"":[]},""902017"":{""d"":[""让农民可就近取水，提高生产效率""],""f"":[104001],""s"":[]},""902018"":{""d"":[""将动物粪便和腐败食物，转化为肥料，撒在农田中增加产量""],""f"":[105015,104021],""s"":[]},""902019"":{""d"":[],""f"":[902019],""s"":[]},""902020"":{""d"":[],""f"":[902020],""s"":[]},""902021"":{""d"":[],""f"":[902021],""s"":[]},""902022"":{""d"":[""在野外获得食物""],""f"":[105006],""s"":[]},""902023"":{""d"":[""设置兽夹，捕获路过野生动物，杀死路过的怪物""],""f"":[105017],""s"":[]},""902024"":{""d"":[""设置蟹笼，捕捞水产，收获颇丰""],""f"":[105018],""s"":[]},""902025"":{""d"":[""招募士兵，保卫家园""],""f"":[106001],""s"":[]},""902026"":{""d"":[""可制造精良武器""],""f"":[413003],""s"":[]},""902027"":{""d"":[""可制造精良盔甲""],""f"":[415003],""s"":[]},""902028"":{""d"":[""可制造精良盾牌""],""f"":[414003],""s"":[]},""902029"":{""d"":[""可制造高级武器""],""f"":[413004],""s"":[]},""902030"":{""d"":[""可制造高级盔甲""],""f"":[415004],""s"":[]},""902031"":{""d"":[""可制造高级盾牌""],""f"":[414004],""s"":[]},""902032"":{""d"":[""可让人们信仰一神教""],""f"":[902032],""s"":[901001]},""902033"":{""d"":[""可让人们信仰仁义道""],""f"":[902033],""s"":[901002]},""902034"":{""d"":[""通过狩猎，获得肉类和皮毛""],""f"":[105005],""s"":[]},""902035"":{""d"":[""到水中捕鱼，获得肉类""],""f"":[105004],""s"":[]},""902036"":{""d"":[""种植农作物"",""取水用于农业灌溉，或酒类酿造""],""f"":[105001,105019],""s"":[]},""902037"":{""d"":[""可饲养动物鸡，牛，羊，马，猪或驯狼""],""f"":[105003],""s"":[]},""902038"":{""d"":[""可饲养蜜蜂，获得高级食材：蜂蜜""],""f"":[105023],""s"":[]},""902039"":{""d"":[""养花，赏花提高幸福度。也可作为蜂蜜的蜜源""],""f"":[104018,104028,104029,104030],""s"":[]},""902040"":{""d"":[""可制造稀有武器""],""f"":[413005],""s"":[]},""902041"":{""d"":[""可制造稀有盔甲""],""f"":[415005],""s"":[]},""902042"":{""d"":[""可制造稀有盾牌""],""f"":[414005],""s"":[]},""902043"":{""d"":[""可制造特殊武器""],""f"":[413006],""s"":[]},""902044"":{""d"":[""可制造特殊盔甲""],""f"":[415006],""s"":[]},""902045"":{""d"":[""可制造特殊盾牌""],""f"":[414006],""s"":[]},""902046"":{""d"":[""可制造极品武器""],""f"":[413007],""s"":[]},""902047"":{""d"":[""可制造极品盔甲""],""f"":[415007],""s"":[]},""902048"":{""d"":[""可制造极品盾牌""],""f"":[414007],""s"":[]},""902049"":{""d"":[""可制造普通武器""],""f"":[413002],""s"":[]},""902050"":{""d"":[""可制造普通盔甲""],""f"":[415002],""s"":[]},""902051"":{""d"":[""可制造普通盾牌""],""f"":[414002],""s"":[]},""902052"":{""d"":[""可招募剑士，武术高超"",""可招募长枪兵，拥有更大的攻击范围""],""f"":[202401,202405],""s"":[]},""902053"":{""d"":[""可招募弓箭兵，远距离袭击""],""f"":[202301],""s"":[]},""902055"":{""d"":[""可招募刀盾兵，攻守兼备""],""f"":[202501],""s"":[]},""902056"":{""d"":[""可招募巨盾兵，防守一流""],""f"":[202502],""s"":[]},""902057"":{""d"":[""可招募弓骑兵，机动灵活，远距离袭击""],""f"":[202601],""s"":[]},""902059"":{""d"":[],""f"":[],""s"":[424001]},""902060"":{""d"":[],""f"":[],""s"":[424002]},""902061"":{""d"":[""批量运输，集散物资，供居民使用，减少居民跑腿时间""],""f"":[103003],""s"":[]},""902063"":{""d"":[""可将水域改造为陆地""],""f"":[105022],""s"":[]},""902064"":{""d"":[""可将陆地挖掘成坑，引水成河""],""f"":[105021],""s"":[]},""902065"":{""d"":[""在边境上，与四方的商人进行稳定的贸易往来，大规模买卖固定种类的商品""],""f"":[103005],""s"":[]},""902066"":{""d"":[""可快速大批量运输货物""],""f"":[""103012""],""s"":[]},""902068"":{""d"":[""可制造传说武器""],""f"":[413008],""s"":[]},""902069"":{""d"":[""可制造传说盔甲""],""f"":[415008],""s"":[]},""902070"":{""d"":[""可制造传说盾牌""],""f"":[414008],""s"":[]},""902071"":{""d"":[""可制造史诗武器""],""f"":[413009],""s"":[]},""902072"":{""d"":[""可制造史诗盔甲""],""f"":[415009],""s"":[]},""902073"":{""d"":[""可制造史诗盾牌""],""f"":[414009],""s"":[]},""902074"":{""d"":[""关押，审讯，劝降战斗中俘虏的敌人""],""f"":[106002],""s"":[]},""902075"":{""d"":[""可更大范围供暖""],""f"":[104014],""s"":[]},""902077"":{""d"":[""居民可随身携带食物等，提高效率""],""f"":[420001],""s"":[]},""902078"":{""d"":[],""f"":[902078],""s"":[]},""902080"":{""d"":[],""f"":[902080],""s"":[]},""902081"":{""d"":[],""f"":[902081],""s"":[]},""902082"":{""d"":[],""f"":[902082],""s"":[]},""902083"":{""d"":[],""f"":[902083],""s"":[]},""902084"":{""d"":[""可吸引和投喂怪物""],""f"":[103013],""s"":[]},""902085"":{""d"":[],""f"":[],""s"":[705001]},""902086"":{""d"":[],""f"":[],""s"":[705002]},""902087"":{""d"":[],""f"":[],""s"":[705003]},""902088"":{""d"":[],""f"":[],""s"":[705004]},""902089"":{""d"":[],""f"":[],""s"":[705005]},""902090"":{""d"":[""高大的城墙，可阻挡一切敌人，包括飞行怪"",""城墙上的门""],""f"":[""102008"",""102009""],""s"":[]},""902091"":{""d"":[""开挖山中的石料，移除山地""],""f"":[105020],""s"":[]},""902092"":{""d"":[""大范围杀伤性武器""],""f"":[106003],""s"":[423001]},""902093"":{""d"":[""有战斗力的大船""],""f"":[],""s"":[706002]},""902094"":{""d"":[""可造船"",""可进行海上航行，开展海上贸易""],""f"":[105026,105027],""s"":[706001]},""902095"":{""d"":[""战斗力强悍的巨型舰船""],""f"":[],""s"":[706003]},""902096"":{""d"":[],""f"":[111001],""s"":[]},""902097"":{""d"":[],""f"":[],""s"":[423002]},""902098"":{""d"":[],""f"":[902098],""s"":[]},""902099"":{""d"":[""招待来往旅客，赚取利润，搜集外界的消息，接受或发布赏金任务""],""f"":[104019],""s"":[]},""902100"":{""d"":[],""f"":[],""s"":[423003]},""902101"":{""d"":[],""f"":[111002],""s"":[]},""902102"":{""d"":[],""f"":[],""s"":[902102]},""902103"":{""d"":[""可招募法师，使用魔法攻击敌人"",""可招募法师，使用魔法禁锢敌人"",""可招募法师，使用魔法为士兵回血"",""可招募法师，对敌人实施精神控制""],""f"":[202701,202702,202703,202704],""s"":[]},""902104"":{""d"":[""可为蚁人，鼠人和猪人等群居种族，提供居住空间""],""f"":[101004],""s"":[]},""902105"":{""d"":[""可利用魔法，跨空间传送士兵""],""f"":[102010],""s"":[]},""902106"":{""d"":[""可举办活动宴会""],""f"":[104020],""s"":[]},""902108"":{""d"":[""可招募狼战士，使用钩爪攻击或控制敌人""],""f"":[202404],""s"":[]},""902109"":{""d"":[],""f"":[902109],""s"":[]},""902110"":{""d"":[""民兵可使用武器装备，提升战斗力""],""f"":[902110,104022],""s"":[]},""902111"":{""d"":[""可用行政手段对人口进行控制""],""f"":[902111],""s"":[]},""902112"":{""d"":[],""f"":[424007],""s"":[]},""902113"":{""d"":[""可以磨面粉，方便制作高级食物""],""f"":[105032],""s"":[]},""902114"":{""d"":[""满足有文化的居民的精神需求""],""f"":[424008],""s"":[]},""902115"":{""d"":[""方便快捷的小军营""],""f"":[106004],""s"":[]},""902116"":{""d"":[""可在室内种蘑菇""],""f"":[105030],""s"":[]},""902117"":{""d"":[""先知可接受不幸的居民倾诉，并给其心灵安慰""],""f"":[902117],""s"":[]},""902118"":{""d"":[],""f"":[""111003"",906001,906002,906003,906004,906005],""s"":[]},""902119"":{""d"":[],""f"":[""111004"",906006,906007,906008,906009,906010,906011,906012],""s"":[]},""902120"":{""d"":[],""f"":[],""s"":[424003]},""902121"":{""d"":[""上下铺，供单身居民使用，节省空间""],""f"":[101005],""s"":[]},""902122"":{""d"":[""将多余的食物，存入地下冰窖，作为应急储备""],""f"":[103009],""s"":[]},""902123"":{""d"":[],""f"":[106006],""s"":[]},""902124"":{""d"":[],""f"":[902124],""s"":[]},""902125"":{""d"":[],""f"":[902125],""s"":[]},""902126"":{""d"":[],""f"":[902126],""s"":[]},""902127"":{""d"":[""可招募贵族为火枪手，火枪类型随士兵等级变化，等级越高，杀伤力越大。""],""f"":[202304],""s"":[428001]},""902128"":{""d"":[""可招募狼骑兵，机动灵活，智勇双全""],""f"":[202102],""s"":[]},""902129"":{""d"":[""主动感知危险，以关闭城门，或召唤士兵战斗""],""f"":[106007],""s"":[]},""902130"":{""d"":[],""f"":[105028],""s"":[]},""902131"":{""d"":[],""f"":[],""s"":[603002,603003,603004]},""902132"":{""d"":[],""f"":[902132],""s"":[]},""902133"":{""d"":[],""f"":[106005,101003,101006],""s"":[]},""902134"":{""d"":[],""f"":[902134],""s"":[]},""902135"":{""d"":[],""f"":[113001],""s"":[]},""902136"":{""d"":[],""f"":[113002],""s"":[]},""902137"":{""d"":[],""f"":[113003],""s"":[]},""902138"":{""d"":[],""f"":[113004],""s"":[]},""902139"":{""d"":[],""f"":[113005],""s"":[]},""902140"":{""d"":[""可供旅客玩轮盘赌。可吸引更多旅客来访。""],""f"":[104023,104024,104025,104026],""s"":[]},""902141"":{""d"":[],""f"":[104027],""s"":[]},""902142"":{""d"":[],""f"":[106008],""s"":[]},""902143"":{""d"":[],""f"":[""102011"",102012],""s"":[]},""902144"":{""d"":[""建造国库，集中物资，用于外交或上贡，禁止居民使用""],""f"":[109005],""s"":[]},""902145"":{""d"":[],""f"":[],""s"":[705006]},""902146"":{""d"":[],""f"":[902146],""s"":[]},""902147"":{""d"":[],""f"":[],""s"":[429001,429002,429003]},""902148"":{""d"":[],""f"":[111005],""s"":[]},""902149"":{""d"":[],""f"":[],""s"":[424004]},""902150"":{""d"":[],""f"":[],""s"":[424005]},""902151"":{""d"":[],""f"":[],""s"":[424006]},""902152"":{""d"":[],""f"":[902152],""s"":[]},""902153"":{""d"":[],""f"":[],""s"":[304009,304010]},""902154"":{""d"":[],""f"":[],""s"":[305005,305006]},""902155"":{""d"":[],""f"":[],""s"":[412001,412002]},""902156"":{""d"":[],""f"":[],""s"":[421001]},""902157"":{""d"":[],""f"":[],""s"":[412003]},""902158"":{""d"":[],""f"":[],""s"":[418001]},""902159"":{""d"":[],""f"":[],""s"":[418002]},""902160"":{""d"":[""种植果树""],""f"":[105002],""s"":[]},""902161"":{""d"":[],""f"":[902161],""s"":[]},""902162"":{""d"":[],""f"":[],""s"":[705007]},""902163"":{""d"":[],""f"":[902163],""s"":[901004]}};
+var TECH_ICON={108012:111005,806005:416001,806006:416002,902004:103008,902017:104001,902018:105015,902032:901001,902033:901002,902065:103005,902074:106002,902085:705001,902086:705002,902087:705003,902088:705004,902089:705005,902099:104019,902101:111002,902104:101004,902106:104020,902118:111003,902119:111004,902129:106007,902132:108009,902133:106005,902135:113001,902136:113002,902137:113003,902138:113004,902139:113005,902140:104026,902141:104027,902142:106008,902143:102011,902144:109005,902145:705006,902148:111005,902149:424004,902150:424005,902151:424006,902156:421001,902157:412003,902158:418001,902159:418002,902160:105002,902162:705007,902163:901004};
+function toggleTechTree() {
+  techTreeOpen = !techTreeOpen;
+  renderSidebar();
+}
+
+async function openTechTree() {
+  selectedChest = -1;
+  dragonView = '';
+  npcView = '';
+  renderSidebar();
+  const el = document.getElementById('content');
+  el.innerHTML = '<div style=""padding:20px;color:var(--text-muted)"">加载科技树...</div>';
+  try {
+    const r = await fetch('/api/techtree?t=' + Date.now());
+    techTreeData = await r.json();
+    renderTechTreePanel();
+  } catch(e) {
+    el.innerHTML = '<div style=""padding:20px;color:var(--danger)"">加载失败: ' + esc(e.message) + '</div>';
+  }
+}
+
+function getTechName(tid) {
+  if (typeof TECH_INFO === 'undefined') return '' + tid;
+  const info = TECH_INFO[tid];
+  if (!info) return '' + tid;
+  if (info.d && info.d.length > 0) return info.d[0];
+  return '' + tid;
+}
+
+function toggleTechBranch(el) {
+  const det = el.parentElement;
+  if (det.tagName === 'DETAILS') det.open = !det.open;
+}
+function techIconErr(el, tid) {
+  el.onerror = null;
+  el.parentElement.innerHTML = '<span style=""font-size:18px;color:var(--text-muted)"">' + (tid % 100) + '</span>';
+}
+
+function renderTechTreeNode(node, unlocked, paid, curTech) {
+  const tid = node.id;
+  const isUnlocked = unlocked.includes(tid);
+  const isPaid = paid.includes(tid);
+  const isResearch = tid === curTech;
+  const name = getTechName(tid);
+  const hasChildren = node.children && node.children.length > 0;
+  let bg, borderCol;
+  if (isResearch) { bg = 'rgba(99,102,241,0.25)'; borderCol = 'var(--accent)'; }
+  else if (isUnlocked) { bg = 'rgba(16,185,129,0.2)'; borderCol = 'var(--success, #10b981)'; }
+  else { bg = 'var(--bg-card)'; borderCol = 'var(--border)'; }
+  const cost = [];
+  if (node.p > 0) cost.push(node.p + '点');
+  if (node.s > 0) cost.push(node.s + '银');
+  const costStr = cost.join(' ');
+  let h = '';
+  h += '<div class=""tech-tree-node"" data-tid=""' + tid + '"" data-name=""' + esc(name).toLowerCase() + '"">';
+  h += '<div class=""tech-card"" style=""background:' + bg + ';border:2px solid ' + borderCol + '"" onclick=""toggleTech(' + tid + ',' + (!isUnlocked) + ')"">';
+  const iconId = (typeof TECH_ICON !== 'undefined' && TECH_ICON[tid]) ? TECH_ICON[tid] : tid;
+  h += '<div class=""tc-icon"" style=""border-color:' + borderCol + '""><img src=""/icon/' + iconId + '"" onerror=""techIconErr(this,' + tid + ')""></div>';
+  h += '<div class=""tc-name"" style=""color:' + (isUnlocked ? 'var(--text-primary)' : 'var(--text-muted)') + '"">' + esc(name) + '</div>';
+  if (costStr) h += '<div class=""tc-cost"">' + costStr + '</div>';
+  if (isPaid) h += '<span class=""tc-badge"" style=""background:var(--success-dark,#059669);color:#fff"">已付</span>';
+  if (isResearch) h += '<span class=""tc-badge"" style=""background:var(--accent);color:#fff"">研究中</span>';
+  if (node.t) h += '<span class=""tc-tip"" title=""' + esc(node.t) + '"">&#x26A0;</span>';
+  h += '</div>';
+  h += '</div>';
+  if (hasChildren) {
+    h += '<div data-children style=""margin-left:24px;margin-top:4px;margin-bottom:8px"">';
+    h += '<div style=""display:flex;flex-wrap:wrap;gap:6px;align-items:flex-start"">';
+    for (const child of node.children) {
+      h += renderTechTreeNode(child, unlocked, paid, curTech);
+    }
+    h += '</div></div>';
+  }
+  return h;
+}
+
+function renderTechTreePanel() {
+  const el = document.getElementById('content');
+  if (!techTreeData) {
+    el.innerHTML = '<div style=""padding:20px;color:var(--text-muted)"">暂无数据</div>';
+    return;
+  }
+
+  const d = techTreeData;
+  const unlocked = d.unlockTechList || [];
+  const paid = d.techHasPaid || [];
+  const queue = d.researchQueue || [];
+  const curTech = d.curResearchTech || 0;
+  const curProg = d.curResearchProgress || 0;
+
+  let html = '<div style=""padding:16px"">';
+  html += '<h2 style=""color:var(--accent-light);margin-bottom:16px;font-size:18px"">&#x1F333; 科技树</h2>';
+
+  // 当前研究
+  if (curTech > 0) {
+    html += '<div style=""margin-bottom:16px;padding:12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm)"">';
+    html += '<div style=""font-weight:600;margin-bottom:8px;color:var(--text-primary)"">当前研究</div>';
+    html += '<div style=""display:flex;align-items:center;gap:12px"">';
+    html += '<span style=""color:var(--accent-light);font-size:15px"">' + curTech + ' ' + getTechName(curTech) + '</span>';
+    html += '<span style=""color:var(--text-muted);font-size:13px"">进度: ' + curProg + '</span>';
+    if (queue.length > 0) {
+      html += '<span style=""color:var(--text-muted);font-size:12px"">队列: ' + queue.join(', ') + '</span>';
+    }
+    html += '</div></div>';
+  }
+
+  // 布尔解锁状态
+  const boolFlags = [
+    {key:'isUnlockTechInspiration', label:'灵感解锁'},
+    {key:'isUnlockFreeLove', label:'自由恋爱'},
+    {key:'isUnlockCourage', label:'勇气'},
+    {key:'isUnlockPenaltySystem', label:'惩罚制度'},
+    {key:'isUnlockRewardsSystem', label:'奖励制度'},
+    {key:'isUnlockPersonalAwareness', label:'个人意识'},
+    {key:'isUnlockHearken', label:'倾听'},
+    {key:'isUnlockSocialSupport', label:'社会支持'},
+    {key:'isUnlockEfficientStorage', label:'高效存储'},
+    {key:'isUnlockEncyclopedia', label:'百科全书'}
+  ];
+  html += '<details style=""margin-bottom:16px"">';
+  html += '<summary style=""cursor:pointer;padding:10px 14px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-weight:600;font-size:14px"">特殊解锁状态</summary>';
+  html += '<div style=""display:flex;flex-wrap:wrap;gap:8px;padding:12px"">';
+  for (const f of boolFlags) {
+    const val = d[f.key];
+    const bg = val ? 'var(--success-dark, #27ae60)' : 'var(--bg-input, #1a1a2e)';
+    const fg = val ? '#fff' : 'var(--text-muted)';
+    html += '<span style=""padding:4px 10px;border-radius:12px;font-size:12px;background:' + bg + ';color:' + fg + ';border:1px solid var(--border)"">' + f.label + ': ' + (val ? '是' : '否') + '</span>';
+  }
+  html += '</div></details>';
+
+  // 搜索框
+  html += '<input id=""techSearch"" placeholder=""搜索科技名称或ID..."" oninput=""filterTechList()"" style=""width:100%;padding:6px 10px;margin-bottom:12px;background:var(--bg-input,#1a1a2e);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:12px"">';
+
+  // 依赖树展示
+  html += '<details open style=""margin-bottom:16px"">';
+  html += '<summary style=""cursor:pointer;padding:10px 14px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-weight:600;font-size:14px;display:flex;align-items:center;gap:8px"">';
+  html += '<span>科技依赖树</span>';
+  html += '<span style=""margin-left:auto;font-size:12px;color:var(--text-muted);font-weight:400"">' + unlocked.length + ' 已解锁</span>';
+  html += '</summary>';
+  html += '<div id=""techTreeContainer"" style=""padding:8px;max-height:60vh;overflow-y:auto"">';
+
+  if (typeof TECH_TREE !== 'undefined') {
+    // 构建依赖树
+    const byId = {};
+    const roots = [];
+    for (const t of TECH_TREE) {
+      byId[t.i] = {id:t.i, p:t.p, s:t.s, t:t.t||'', children:[], dep:t.d};
+    }
+    for (const t of TECH_TREE) {
+      const node = byId[t.i];
+      if (t.d && byId[t.d]) {
+        byId[t.d].children.push(node);
+      } else if (!t.d || t.d === 0 || t.d === '') {
+        roots.push(node);
+      }
+    }
+    // 排序子节点
+    function sortTree(nodes) {
+      nodes.sort((a,b) => a.id - b.id);
+      for (const n of nodes) sortTree(n.children);
+    }
+    sortTree(roots);
+    // 渲染 - 根节点用flex-wrap网格布局
+    html += '<div style=""display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start"">';
+    for (const root of roots) {
+      html += renderTechTreeNode(root, unlocked, paid, curTech);
+    }
+    html += '</div>';
+  } else {
+    html += '<div style=""color:var(--text-muted);padding:12px"">科技数据加载中...</div>';
+  }
+
+  html += '</div></details>';
+
+  // 一键点亮
+  html += '<div style=""margin-bottom:16px;display:flex;gap:8px;align-items:center"">';
+  html += '<button onclick=""unlockAllTechs()"" style=""padding:8px 20px;background:linear-gradient(135deg,var(--accent),var(--accent-dark));color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;font-size:13px;font-weight:600;box-shadow:0 2px 8px rgba(99,102,241,0.4)"">&#x2728; 一键点亮全部科技</button>';
+  html += '<button onclick=""lockAllTechs()"" style=""padding:8px 20px;background:var(--danger);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;font-size:13px;font-weight:600"">&#x1F512; 一键锁定全部科技</button>';
+  html += '</div>';
+
+  // 添加科技（手动输入ID）
+  html += '<div style=""margin-bottom:16px;padding:12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm)"">';
+  html += '<div style=""font-weight:600;margin-bottom:8px;color:var(--text-primary)"">手动添加/移除科技</div>';
+  html += '<div style=""display:flex;gap:8px;align-items:center"">';
+  html += '<input id=""techAddId"" type=""number"" placeholder=""科技ID"" style=""width:120px;padding:6px 10px;background:var(--bg-input,#1a1a2e);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:12px"">';
+  html += '<button onclick=""addTech(true)"" style=""padding:6px 12px;background:var(--success-dark,#27ae60);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px"">解锁</button>';
+  html += '<button onclick=""addTech(false)"" style=""padding:6px 12px;background:var(--danger,#e74c3c);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px"">锁定</button>';
+  html += '</div></div>';
+
+  // 诊断按钮
+  html += '<div style=""margin-top:16px""><button onclick=""diagnoseTechTree()"" style=""padding:6px 16px;background:var(--accent);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px"">诊断原始数据</button></div>';
+  html += '<pre id=""techTreeDiag"" style=""margin-top:8px;padding:12px;background:var(--bg-card);border-radius:var(--radius-sm);font-size:11px;color:var(--text-muted);white-space:pre-wrap;max-height:400px;overflow-y:auto;display:none""></pre>';
+
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+function filterTechList() {
+  const q = document.getElementById('techSearch').value.toLowerCase().trim();
+  const container = document.getElementById('techTreeContainer');
+  if (!container) return;
+  const nodes = container.querySelectorAll('.tech-tree-node');
+  if (!q) {
+    nodes.forEach(n => { n.style.display = ''; const p = n.parentElement; if (p) p.style.display = ''; });
+    container.querySelectorAll('[data-children]').forEach(c => c.style.display = '');
+    return;
+  }
+  // 先全部隐藏
+  nodes.forEach(n => n.style.display = 'none');
+  container.querySelectorAll('[data-children]').forEach(c => c.style.display = 'none');
+  // 递归显示匹配节点及其祖先
+  function showNode(el) {
+    el.style.display = '';
+    // 显示父级children容器
+    const parent = el.closest('[data-children]');
+    if (parent) parent.style.display = '';
+  }
+  function checkAndShow(el) {
+    const tid = (el.dataset.tid || '').toLowerCase();
+    const name = el.dataset.name || '';
+    const match = tid.includes(q) || name.includes(q);
+    // 找子节点容器（下一个兄弟元素）
+    let childContainer = el.nextElementSibling;
+    let childMatch = false;
+    if (childContainer && childContainer.dataset.children !== undefined) {
+      const childNodes = childContainer.querySelectorAll(':scope > .tech-tree-node');
+      childNodes.forEach(cn => { if (checkAndShow(cn)) childMatch = true; });
+    }
+    if (match || childMatch) {
+      showNode(el);
+      return true;
+    }
+    return false;
+  }
+  // 找根节点（在顶层flex容器中）
+  const rootNodes = container.querySelectorAll(':scope > div > .tech-tree-node, :scope > .tech-tree-node');
+  rootNodes.forEach(n => checkAndShow(n));
+}
+
+function addTech(unlock) {
+  const input = document.getElementById('techAddId');
+  const techId = parseInt(input.value);
+  if (!techId || isNaN(techId)) { toast('请输入有效的科技ID', true); return; }
+  toggleTech(techId, unlock);
+}
+
+async function unlockAllTechs() {
+  if (!confirm('确定要一键点亮全部科技吗？')) return;
+  try {
+    const r = await fetch('/api/techtree/unlockall', {method:'POST'});
+    const d = await r.json();
+    if (d.error) { toast(d.error, true); return; }
+    toast('已点亮 ' + d.added + ' 个科技（共 ' + d.total + ' 个）');
+    const container = document.getElementById('techTreeContainer');
+    const scrollTop = container ? container.scrollTop : 0;
+    const r2 = await fetch('/api/techtree?t=' + Date.now());
+    techTreeData = await r2.json();
+    renderTechTreePanel();
+    const c2 = document.getElementById('techTreeContainer');
+    if (c2) c2.scrollTop = scrollTop;
+  } catch(e) { toast('操作失败', true); }
+}
+
+async function lockAllTechs() {
+  if (!confirm('确定要一键锁定全部科技吗？这会清除所有已解锁科技！')) return;
+  try {
+    const ids = (typeof TECH_TREE !== 'undefined') ? TECH_TREE.map(t => t.i) : [];
+    if (!ids.length) { toast('科技数据未加载', true); return; }
+    let removed = 0;
+    for (const tid of ids) {
+      const r = await fetch('/api/techtree/toggle', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({techId:tid, unlock:false})
+      });
+      const d = await r.json();
+      if (d.action === 'removed') removed++;
+    }
+    toast('已锁定 ' + removed + ' 个科技');
+    const container = document.getElementById('techTreeContainer');
+    const scrollTop = container ? container.scrollTop : 0;
+    const r2 = await fetch('/api/techtree?t=' + Date.now());
+    techTreeData = await r2.json();
+    renderTechTreePanel();
+    const c2 = document.getElementById('techTreeContainer');
+    if (c2) c2.scrollTop = scrollTop;
+  } catch(e) { toast('操作失败', true); }
+}
+
+async function toggleTech(techId, unlock) {
+  techId = parseInt(techId);
+  if (!techId || isNaN(techId)) { toast('请输入有效的科技ID', true); return; }
+  try {
+    const r = await fetch('/api/techtree/toggle', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({techId, unlock})
+    });
+    const d = await r.json();
+    if (d.error) { toast(d.error, true); return; }
+    toast('操作成功: ' + (d.action || 'ok'));
+    const container = document.getElementById('techTreeContainer');
+    const scrollTop = container ? container.scrollTop : 0;
+    const searchInput = document.getElementById('techSearch');
+    const searchVal = searchInput ? searchInput.value : '';
+    try {
+      const r2 = await fetch('/api/techtree?t=' + Date.now());
+      techTreeData = await r2.json();
+      renderTechTreePanel();
+    } catch(e2) {}
+    const container2 = document.getElementById('techTreeContainer');
+    if (container2) container2.scrollTop = scrollTop;
+    const searchInput2 = document.getElementById('techSearch');
+    if (searchInput2 && searchVal) { searchInput2.value = searchVal; filterTechList(); }
+  } catch(e) { toast('操作失败', true); }
+}
+
+async function diagnoseTechTree() {
+  const pre = document.getElementById('techTreeDiag');
+  pre.style.display = 'block';
+  pre.textContent = '诊断中...';
+  try {
+    const r = await fetch('/api/techtree/diagnose?t=' + Date.now());
+    const data = await r.json();
+    pre.textContent = JSON.stringify(data, null, 2);
+  } catch(e) {
+    pre.textContent = '诊断失败: ' + e.message;
+  }
 }
 
 function selectNpcView(view) {

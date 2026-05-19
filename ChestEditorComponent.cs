@@ -35,7 +35,14 @@ public partial class ChestEditorComponent : MonoBehaviour
     internal volatile string DragonEntitiesJson = "[]";
     internal volatile string EntityEditorJson = "[]";
     internal volatile string EntityEditorFieldsJson = "{}";
+    internal volatile string NpcListJson = "[]";
+    internal volatile string NpcFieldsJson = "{}";
     internal volatile string? LastSummonResult;
+
+    // 读档后延迟重应用 NPC 修改（多次，防止被游戏覆盖）
+    private int _reapplyCountdown;
+    private int _reapplyRemaining;
+    private bool _reapplyPending;
 
     // 龙素材物品 ID 列表
     private static readonly int[] DragonItemIds = { 815001, 815002, 815003, 815004, 815005 };
@@ -100,12 +107,40 @@ public partial class ChestEditorComponent : MonoBehaviour
 
     internal List<ChestInfo> GetChests() => _chests;
 
+    internal void ScheduleNpcReapply()
+    {
+        _reapplyCountdown = 60;
+        _reapplyRemaining = 5; // 重应用5次，确保不被游戏覆盖
+        _reapplyPending = true;
+        Plugin.LogInfo("[ChestEditor] 已调度 NPC 修改重应用 x5...");
+    }
+
     private void Update()
     {
         if (Input.GetKeyDown(KeyCode.F11))
         {
             try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("http://localhost:8765/") { UseShellExecute = true }); }
             catch (Exception ex) { Plugin.LogError($"打开浏览器失败: {ex.Message}"); }
+        }
+
+        // 读档后延迟重应用 NPC 修改（多次）
+        if (_reapplyPending)
+        {
+            _reapplyCountdown--;
+            if (_reapplyCountdown <= 0)
+            {
+                try
+                {
+                    Plugin.LogInfo($"[ChestEditor] 重应用 NPC 修改 (剩余{ _reapplyRemaining}次)...");
+                    EntityEditor.ReapplyModifications();
+                }
+                catch (Exception ex) { Plugin.LogError($"[ChestEditor] NPC 修改重应用失败: {ex.Message}"); }
+                _reapplyRemaining--;
+                if (_reapplyRemaining <= 0)
+                    _reapplyPending = false;
+                else
+                    _reapplyCountdown = 120; // 下一次等120帧
+            }
         }
 
         // 每帧更新 JSON 缓存
@@ -311,6 +346,7 @@ public partial class ChestEditorComponent : MonoBehaviour
                     // 统一实体编辑器扫描（主线程执行）
                     Plugin.LogInfo("[MainThread] 开始统一实体编辑器扫描...");
                     EntityEditor.ScanAll();
+                    EntityEditor.ApplyPendingModifications();
                     EntityEditorJson = EntityEditor.GetAllJson();
                     Plugin.LogInfo($"[MainThread] 统一扫描完成, JSON长度={EntityEditorJson.Length}");
                     req.ResultJson = "{\"ok\":true}";
@@ -353,6 +389,31 @@ public partial class ChestEditorComponent : MonoBehaviour
                     // 定位实体: ExtraFloat1=x, ExtraFloat2=y
                     LocateFacility(req.ExtraFloat1, req.ExtraFloat2);
                     req.ResultJson = $"{{\"ok\":true,\"x\":{req.ExtraFloat1.ToString(System.Globalization.CultureInfo.InvariantCulture)},\"y\":{req.ExtraFloat2.ToString(System.Globalization.CultureInfo.InvariantCulture)}}}";
+                }
+                else if (req.ChestIndex == -31)
+                {
+                    // NPC 扫描：先做全量扫描，再返回我方 NPC 列表
+                    Plugin.LogInfo("[MainThread] 开始 NPC 扫描...");
+                    EntityEditor.ScanAll();
+                    EntityEditor.ApplyPendingModifications();
+                    NpcListJson = EntityEditor.GetNpcListJson();
+                    Plugin.LogInfo($"[MainThread] NPC 扫描完成, JSON长度={NpcListJson.Length}");
+                    req.ResultJson = NpcListJson;
+                }
+                else if (req.ChestIndex == -32)
+                {
+                    // NPC 字段读取: ExtraIndex=ptrHash
+                    NpcFieldsJson = EntityEditor.GetFieldsJson(req.ExtraIndex);
+                    req.ResultJson = NpcFieldsJson;
+                    Plugin.LogInfo($"[MainThread] -32 完成, NpcFieldsJson={NpcFieldsJson.Length} 字节, ptrHash={req.ExtraIndex}");
+                }
+                else if (req.ChestIndex == -33)
+                {
+                    // NPC 字段修改: ExtraIndex=ptrHash, ResultJson=fieldName, Count=floatBits
+                    string field = req.ResultJson ?? "";
+                    float val = BitConverter.Int32BitsToSingle(req.Count);
+                    string result = EntityEditor.SetNpcField(req.ExtraIndex, field, val);
+                    req.ResultJson = result == "ok" ? "{\"ok\":true}" : $"{{\"error\":\"{Escape(result)}\"}}";
                 }
                 else if (req.IsAdd)
                 {

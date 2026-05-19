@@ -38,6 +38,7 @@ public static class SaveLoadPatches
 
         PatchDoLoad(harmony);
         PatchWalkStates(harmony);
+        PatchUpdateSpeed(harmony);
     }
 
 
@@ -88,6 +89,26 @@ public static class SaveLoadPatches
         Plugin.LogError("未能钩住任何行走状态方法");
     }
 
+    /// <summary>
+    /// 钩住 UpdateAgentMoveSpeed 以持续应用速度覆盖
+    /// </summary>
+    private static void PatchUpdateSpeed(Harmony harmony)
+    {
+        var type = AccessTools.TypeByName("Npc") ?? AccessTools.TypeByName("BattleUnit");
+        if (type == null) { Plugin.LogError("找不到 Npc/BattleUnit 类型"); return; }
+
+        var method = AccessTools.Method(type, "UpdateAgentMoveSpeed");
+        if (method == null) { Plugin.LogError("找不到 UpdateAgentMoveSpeed 方法"); return; }
+
+        try
+        {
+            harmony.Patch(method,
+                postfix: new HarmonyMethod(typeof(SaveLoadPatches), nameof(UpdateSpeedPostfix)));
+            Plugin.LogInfo("钩住 UpdateAgentMoveSpeed 成功");
+        }
+        catch (Exception ex) { Plugin.LogError($"钩住 UpdateAgentMoveSpeed 失败: {ex.Message}"); }
+    }
+
     // ========== 补丁回调 ==========
 
     public static void OnDoLoadPostfix(string __0, bool __result)
@@ -96,7 +117,21 @@ public static class SaveLoadPatches
         {
             Plugin.LogInfo($"存档加载成功: {__0}");
             CachedTerritory = null; // 清除旧缓存，等待下次 WalkState 重新获取
+
+            // 延迟重应用 NPC 修改（等实体重建完成）
+            ChestEditorComponent.Instance?.ScheduleNpcReapply();
         }
+    }
+
+    public static void UpdateSpeedPostfix(object __instance)
+    {
+        try
+        {
+            IntPtr ptr = GetIl2CppPtr(__instance);
+            if (ptr != IntPtr.Zero)
+                EntityEditor.OnPostUpdate(ptr);
+        }
+        catch { }
     }
 
     public static void WalkStatePrefix(object __instance)
@@ -117,6 +152,17 @@ public static class SaveLoadPatches
     }
 
     // ========== 辅助方法 ==========
+
+    private static IntPtr GetIl2CppPtr(object obj)
+    {
+        try
+        {
+            var prop = obj.GetType().GetProperty("Pointer", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (prop != null) return (IntPtr)prop.GetValue(obj);
+        }
+        catch { }
+        return IntPtr.Zero;
+    }
 
     private static object? GetProp(object obj, string name)
     {

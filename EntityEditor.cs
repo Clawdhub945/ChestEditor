@@ -25,7 +25,7 @@ internal static class EntityEditor
     private static MethodInfo? _il2cpp_type_get_name;
 
     // 组件类字段偏移缓存
-    private static readonly Dictionary<string, Dictionary<string, FieldEntry>> _classFieldCache = new();
+    private static readonly Dictionary<IntPtr, Dictionary<string, FieldEntry>> _classFieldCache = new();
 
     private static readonly HashSet<string> FloatTypeNames = new() { "System.Single", "float" };
     private static readonly HashSet<string> StringTypeNames = new() { "System.String", "String", "Il2CppSystem.String" };
@@ -69,6 +69,7 @@ internal static class EntityEditor
         public IntPtr Ptr;
         public int PtrHash;
         public int Guid;
+        public int NpcId; // Soldier.npc_id，用于 NPC 持久化标识
         public int StuffId;
         public GameObject? GoRef;
         public Component? CompRef;
@@ -167,7 +168,7 @@ internal static class EntityEditor
 
     private static Dictionary<string, FieldEntry> GetOrCacheClassFields(IntPtr compClass, string className)
     {
-        if (_classFieldCache.TryGetValue(className, out var cached))
+        if (_classFieldCache.TryGetValue(compClass, out var cached))
             return cached;
 
         var fieldMap = new Dictionary<string, FieldEntry>();
@@ -199,7 +200,9 @@ internal static class EntityEditor
             depth++;
         }
 
-        _classFieldCache[className] = fieldMap;
+        _classFieldCache[compClass] = fieldMap;
+        if (fieldMap.Count == 0)
+            Plugin.LogInfo($"[EntityEditor] 类 {className} 无字段 (depth={depth})");
         return fieldMap;
     }
 
@@ -209,6 +212,7 @@ internal static class EntityEditor
     internal static void ScanAll()
     {
         try { _entities.Clear(); } catch (Exception ex) { Plugin.LogError($"[EntityEditor] Clear error: {ex.Message}"); return; }
+        _classFieldCache.Clear();
         try
         {
             try { CacheIl2CppApi(); } catch (Exception ex) { Plugin.LogError($"[EntityEditor] CacheIl2CppApi error: {ex.Message}"); return; }
@@ -243,6 +247,30 @@ internal static class EntityEditor
 
                         string className = comp.GetIl2CppType().Name;
                         var fieldMap = GetOrCacheClassFields(compClass, className);
+
+                        // 如果缓存的字段为空，强制重新枚举（不用缓存）
+                        if (fieldMap.Count == 0)
+                        {
+                            fieldMap = new Dictionary<string, FieldEntry>();
+                            var seen = new HashSet<int>();
+                            IntPtr cls2 = compClass;
+                            int d2 = 0;
+                            while (cls2 != IntPtr.Zero && d2 < 15)
+                            {
+                                int addr2 = cls2.GetHashCode();
+                                if (seen.Contains(addr2)) break;
+                                seen.Add(addr2);
+                                foreach (var (name, offset, typeName) in GetIl2CppFields(cls2))
+                                {
+                                    if (offset > 0 && !fieldMap.ContainsKey(name))
+                                        fieldMap[name] = new FieldEntry { Offset = offset, TypeName = typeName, IsFloat = FloatTypeNames.Contains(typeName), IsString = StringTypeNames.Contains(typeName), IsPointer = !FloatTypeNames.Contains(typeName) && !StringTypeNames.Contains(typeName) && !IntTypeNames.Contains(typeName) };
+                                }
+                                try { cls2 = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(cls2); } catch { break; }
+                                d2++;
+                            }
+                            _classFieldCache[compClass] = fieldMap;
+                            Plugin.LogInfo($"[EntityEditor] 强制重枚举 {className}: {fieldMap.Count} 字段");
+                        }
 
                         // 判断是否匹配：有 stuff_id 字段 且 stuffId>0,guid>0  OR  类名含 Npc
                         bool hasStuffId = fieldMap.ContainsKey("stuff_id");
@@ -328,6 +356,11 @@ internal static class EntityEditor
                         if (fieldMap.TryGetValue("soldier_type_id", out var stFe))
                             try { soldierTypeId = ReadIl2CppInt(compPtr, stFe.Offset); } catch { }
 
+                        // 读取 npc_id（Soldier 类字段，用于 NPC 持久化标识）
+                        int npcId = 0;
+                        if (fieldMap.TryGetValue("npc_id", out var npcIdFe))
+                            try { npcId = ReadIl2CppInt(compPtr, npcIdFe.Offset); } catch { }
+
                         seenPtrHash.Add(ptrHash);
 
                         var entity = new EditorEntity
@@ -341,6 +374,7 @@ internal static class EntityEditor
                             Ptr = compPtr,
                             PtrHash = ptrHash,
                             Guid = guid,
+                            NpcId = npcId,
                             StuffId = stuffId,
                             GoRef = go,
                             CompRef = comp,
@@ -456,9 +490,21 @@ internal static class EntityEditor
     /// </summary>
     internal static string GetFieldsJson(int ptrHash)
     {
+        Plugin.LogInfo($"[GetFieldsJson] ptrHash={ptrHash}, _entities.Count={_entities.Count}");
         foreach (var e in _entities)
         {
             if (e.PtrHash != ptrHash) continue;
+            Plugin.LogInfo($"[GetFieldsJson] 匹配: {e.ClassName} guid={e.Guid} FieldMeta.Count={e.FieldMeta.Count}");
+            int ptrCnt = 0, nonPtrCnt = 0;
+            foreach (var kv in e.FieldMeta) { if (kv.Value.IsPointer) ptrCnt++; else nonPtrCnt++; }
+            Plugin.LogInfo($"[GetFieldsJson] ptr={ptrCnt} nonPtr={nonPtrCnt}");
+            // 显示前5个字段的类型
+            int shown = 0;
+            foreach (var kv in e.FieldMeta) {
+                if (shown >= 5) break;
+                Plugin.LogInfo($"[GetFieldsJson]   {kv.Key}: type={kv.Value.TypeName} isFloat={kv.Value.IsFloat} isString={kv.Value.IsString} isPtr={kv.Value.IsPointer}");
+                shown++;
+            }
 
             var sb = new System.Text.StringBuilder();
             sb.Append('{');
@@ -496,7 +542,9 @@ internal static class EntityEditor
                 sb.Append("}");
             }
             sb.Append('}');
-            return sb.ToString();
+            var result = sb.ToString();
+            Plugin.LogInfo($"[GetFieldsJson] 返回 {result.Length} 字节, keys约{nonPtrCnt}个");
+            return result;
         }
         return "{\"error\":\"not found\"}";
     }
@@ -2574,5 +2622,471 @@ internal static class EntityEditor
             return Marshal.PtrToStringUni(charsPtr);
         }
         catch { return null; }
+    }
+
+    // ====== 修改记录 + 读档重应用 (方案3) ======
+
+    // key: "guid:fieldName", value: float value
+    private static readonly Dictionary<string, float> _pendingModifications = new();
+
+    internal static void RecordModification(int guid, string field, float value)
+    {
+        if (guid <= 0 || string.IsNullOrEmpty(field)) return;
+        string key = $"{guid}:{field}";
+        _pendingModifications[key] = value;
+        Plugin.LogInfo($"[EntityEditor] RecordModification: {key} = {value}");
+        SaveModificationsToDisk();
+    }
+
+    internal static void RecordModificationById(int npcId, string field, float value)
+    {
+        if (npcId <= 0 || string.IsNullOrEmpty(field)) return;
+        string key = $"npc:{npcId}:{field}";
+        _pendingModifications[key] = value;
+        Plugin.LogInfo($"[EntityEditor] RecordModificationById: {key} = {value}");
+        SaveModificationsToDisk();
+    }
+
+    // ========== 持续覆盖（速度、血量、血量上限） ==========
+
+    private static readonly Dictionary<int, float> _speedOverrides = new(); // key: npcId
+    private static readonly Dictionary<int, float> _hpOverrides = new();
+    private static readonly Dictionary<int, float> _hpTotalOverrides = new();
+
+    internal static void SetSpeedOverride(int npcId, float speed) { if (npcId > 0) _speedOverrides[npcId] = speed; }
+    internal static void SetHpOverride(int npcId, float hp) { if (npcId > 0) _hpOverrides[npcId] = hp; }
+    internal static void SetHpTotalOverride(int npcId, float hpTotal) { if (npcId > 0) _hpTotalOverrides[npcId] = hpTotal; }
+
+    /// <summary>
+    /// 在 UpdateAgentMoveSpeed 后被调用，重新应用覆盖值
+    /// </summary>
+    internal static void OnPostUpdate(IntPtr instancePtr)
+    {
+        try
+        {
+            var entity = FindEntityByPtr(instancePtr);
+            if (entity == null || entity.NpcId <= 0) return;
+            int npcId = entity.NpcId;
+
+            // 速度覆盖
+            if (_speedOverrides.TryGetValue(npcId, out float sp) && entity.FieldMeta.TryGetValue("move_agent", out var maFe) && maFe.IsPointer)
+            {
+                IntPtr moveAgentPtr;
+                unsafe { moveAgentPtr = *(IntPtr*)(instancePtr + maFe.Offset); }
+                if (moveAgentPtr != IntPtr.Zero)
+                {
+                    IntPtr maClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(moveAgentPtr);
+                    IntPtr mth = FindMethodInHierarchy(maClass, "SetSpeed", 1);
+                    if (mth != IntPtr.Zero)
+                    {
+                        IntPtr ex = IntPtr.Zero;
+                        unsafe { float v = sp; void** p = stackalloc void*[1]; p[0] = &v; Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(mth, moveAgentPtr, p, ref ex); }
+                    }
+                }
+            }
+
+            // 血量覆盖
+            if (_hpOverrides.TryGetValue(npcId, out float hpVal))
+            {
+                if (entity.FieldMeta.TryGetValue("hp", out var hpFe) && !hpFe.IsPointer)
+                {
+                    WriteIl2CppFloat(instancePtr, hpFe.Offset, hpVal);
+                }
+            }
+
+            // 血量上限覆盖
+            if (_hpTotalOverrides.TryGetValue(npcId, out float hpTotalVal))
+            {
+                if (entity.FieldMeta.TryGetValue("hp_total", out var htFe) && !htFe.IsPointer)
+                {
+                    WriteIl2CppFloat(instancePtr, htFe.Offset, hpTotalVal);
+                }
+            }
+        }
+        catch { }
+    }
+
+    private static EditorEntity? FindEntityByPtr(IntPtr ptr)
+    {
+        int hash = ptr.GetHashCode();
+        foreach (var e in _entities)
+            if (e.PtrHash == hash) return e;
+        return null;
+    }
+
+    // ========== 磁盘持久化 ==========
+
+    private static string GetSavePath()
+    {
+        return System.IO.Path.Combine(BepInEx.Paths.ConfigPath, "ChestEditor_modifications.json");
+    }
+
+    internal static void SaveModificationsToDisk()
+    {
+        try
+        {
+            var sb = new System.Text.StringBuilder();
+            sb.Append('{');
+            bool first = true;
+            foreach (var kv in _pendingModifications)
+            {
+                if (!first) sb.Append(',');
+                first = false;
+                sb.Append($"\"{Escape(kv.Key)}\":{kv.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
+            }
+            sb.Append('}');
+            System.IO.File.WriteAllText(GetSavePath(), sb.ToString());
+        }
+        catch (Exception ex) { Plugin.LogError($"[EntityEditor] 保存修改失败: {ex.Message}"); }
+    }
+
+    internal static void LoadModificationsFromDisk()
+    {
+        try
+        {
+            string path = GetSavePath();
+            Plugin.LogInfo($"[EntityEditor] 加载修改文件: {path}, 存在={System.IO.File.Exists(path)}");
+            if (!System.IO.File.Exists(path)) return;
+            string json = System.IO.File.ReadAllText(path);
+            Plugin.LogInfo($"[EntityEditor] 修改文件内容长度: {json.Length}");
+            if (string.IsNullOrWhiteSpace(json) || json == "{}") return;
+
+            // 简单 JSON 解析: {"key":value, ...}
+            _pendingModifications.Clear();
+            json = json.Trim();
+            if (json.StartsWith("{") && json.EndsWith("}"))
+            {
+                string content = json.Substring(1, json.Length - 2);
+                // 按逗号分割，但要处理嵌套
+                var pairs = SplitJsonPairs(content);
+                foreach (var pair in pairs)
+                {
+                    // 找到 key 和 value 之间的冒号（在引号之后的第一个冒号）
+                    string trimmed = pair.Trim();
+                    if (!trimmed.StartsWith("\"")) continue;
+                    int endQuote = trimmed.IndexOf('"', 1);
+                    if (endQuote < 0) continue;
+                    int colonIdx = trimmed.IndexOf(':', endQuote + 1);
+                    if (colonIdx < 0) continue;
+                    string key = trimmed.Substring(1, endQuote - 1);
+                    string valStr = trimmed.Substring(colonIdx + 1).Trim();
+                    if (float.TryParse(valStr, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float val))
+                    {
+                        _pendingModifications[key] = val;
+                    }
+                }
+            }
+            // 提取覆盖
+            foreach (var kv in _pendingModifications)
+            {
+                if (!kv.Key.StartsWith("npc:")) continue;
+                int firstColon = kv.Key.IndexOf(':', 4);
+                if (firstColon <= 4) continue;
+                if (!int.TryParse(kv.Key.Substring(4, firstColon - 4), out int npcId) || npcId <= 0) continue;
+                string field = kv.Key.Substring(firstColon + 1);
+                if (field == "speed") _speedOverrides[npcId] = kv.Value;
+                else if (field == "hp") _hpOverrides[npcId] = kv.Value;
+                else if (field == "hp_total") _hpTotalOverrides[npcId] = kv.Value;
+            }
+            Plugin.LogInfo($"[EntityEditor] 从磁盘加载 {_pendingModifications.Count} 条修改, 速度{_speedOverrides.Count} 血量{_hpOverrides.Count} 血量上限{_hpTotalOverrides.Count}");
+            foreach (var kv in _pendingModifications)
+                Plugin.LogInfo($"[EntityEditor]   {kv.Key} = {kv.Value}");
+        }
+        catch (Exception ex) { Plugin.LogError($"[EntityEditor] 加载修改失败: {ex.Message}"); }
+    }
+
+    private static List<string> SplitJsonPairs(string content)
+    {
+        var result = new List<string>();
+        int depth = 0;
+        int start = 0;
+        for (int i = 0; i < content.Length; i++)
+        {
+            if (content[i] == '{' || content[i] == '[') depth++;
+            else if (content[i] == '}' || content[i] == ']') depth--;
+            else if (content[i] == ',' && depth == 0)
+            {
+                result.Add(content.Substring(start, i - start));
+                start = i + 1;
+            }
+        }
+        if (start < content.Length)
+            result.Add(content.Substring(start));
+        return result;
+    }
+
+    internal static void ClearModification(int guid, string field)
+    {
+        if (guid <= 0 || string.IsNullOrEmpty(field)) return;
+        string key = $"{guid}:{field}";
+        _pendingModifications.Remove(key);
+    }
+
+    internal static void ClearAllModificationsForGuid(int guid)
+    {
+        var prefix = $"{guid}:";
+        var keysToRemove = _pendingModifications.Keys.Where(k => k.StartsWith(prefix)).ToList();
+        foreach (var k in keysToRemove) _pendingModifications.Remove(k);
+    }
+
+    internal static string GetPendingModificationsJson()
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.Append('{');
+        bool first = true;
+        foreach (var kv in _pendingModifications)
+        {
+            if (!first) sb.Append(',');
+            first = false;
+            sb.Append($"\"{Escape(kv.Key)}\":{kv.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
+        }
+        sb.Append('}');
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// 将 _pendingModifications 应用到当前 _entities（不扫描）
+    /// </summary>
+    internal static void ApplyPendingModifications()
+    {
+        if (_pendingModifications.Count == 0) return;
+
+        int applied = 0, missed = 0;
+        foreach (var entry in _pendingModifications.ToList())
+        {
+            string key = entry.Key;
+            float value = entry.Value;
+            EditorEntity? match = null;
+            string fieldName, logId;
+
+            if (key.StartsWith("npc:"))
+            {
+                int firstColon = key.IndexOf(':', 4);
+                if (firstColon <= 4) { missed++; continue; }
+                if (!int.TryParse(key.Substring(4, firstColon - 4), out int npcId)) { missed++; continue; }
+                fieldName = key.Substring(firstColon + 1);
+                logId = $"npcId={npcId}";
+                foreach (var e in _entities) { if (e.NpcId == npcId) { match = e; break; } }
+            }
+            else
+            {
+                int colonIdx = key.IndexOf(':');
+                if (colonIdx <= 0) { missed++; continue; }
+                if (!int.TryParse(key.Substring(0, colonIdx), out int guid)) { missed++; continue; }
+                fieldName = key.Substring(colonIdx + 1);
+                logId = $"guid={guid}";
+                foreach (var e in _entities) { if (e.Guid == guid) { match = e; break; } }
+            }
+
+            if (match == null) { missed++; continue; }
+            if (!match.FieldMeta.TryGetValue(fieldName, out var fe) || fe.IsPointer) { missed++; continue; }
+
+            try
+            {
+                if (fe.IsFloat) WriteIl2CppFloat(match.Ptr, fe.Offset, value);
+                else WriteIl2CppInt(match.Ptr, fe.Offset, (int)value);
+                ApplyNpcFieldChange(match, fieldName, value);
+                applied++;
+            }
+            catch { missed++; }
+        }
+        Plugin.LogInfo($"[EntityEditor] ApplyPendingModifications: applied={applied}, missed={missed}");
+    }
+
+    /// <summary>
+    /// 读档后重新应用所有记录的修改（主线程调用）
+    /// </summary>
+    internal static string ReapplyModifications()
+    {
+        if (_pendingModifications.Count == 0)
+        {
+            Plugin.LogInfo("[EntityEditor] ReapplyModifications: 无待应用修改");
+            return "{\"ok\":true,\"applied\":0}";
+        }
+        ScanAll();
+        ApplyPendingModifications();
+        return "{\"ok\":true}";
+    }
+
+    /// <summary>
+    /// 返回我方 NPC 列表 JSON（className=Npc, hometownKingdomId=1）
+    /// </summary>
+    internal static string GetNpcListJson()
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.Append('[');
+        bool first = true;
+        foreach (var e in _entities)
+        {
+            // 只显示 NPC 类型且属于我方 (hometownKingdomId == 1)
+            if (e.ClassName != "Npc" || e.HometownKingdomId != 1) continue;
+
+            if (!first) sb.Append(',');
+            first = false;
+
+            sb.Append('{');
+            sb.Append($"\"ptrHash\":{e.PtrHash},");
+            sb.Append($"\"guid\":{e.Guid},");
+            sb.Append($"\"npcId\":{e.NpcId},");
+            sb.Append($"\"stuffId\":{e.StuffId},");
+            sb.Append($"\"npcName\":\"{Escape(e.NpcName)}\",");
+            sb.Append($"\"soldierTypeId\":{e.SoldierTypeId},");
+            sb.Append($"\"soldierTypeName\":\"{Escape(GetSoldierTypeName(e.SoldierTypeId))}\",");
+            sb.Append($"\"name\":\"{Escape(StuffIdNames.GetName(e.StuffId))}\",");
+
+            // 读取重点字段
+            int slimCount = 0;
+            int pointerCount = 0;
+            foreach (var kv in e.FieldMeta)
+                if (!kv.Value.IsPointer) slimCount++; else pointerCount++;
+            sb.Append($"\"fieldCount\":{slimCount},");
+            Plugin.LogInfo($"[GetNpcListJson] {e.NpcName} guid={e.Guid} ptrHash={e.PtrHash} className={e.ClassName} total={e.FieldMeta.Count} slim={slimCount} ptr={pointerCount}");
+
+            // speed, hp, hp_total
+            if (e.FieldMeta.TryGetValue("speed", out var speedFe) && speedFe.IsFloat)
+                sb.Append($"\"speed\":{ReadIl2CppFloat(e.Ptr, speedFe.Offset).ToString("G")},");
+            if (e.FieldMeta.TryGetValue("hp", out var hpFe) && hpFe.IsFloat)
+                sb.Append($"\"hp\":{ReadIl2CppFloat(e.Ptr, hpFe.Offset).ToString("G")},");
+            if (e.FieldMeta.TryGetValue("hp_total", out var hpTotalFe) && hpTotalFe.IsFloat)
+                sb.Append($"\"hpTotal\":{ReadIl2CppFloat(e.Ptr, hpTotalFe.Offset).ToString("G")},");
+
+            // 尝试读取 age（可能是 int 或 float）
+            if (e.FieldMeta.TryGetValue("age", out var ageFe))
+            {
+                if (ageFe.IsFloat)
+                    sb.Append($"\"age\":{ReadIl2CppFloat(e.Ptr, ageFe.Offset).ToString("G")},");
+                else if (!ageFe.IsString && !ageFe.IsPointer)
+                    sb.Append($"\"age\":{ReadIl2CppInt(e.Ptr, ageFe.Offset)},");
+            }
+
+            // 去掉末尾多余逗号
+            if (sb[sb.Length - 1] == ',') sb.Length--;
+            sb.Append('}');
+        }
+        sb.Append(']');
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// 设置 NPC 字段并记录修改（用于读档重应用）
+    /// </summary>
+    internal static string SetNpcField(int ptrHash, string fieldName, float value)
+    {
+        string result = SetField(ptrHash, fieldName, value);
+        if (result == "ok")
+        {
+            foreach (var e in _entities)
+            {
+                if (e.PtrHash == ptrHash)
+                {
+                    // 记录修改
+                    if (e.Guid > 0)
+                        RecordModification(e.Guid, fieldName, value);
+                    else if (e.NpcId > 0)
+                        RecordModificationById(e.NpcId, fieldName, value);
+                    // 应用到游戏
+                    ApplyNpcFieldChange(e, fieldName, value);
+                    break;
+                }
+            }
+        }
+        return result;
+    }
+
+    private static void ApplyNpcFieldChange(EditorEntity e, string fieldName, float value)
+    {
+        try
+        {
+            if (fieldName == "speed")
+            {
+                if (e.NpcId > 0) SetSpeedOverride(e.NpcId, value);
+                // 读取 move_agent 字段并调用 SetSpeed
+                if (e.FieldMeta.TryGetValue("move_agent", out var maFe) && maFe.IsPointer)
+                {
+                    IntPtr moveAgentPtr;
+                    unsafe { moveAgentPtr = *(IntPtr*)(e.Ptr + maFe.Offset); }
+                    if (moveAgentPtr != IntPtr.Zero)
+                    {
+                        IntPtr maClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(moveAgentPtr);
+                        IntPtr setSpeedMth = FindMethodInHierarchy(maClass, "SetSpeed", 1);
+                        if (setSpeedMth != IntPtr.Zero)
+                        {
+                            IntPtr ex = IntPtr.Zero;
+                            unsafe
+                            {
+                                float v = value;
+                                void** p = stackalloc void*[1];
+                                p[0] = &v;
+                                Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(setSpeedMth, moveAgentPtr, p, ref ex);
+                            }
+                            Plugin.LogInfo($"[ApplyNpcFieldChange] speed={value} -> move_agent.SetSpeed OK");
+                        }
+                    }
+                }
+            }
+            else if (fieldName == "hp")
+            {
+                if (e.NpcId > 0) SetHpOverride(e.NpcId, value);
+                // 调用 SetHp(float) 方法
+                IntPtr compClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(e.Ptr);
+                IntPtr setHpMth = FindMethodInHierarchy(compClass, "SetHp", 1);
+                if (setHpMth != IntPtr.Zero)
+                {
+                    IntPtr ex = IntPtr.Zero;
+                    unsafe
+                    {
+                        float v = value;
+                        void** p = stackalloc void*[1];
+                        p[0] = &v;
+                        Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(setHpMth, e.Ptr, p, ref ex);
+                    }
+                    Plugin.LogInfo($"[ApplyNpcFieldChange] hp={value} -> SetHp OK");
+                }
+            }
+            else if (fieldName == "hp_total")
+            {
+                if (e.NpcId > 0) SetHpTotalOverride(e.NpcId, value);
+                // 调用 UpdateHpProgressBarTotal()
+                IntPtr compClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(e.Ptr);
+                IntPtr mth = FindMethodInHierarchy(compClass, "UpdateHpProgressBarTotal", 0);
+                if (mth != IntPtr.Zero)
+                {
+                    IntPtr ex = IntPtr.Zero;
+                    unsafe { Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(mth, e.Ptr, (void**)0, ref ex); }
+                    Plugin.LogInfo($"[ApplyNpcFieldChange] hp_total={value} -> UpdateHpProgressBarTotal OK");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Plugin.LogError($"[ApplyNpcFieldChange] {fieldName}={value} 失败: {ex.Message}");
+        }
+    }
+
+    private static IntPtr FindMethodInHierarchy(IntPtr cls, string name, int paramCount)
+    {
+        IntPtr c = cls;
+        int depth = 0;
+        while (c != IntPtr.Zero && depth < 15)
+        {
+            IntPtr m = FindMethod(c, name, paramCount);
+            if (m != IntPtr.Zero) return m;
+            try { c = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(c); } catch { break; }
+            depth++;
+        }
+        return IntPtr.Zero;
+    }
+
+    private static unsafe IntPtr FindMethod(IntPtr cls, string name, int paramCount)
+    {
+        IntPtr iter = IntPtr.Zero;
+        IntPtr m;
+        while ((m = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_methods(cls, ref iter)) != IntPtr.Zero)
+        {
+            string? mn = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_name(m));
+            if (mn == name && Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_param_count(m) == paramCount)
+                return m;
+        }
+        return IntPtr.Zero;
     }
 }
