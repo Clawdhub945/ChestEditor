@@ -1363,20 +1363,11 @@ function renderNpcCard(npc) {
   h += '<button onclick=""event.stopPropagation();locateEditorEntity(' + ptrHash + ')"" style=""padding:3px 8px;background:var(--info,#3498db);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px"">定位</button>';
   h += '</div>';
 
-  // 重点字段：speed, hp, hp_total
-  h += '<div style=""display:flex;gap:12px;padding:10px 14px;flex-wrap:wrap"">';
-  h += renderNpcFieldInput(ptrHash, 'speed', '速度', npc.speed, {isFloat:true});
-  h += renderNpcFieldInput(ptrHash, 'hp', '血量', npc.hp, {isFloat:true});
-  h += renderNpcFieldInput(ptrHash, 'hp_total', '血量上限', npc.hpTotal, {isFloat:true});
-  h += '</div>';
-
-  // 其他字段折叠（懒加载）
-  if (fieldCount > 3) {
-    h += '<details style=""border-top:1px solid var(--border)"" ontoggle=""loadNpcFields(this,' + ptrHash + ')"">';
-    h += '<summary style=""cursor:pointer;padding:8px 14px;font-size:12px;color:var(--text-muted);user-select:none"">其他字段 (' + (fieldCount - 3) + ')</summary>';
-    h += '<div id=""npc-fields-' + ptrHash + '"" style=""padding:6px 14px 10px;color:var(--text-muted);font-size:12px"">点击展开加载...</div>';
-    h += '</details>';
-  }
+  // 所有字段折叠（懒加载）
+  h += '<details style=""border-top:1px solid var(--border)"" ontoggle=""loadNpcFields(this,' + ptrHash + ')"">';
+  h += '<summary style=""cursor:pointer;padding:8px 14px;font-size:12px;color:var(--text-muted);user-select:none"">所有字段 (' + fieldCount + ')</summary>';
+  h += '<div id=""npc-fields-' + ptrHash + '"" style=""padding:6px 14px 10px;color:var(--text-muted);font-size:12px"">点击展开加载...</div>';
+  h += '</details>';
 
   h += '</div>';
   return h;
@@ -1399,8 +1390,7 @@ async function loadNpcFields(details, ptrHash) {
       if (summary) summary.textContent = '其他字段 (已失效)';
       return;
     }
-    const mainFields = new Set(['speed', 'hp', 'hp_total']);
-    const numKeys = allKeys.filter(k => !mainFields.has(k) && !fields[k].isString);
+    const numKeys = allKeys.filter(k => !fields[k].isString);
     const strKeys = allKeys.filter(k => fields[k].isString);
     let h = '';
     if (numKeys.length > 0) {
