@@ -1344,6 +1344,10 @@ function renderNpcPanel() {
 
   html += '</div>';
   el.innerHTML = html;
+  // 初始化勾选字段显示
+  for (const npc of npcListData) {
+    refreshNpcCheckedDisplay(npc.ptrHash || 0);
+  }
 }
 
 function renderNpcCard(npc) {
@@ -1363,6 +1367,9 @@ function renderNpcCard(npc) {
   h += '<button onclick=""event.stopPropagation();locateEditorEntity(' + ptrHash + ')"" style=""padding:3px 8px;background:var(--info,#3498db);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px"">定位</button>';
   h += '</div>';
 
+  // 勾选字段显示区域
+  h += '<div id=""npc-checked-' + ptrHash + '""></div>';
+
   // 所有字段折叠（懒加载）
   h += '<details style=""border-top:1px solid var(--border)"" ontoggle=""loadNpcFields(this,' + ptrHash + ')"">';
   h += '<summary style=""cursor:pointer;padding:8px 14px;font-size:12px;color:var(--text-muted);user-select:none"">所有字段 (' + fieldCount + ')</summary>';
@@ -1373,6 +1380,27 @@ function renderNpcCard(npc) {
   return h;
 }
 
+var _fieldTranslations = null;
+var _npcFieldCache = {};
+async function loadFieldTranslations() {
+  if (_fieldTranslations !== null) return _fieldTranslations;
+  try {
+    const r = await fetch('/api/npc/translations?t=' + Date.now());
+    _fieldTranslations = await r.json();
+  } catch(e) { _fieldTranslations = {}; }
+  return _fieldTranslations;
+}
+
+function getCheckedFields(ptrHash) {
+  try {
+    const raw = localStorage.getItem('npc_checked_' + ptrHash);
+    return raw ? JSON.parse(raw) : [];
+  } catch(e) { return []; }
+}
+function saveCheckedFields(ptrHash, arr) {
+  localStorage.setItem('npc_checked_' + ptrHash, JSON.stringify(arr));
+}
+
 async function loadNpcFields(details, ptrHash) {
   if (!details.open) return;
   const container = document.getElementById('npc-fields-' + ptrHash);
@@ -1380,58 +1408,210 @@ async function loadNpcFields(details, ptrHash) {
   container.dataset.loaded = '1';
   container.innerHTML = '加载中...';
   try {
-    const r = await fetch('/api/npc/fields/' + ptrHash + '?t=' + Date.now());
-    const fields = await r.json();
+    const [fields, translations] = await Promise.all([
+      fetch('/api/npc/fields/' + ptrHash + '?t=' + Date.now()).then(r => r.json()),
+      loadFieldTranslations()
+    ]);
     const allKeys = Object.keys(fields);
     console.log('[NPC fields] ptrHash=' + ptrHash + ' keys=' + allKeys.length + ' error=' + (fields.error || 'none'));
+    _npcFieldCache[ptrHash] = { fields: fields, translations: translations };
     if (fields.error || allKeys.length === 0) {
       container.innerHTML = '<span style=""color:var(--danger)"">实体已失效 (ptrHash: ' + ptrHash + ')，请<a href=""javascript:void(0)"" onclick=""openNpcPanel()"" style=""color:var(--accent)"">重新扫描</a></span>';
-      const summary = details.querySelector('summary');
-      if (summary) summary.textContent = '其他字段 (已失效)';
       return;
     }
+    const checked = new Set(getCheckedFields(ptrHash));
     const numKeys = allKeys.filter(k => !fields[k].isString);
     const strKeys = allKeys.filter(k => fields[k].isString);
+    const totalCount = numKeys.length + strKeys.length;
+
     let h = '';
-    if (numKeys.length > 0) {
-      h += '<div style=""display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px"">';
-      for (const key of numKeys) {
-        const f = fields[key];
-        h += renderNpcFieldInput(ptrHash, key, key, f.value, f);
-      }
-      h += '</div>';
+    // 搜索框
+    h += '<div style=""margin-bottom:8px"">';
+    h += '<input id=""npc-search-' + ptrHash + '"" type=""text"" placeholder=""搜索字段..."" oninput=""filterNpcTable(this)"" ';
+    h += 'style=""width:100%;padding:5px 8px;background:var(--bg-input,#1a1a2e);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:12px;outline:none"" />';
+    h += '</div>';
+    // 全选/取消
+    h += '<div style=""display:flex;gap:8px;margin-bottom:6px;font-size:11px"">';
+    h += '<a href=""javascript:void(0)"" onclick=""toggleAllNpcCheckboxes(' + ptrHash + ',true)"" style=""color:var(--accent)"">全选</a>';
+    h += '<a href=""javascript:void(0)"" onclick=""toggleAllNpcCheckboxes(' + ptrHash + ',false)"" style=""color:var(--text-muted)"">取消全选</a>';
+    h += '</div>';
+    // 表格
+    h += '<table class=""npc-fields-table"" style=""width:100%;border-collapse:collapse;font-size:12px"">';
+    h += '<thead><tr style=""border-bottom:1px solid var(--border)"">';
+    h += '<th style=""width:30px;padding:4px 6px;text-align:center""><input type=""checkbox"" id=""npc-checkall-' + ptrHash + '"" onchange=""toggleAllNpcCheckboxes(' + ptrHash + ',this.checked)"" /></th>';
+    h += '<th style=""padding:4px 8px;text-align:left;min-width:120px"">字段</th>';
+    h += '<th style=""padding:4px 8px;text-align:left;min-width:80px"">翻译</th>';
+    h += '<th style=""padding:4px 8px;text-align:right;min-width:80px"">数值</th>';
+    h += '<th style=""width:50px;padding:4px 6px;text-align:center"">操作</th>';
+    h += '</tr></thead><tbody>';
+
+    // 数值字段
+    for (const key of numKeys) {
+      const f = fields[key];
+      const isFloat = f.isFloat;
+      const displayVal = (typeof f.value === 'number') ? (isFloat ? f.value.toFixed(2) : f.value) : (f.value || 0);
+      const trans = translations[key] || '';
+      const isChecked = checked.has(key);
+      const inpId = 'npc_inp_' + ptrHash + '_' + key;
+      h += '<tr class=""npc-field-row"" data-key=""' + esc(key).toLowerCase() + '"">';
+      h += '<td style=""text-align:center;padding:3px 6px;border-bottom:1px solid var(--border)""><input type=""checkbox"" class=""npc-field-cb"" data-ptr=""' + ptrHash + '"" data-key=""' + esc(key) + '"" ' + (isChecked ? 'checked' : '') + ' onchange=""onNpcCheckChange(this)"" /></td>';
+      h += '<td style=""padding:3px 8px;border-bottom:1px solid var(--border);color:var(--text-primary)"">' + esc(key) + '</td>';
+      h += '<td style=""padding:3px 8px;border-bottom:1px solid var(--border);color:var(--text-muted)"">' + esc(trans) + '</td>';
+      h += '<td style=""padding:3px 6px;border-bottom:1px solid var(--border);text-align:right"">';
+      h += '<input id=""' + inpId + '"" type=""number"" step=""' + (isFloat ? '0.1' : '1') + '"" value=""' + displayVal + '"" ';
+      h += 'style=""width:80px;background:transparent;border:1px solid var(--border);border-radius:3px;color:var(--text-primary);font-size:12px;text-align:right;padding:2px 4px;outline:none"" onfocus=""this.select()"" />';
+      h += '</td>';
+      h += '<td style=""text-align:center;padding:3px 6px;border-bottom:1px solid var(--border)"">';
+      h += '<button onclick=""setNpcField(' + ptrHash + ',\'' + esc(key) + '\',document.getElementById(\'' + inpId + '\').value,' + (isFloat ? 'true' : 'false') + ')"" style=""padding:2px 8px;background:var(--accent);color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:11px"">OK</button>';
+      h += '</td></tr>';
     }
-    if (strKeys.length > 0) {
-      for (const key of strKeys) {
-        const f = fields[key];
-        h += '<div style=""display:flex;align-items:center;gap:8px;font-size:12px;margin-bottom:2px"">';
-        h += '<span style=""color:var(--text-muted);min-width:100px"">' + esc(key) + '</span>';
-        h += '<span style=""color:var(--text-primary)"">' + esc(String(f.value || '')) + '</span>';
-        h += '</div>';
-      }
+    // 字符串字段
+    for (const key of strKeys) {
+      const f = fields[key];
+      const trans = translations[key] || '';
+      const isChecked = checked.has(key);
+      h += '<tr class=""npc-field-row"" data-key=""' + esc(key).toLowerCase() + '"">';
+      h += '<td style=""text-align:center;padding:3px 6px;border-bottom:1px solid var(--border)""><input type=""checkbox"" class=""npc-field-cb"" data-ptr=""' + ptrHash + '"" data-key=""' + esc(key) + '"" ' + (isChecked ? 'checked' : '') + ' onchange=""onNpcCheckChange(this)"" /></td>';
+      h += '<td style=""padding:3px 8px;border-bottom:1px solid var(--border);color:var(--text-primary)"">' + esc(key) + '</td>';
+      h += '<td style=""padding:3px 8px;border-bottom:1px solid var(--border);color:var(--text-muted)"">' + esc(trans) + '</td>';
+      h += '<td style=""padding:3px 8px;border-bottom:1px solid var(--border);color:var(--text-muted);text-align:right"">' + esc(String(f.value || '')) + '</td>';
+      h += '<td style=""padding:3px 6px;border-bottom:1px solid var(--border)""></td>';
+      h += '</tr>';
     }
-    container.innerHTML = h || '<span style=""color:var(--text-muted)"">无其他字段</span>';
-    const summary = details.querySelector('summary');
-    if (summary) summary.textContent = '其他字段 (' + (numKeys.length + strKeys.length) + ')';
+    h += '</tbody></table>';
+
+    container.innerHTML = h;
+    // 更新 check-all 状态
+    updateCheckAllState(ptrHash);
   } catch(e) {
-    container.innerHTML = '<span style=""color:var(--danger)"">加载失败</span>';
+    container.innerHTML = '<span style=""color:var(--danger)"">加载失败: ' + esc(String(e)) + '</span>';
   }
 }
 
-var _npcFieldInputId = 0;
-function renderNpcFieldInput(ptrHash, field, label, value, fieldMeta) {
-  const isFloat = fieldMeta && fieldMeta.isFloat;
-  const displayVal = (typeof value === 'number') ? (isFloat ? value.toFixed(2) : value) : (value || 0);
-  const inputId = 'npc_inp_' + (++_npcFieldInputId);
-  let h = '';
-  h += '<div style=""display:flex;align-items:center;gap:4px;background:var(--bg-input, #1a1a2e);border:1px solid var(--border);border-radius:6px;padding:4px 8px"">';
-  h += '<span style=""font-size:11px;color:var(--text-muted);white-space:nowrap"">' + esc(label) + '</span>';
-  h += '<input id=""' + inputId + '"" type=""number"" step=""' + (isFloat ? '0.1' : '1') + '"" value=""' + displayVal + '"" ';
-  h += 'style=""width:70px;background:transparent;border:none;color:var(--text-primary);font-size:12px;text-align:right;outline:none"" ';
-  h += 'onfocus=""this.select()"" />';
-  h += '<button onclick=""setNpcField(' + ptrHash + ',\'' + esc(field) + '\',document.getElementById(\'' + inputId + '\').value,' + (isFloat ? 'true' : 'false') + ')"" style=""padding:2px 6px;background:var(--accent);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px;white-space:nowrap"">OK</button>';
-  h += '</div>';
-  return h;
+function filterNpcTable(input) {
+  const q = input.value.toLowerCase();
+  const table = input.closest('div').querySelector('table');
+  if (!table) return;
+  const rows = table.querySelectorAll('.npc-field-row');
+  for (const row of rows) {
+    const key = row.dataset.key || '';
+    row.style.display = key.includes(q) ? '' : 'none';
+  }
+}
+
+function onNpcCheckChange(cb) {
+  const ptrHash = parseInt(cb.dataset.ptr);
+  const key = cb.dataset.key;
+  let arr = getCheckedFields(ptrHash);
+  if (cb.checked) {
+    if (!arr.includes(key)) arr.push(key);
+  } else {
+    arr = arr.filter(k => k !== key);
+  }
+  saveCheckedFields(ptrHash, arr);
+  updateCheckAllState(ptrHash);
+  // 更新卡片上的勾选字段显示
+  refreshNpcCheckedDisplay(ptrHash);
+}
+
+function toggleAllNpcCheckboxes(ptrHash, checked) {
+  const cbs = document.querySelectorAll('.npc-field-cb');
+  let arr = [];
+  for (const cb of cbs) {
+    if (parseInt(cb.dataset.ptr) !== ptrHash) continue;
+    if (cb.closest('tr').style.display === 'none') continue;
+    cb.checked = checked;
+    if (checked) arr.push(cb.dataset.key);
+  }
+  saveCheckedFields(ptrHash, arr);
+  const checkAll = document.getElementById('npc-checkall-' + ptrHash);
+  if (checkAll) checkAll.checked = checked;
+  refreshNpcCheckedDisplay(ptrHash);
+}
+
+function updateCheckAllState(ptrHash) {
+  const cbs = document.querySelectorAll('.npc-field-cb');
+  const checkAll = document.getElementById('npc-checkall-' + ptrHash);
+  if (!checkAll) return;
+  let total = 0, checkedCount = 0;
+  for (const cb of cbs) {
+    if (parseInt(cb.dataset.ptr) !== ptrHash) continue;
+    total++;
+    if (cb.checked) checkedCount++;
+  }
+  checkAll.checked = (total > 0 && checkedCount === total);
+}
+
+function refreshNpcCheckedDisplay(ptrHash) {
+  const el = document.getElementById('npc-checked-' + ptrHash);
+  if (!el) return;
+  const checked = getCheckedFields(ptrHash);
+  if (checked.length === 0) {
+    el.innerHTML = '';
+    return;
+  }
+  const cache = _npcFieldCache[ptrHash];
+  const fields = cache ? cache.fields : null;
+  const trans = cache ? cache.translations : {};
+  let h = '<table style=""width:100%;border-collapse:collapse;font-size:12px"">';
+  h += '<thead><tr style=""border-bottom:1px solid var(--border)"">';
+  h += '<th style=""padding:3px 8px;text-align:left;min-width:100px"">字段</th>';
+  h += '<th style=""padding:3px 8px;text-align:left;min-width:60px"">翻译</th>';
+  h += '<th style=""padding:3px 8px;text-align:right;min-width:70px"">数值</th>';
+  h += '<th style=""width:50px;padding:3px 6px;text-align:center"">操作</th>';
+  h += '</tr></thead><tbody>';
+  for (const key of checked) {
+    const f = fields ? fields[key] : null;
+    const isFloat = f && f.isFloat;
+    const val = f ? f.value : 0;
+    const displayVal = (typeof val === 'number') ? (isFloat ? val.toFixed(2) : val) : (val || 0);
+    const translation = trans[key] || '';
+    const inpId = 'npc_chkd_' + ptrHash + '_' + key;
+    h += '<tr>';
+    h += '<td style=""padding:3px 8px;border-bottom:1px solid var(--border);color:var(--text-primary)"">' + esc(key) + '</td>';
+    h += '<td style=""padding:3px 8px;border-bottom:1px solid var(--border);color:var(--text-muted)"">' + esc(translation) + '</td>';
+    h += '<td style=""padding:3px 6px;border-bottom:1px solid var(--border);text-align:right"">';
+    h += '<input id=""' + inpId + '"" type=""number"" step=""' + (isFloat ? '0.1' : '1') + '"" value=""' + displayVal + '"" ';
+    h += 'style=""width:80px;background:transparent;border:1px solid var(--border);border-radius:3px;color:var(--text-primary);font-size:12px;text-align:right;padding:2px 4px;outline:none"" onfocus=""this.select()"" />';
+    h += '</td>';
+    h += '<td style=""text-align:center;padding:3px 6px;border-bottom:1px solid var(--border)"">';
+    h += '<button onclick=""setNpcCheckedField(' + ptrHash + ',\'' + esc(key) + '\',document.getElementById(\'' + inpId + '\').value,' + (isFloat ? 'true' : 'false') + ')"" style=""padding:2px 8px;background:var(--accent);color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:11px"">OK</button>';
+    h += '</td></tr>';
+  }
+  h += '</tbody></table>';
+  el.innerHTML = h;
+}
+
+async function setNpcCheckedField(ptrHash, field, value, isFloat) {
+  const v = isFloat ? parseFloat(value) : parseInt(value);
+  if (isNaN(v)) return;
+  try {
+    const r = await fetch('/api/npc/set', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ptrHash, field, value: v})
+    });
+    const data = await r.json();
+    if (data.error) { toast('设置失败: ' + data.error, true); return; }
+    // 更新缓存
+    if (_npcFieldCache[ptrHash] && _npcFieldCache[ptrHash].fields[field]) {
+      _npcFieldCache[ptrHash].fields[field].value = v;
+    }
+    // 同步到所有字段表格的输入框
+    var allInput = document.getElementById('npc_inp_' + ptrHash + '_' + field);
+    if (allInput) allInput.value = isFloat ? v.toFixed(2) : v;
+    // 更新本地数据
+    for (const npc of npcListData) {
+      if (npc.ptrHash === ptrHash) {
+        if (field === 'speed') npc.speed = v;
+        else if (field === 'hp') npc.hp = v;
+        else if (field === 'hp_total') npc.hpTotal = v;
+        if (npc.fields && npc.fields[field]) npc.fields[field].value = v;
+        break;
+      }
+    }
+    toast(field + ' = ' + v);
+  } catch(e) { toast('设置失败', true); }
 }
 
 async function setNpcField(ptrHash, field, value, isFloat) {
@@ -1445,6 +1625,13 @@ async function setNpcField(ptrHash, field, value, isFloat) {
     });
     const data = await r.json();
     if (data.error) { toast('设置失败: ' + data.error, true); return; }
+    // 更新缓存
+    if (_npcFieldCache[ptrHash] && _npcFieldCache[ptrHash].fields[field]) {
+      _npcFieldCache[ptrHash].fields[field].value = v;
+    }
+    // 同步到勾选表格的输入框
+    var chkdInput = document.getElementById('npc_chkd_' + ptrHash + '_' + field);
+    if (chkdInput) chkdInput.value = isFloat ? v.toFixed(2) : v;
     // 更新本地数据
     for (const npc of npcListData) {
       if (npc.ptrHash === ptrHash) {

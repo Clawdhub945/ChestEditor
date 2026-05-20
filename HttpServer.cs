@@ -4,6 +4,7 @@ using System.IO;
 using System.Net;
 using System.Text;
 using System.Threading;
+using BepInEx;
 
 namespace ChestEditor;
 
@@ -624,6 +625,15 @@ internal class HttpServer
                     SendJson(resp, writeReq.ResultJson ?? "{\"ok\":true}");
                 else
                     SendJson(resp, "{\"error\":\"timeout\"}");
+            }
+            else if (path == "/api/npc/translations" && method == "GET")
+            {
+                var modDir = Path.GetDirectoryName(typeof(HttpServer).Assembly.Location) ?? "";
+                var filePath = Path.Combine(modDir, "field_translations.json");
+                string translations;
+                try { translations = File.Exists(filePath) ? File.ReadAllText(filePath, Encoding.UTF8) : "{}"; }
+                catch { translations = "{}"; }
+                SendJson(resp, translations);
             }
             else if (path == "/api/dragon/natures" && method == "GET")
             {
