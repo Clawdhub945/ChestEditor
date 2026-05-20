@@ -2975,6 +2975,10 @@ internal static class EntityEditor
             if (e.FieldMeta.TryGetValue("_npc_type", out var npcTypeFe) && !npcTypeFe.IsString && !npcTypeFe.IsPointer)
                 sb.Append($"\"npcType\":{ReadIl2CppInt(e.Ptr, npcTypeFe.Offset)},");
 
+            // 阵营判断辅助字段
+            sb.Append($"\"hometownKingdomId\":{e.HometownKingdomId},");
+            sb.Append($"\"soldierTypeId\":{e.SoldierTypeId},");
+
             // 去掉末尾多余逗号
             if (sb[sb.Length - 1] == ',') sb.Length--;
             sb.Append('}');
