@@ -1313,10 +1313,12 @@ function renderNpcPanel() {
     html += '<div style=""color:var(--text-muted);font-size:13px"">确保游戏已加载存档且有己方 NPC 存在</div>';
     html += '</div>';
   } else {
-    const grp={soldiers:[],children:[],prisoners:[],workers:[],nobles:[],lords:[],misc:[],outsiders:[],army:[],laborers:[]};
+    const grp={soldiers:[],children:[],prisoners:[],workers:[],nobles:[],lords:[],misc:[],outsiders:[],army:[],laborers:[],others:[]};
     for (const npc of npcListData) {
-      const t = npc.npcType || 0;
-      if (t===1901||t===9305||t===9307||t===9310||t===9311||t===9312||t===9313) grp.soldiers.push(npc);
+      const hasType = npc.npcType !== undefined && npc.npcType !== null;
+      const t = hasType ? npc.npcType : -9999;
+      if (!hasType) grp.others.push(npc);
+      else if (t===1901||t===9305||t===9307||t===9310||t===9311||t===9312||t===9313) grp.soldiers.push(npc);
       else if ((t>=-3&&t<=-1)||(t>=9001&&t<=9199)) grp.children.push(npc);
       else if (t===25) grp.prisoners.push(npc);
       else if ((t>=1&&t<=22)||t===24||(t>=26&&t<=29)||(t>=31&&t<=49)||t===9301||t===9302||t===9303||t===9304||t===9306||t===9308||t===9309) grp.workers.push(npc);
@@ -1326,10 +1328,11 @@ function renderNpcPanel() {
       else if (t>=-15&&t<=-5) grp.outsiders.push(npc);
       else if (t===1001) grp.army.push(npc);
       else if (t===0||(t>=9201&&t<=9299)) grp.laborers.push(npc);
-      else grp.laborers.push(npc);
+      else grp.others.push(npc);
     }
     const groups = [
-      {label:'士兵', icon:'&#x2694;', color:'#e74c3c', items:grp.soldiers},
+      {label:'我方士兵', icon:'&#x2694;', color:'#e74c3c', items:grp.army},
+      {label:'敌兵', icon:'&#x2694;', color:'#c0392b', items:grp.soldiers},
       {label:'工人', icon:'&#x1F527;', color:'#f39c12', items:grp.workers},
       {label:'杂工', icon:'&#x1F6E0;', color:'#95a5a6', items:grp.laborers},
       {label:'儿童', icon:'&#x1F476;', color:'#e91e63', items:grp.children},
@@ -1337,21 +1340,24 @@ function renderNpcPanel() {
       {label:'贵族', icon:'&#x1F451;', color:'#f1c40f', items:grp.nobles},
       {label:'领主', icon:'&#x1F3F0;', color:'#e67e22', items:grp.lords},
       {label:'俘虏', icon:'&#x1F512;', color:'#7f8c8d', items:grp.prisoners},
-      {label:'石头人和小精灵', icon:'&#x1F47E;', color:'#1abc9c', items:grp.misc}
+      {label:'石头人和小精灵', icon:'&#x1F47E;', color:'#1abc9c', items:grp.misc},
+      {label:'其他', icon:'&#x2753;', color:'#34495e', items:grp.others}
     ];
     html += '<div style=""flex:1;overflow-y:auto;min-height:0"">';
     for (const g of groups) {
-      if (g.items.length === 0) continue;
       html += '<details style=""margin-bottom:8px"">';
       html += '<summary style=""cursor:pointer;padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-weight:600;font-size:13px;display:flex;align-items:center;gap:8px"">';
       html += '<span style=""font-size:10px;padding:1px 6px;border-radius:8px;background:' + g.color + ';color:#fff"">' + g.icon + ' ' + g.label + '</span>';
       html += '<span style=""margin-left:auto;font-size:12px;color:var(--text-muted);font-weight:400"">' + g.items.length + ' 个</span>';
       html += '</summary>';
-      html += '<div style=""padding:6px 0"">';
-      for (const npc of g.items) {
-        html += '<div style=""margin-bottom:6px"">' + renderNpcCard(npc) + '</div>';
+      if (g.items.length > 0) {
+        html += '<div style=""padding:6px 0"">';
+        for (const npc of g.items) {
+          html += '<div style=""margin-bottom:6px"">' + renderNpcCard(npc) + '</div>';
+        }
+        html += '</div>';
       }
-      html += '</div></details>';
+      html += '</details>';
     }
     html += '</div>';
   }

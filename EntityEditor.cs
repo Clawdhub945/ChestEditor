@@ -272,9 +272,10 @@ internal static class EntityEditor
                             Plugin.LogInfo($"[EntityEditor] 强制重枚举 {className}: {fieldMap.Count} 字段");
                         }
 
-                        // 判断是否匹配：有 stuff_id 字段 且 stuffId>0,guid>0  OR  类名含 Npc
+                        // 判断是否匹配：有 stuff_id 字段 且 stuffId>0,guid>0  OR  类名含 Npc/Soldier/BattleUnit
                         bool hasStuffId = fieldMap.ContainsKey("stuff_id");
-                        bool isNpc = className.Contains("Npc") && !className.Contains("NpcHelper") && !className.Contains("NpcTask") && !className.Contains("NpcFinder");
+                        bool isNpc = (className.Contains("Npc") || className.Contains("Soldier") || className.Contains("BattleUnit"))
+                            && !className.Contains("NpcHelper") && !className.Contains("NpcTask") && !className.Contains("NpcFinder");
 
                         if (!hasStuffId && !isNpc) continue;
 
@@ -424,6 +425,16 @@ internal static class EntityEditor
 
                         _entities.Add(entity);
                         found++;
+
+                        // 诊断日志：打印所有 NPC 类型实体的 className 和 _npc_type
+                        if (isNpc)
+                        {
+                            int diagNpcType = 0;
+                            if (fieldMap.TryGetValue("_npc_type", out var diagNtFe) && !diagNtFe.IsString && !diagNtFe.IsPointer)
+                                try { diagNpcType = ReadIl2CppInt(compPtr, diagNtFe.Offset); } catch { }
+                            Plugin.LogInfo($"[EntityEditor] NPC: {className} go={go.name} npcName={npcName} npcType={diagNpcType} stuffId={stuffId} guid={guid} npcId={entity.NpcId}");
+                        }
+
                         break; // 每个 GO 只取第一个匹配组件
                     }
                 }
@@ -2918,8 +2929,9 @@ internal static class EntityEditor
         bool first = true;
         foreach (var e in _entities)
         {
-            // 只显示 NPC 类型且属于我方 (hometownKingdomId == 1)
-            if (e.ClassName != "Npc" || e.HometownKingdomId != 1) continue;
+            // 只显示 NPC 类型（含 Soldier、BattleUnit 等敌兵类）
+            bool isNpcType = e.ClassName == "Npc" || e.ClassName.Contains("Soldier") || e.ClassName.Contains("BattleUnit");
+            if (!isNpcType) continue;
 
             if (!first) sb.Append(',');
             first = false;
