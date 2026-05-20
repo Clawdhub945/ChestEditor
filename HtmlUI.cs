@@ -1313,17 +1313,31 @@ function renderNpcPanel() {
     html += '<div style=""color:var(--text-muted);font-size:13px"">确保游戏已加载存档且有己方 NPC 存在</div>';
     html += '</div>';
   } else {
-    const workers = [], citizens = [], soldiers = [];
+    const grp={soldiers:[],children:[],prisoners:[],workers:[],nobles:[],lords:[],misc:[],outsiders:[],army:[],laborers:[]};
     for (const npc of npcListData) {
-      const st = npc.soldierTypeName || '';
-      if (st === '民兵') workers.push(npc);
-      else if (st === '市民') citizens.push(npc);
-      else soldiers.push(npc);
+      const t = npc.npcType || 0;
+      if (t===1901||t===9305||t===9307||t===9310||t===9311||t===9312||t===9313) grp.soldiers.push(npc);
+      else if ((t>=-3&&t<=-1)||(t>=9001&&t<=9199)) grp.children.push(npc);
+      else if (t===25) grp.prisoners.push(npc);
+      else if ((t>=1&&t<=22)||t===24||(t>=26&&t<=29)||(t>=31&&t<=49)||t===9301||t===9302||t===9303||t===9304||t===9306||t===9308||t===9309) grp.workers.push(npc);
+      else if (t===61) grp.nobles.push(npc);
+      else if (t===70) grp.lords.push(npc);
+      else if (t===23||t===30) grp.misc.push(npc);
+      else if (t>=-15&&t<=-5) grp.outsiders.push(npc);
+      else if (t===1001) grp.army.push(npc);
+      else if (t===0||(t>=9201&&t<=9299)) grp.laborers.push(npc);
+      else grp.laborers.push(npc);
     }
     const groups = [
-      {label:'民兵', icon:'&#x1F6E1;', color:'#f39c12', items:workers},
-      {label:'市民', icon:'&#x1F3D7;', color:'#27ae60', items:citizens},
-      {label:'士兵', icon:'&#x2694;', color:'#3498db', items:soldiers}
+      {label:'士兵', icon:'&#x2694;', color:'#e74c3c', items:grp.soldiers},
+      {label:'工人', icon:'&#x1F527;', color:'#f39c12', items:grp.workers},
+      {label:'杂工', icon:'&#x1F6E0;', color:'#95a5a6', items:grp.laborers},
+      {label:'儿童', icon:'&#x1F476;', color:'#e91e63', items:grp.children},
+      {label:'外来者', icon:'&#x1F464;', color:'#9b59b6', items:grp.outsiders},
+      {label:'贵族', icon:'&#x1F451;', color:'#f1c40f', items:grp.nobles},
+      {label:'领主', icon:'&#x1F3F0;', color:'#e67e22', items:grp.lords},
+      {label:'俘虏', icon:'&#x1F512;', color:'#7f8c8d', items:grp.prisoners},
+      {label:'石头人和小精灵', icon:'&#x1F47E;', color:'#1abc9c', items:grp.misc}
     ];
     html += '<div style=""flex:1;overflow-y:auto;min-height:0"">';
     for (const g of groups) {
@@ -1350,18 +1364,25 @@ function renderNpcPanel() {
   }
 }
 
+var NPC_TYPES={""-15"":""外乡人"",""-14"":""流浪者"",""-13"":""赏金猎人"",""-12"":""刺客"",""-11"":""寻宝者"",""-10"":""旅客"",""-9"":""商人头领"",""-7"":""商人"",""-5"":""流民"",""-3"":""婴儿"",""-2"":""儿童"",""-1"":""学生"",""0"":""杂工"",""1"":""建筑工"",""2"":""铁匠"",""29"":""冶炼工"",""3"":""酿造师"",""4"":""农民"",""5"":""裁缝"",""6"":""牧民"",""7"":""搬运工"",""8"":""采集者"",""10"":""渔民"",""11"":""矿工"",""12"":""猎人"",""13"":""石匠"",""14"":""劈柴工"",""24"":""蜂农"",""15"":""学者"",""16"":""护林人"",""17"":""医生"",""18"":""采药师"",""28"":""炼药师"",""19"":""先知"",""20"":""马车夫"",""22"":""厨师"",""27"":""服务员"",""23"":""小精灵"",""25"":""俘虏"",""26"":""水手"",""30"":""石头人"",""1001"":""士兵"",""1901"":""敌兵"",""61"":""贵族"",""70"":""领主"",""9001"":""蚁人儿童"",""9002"":""鼠人儿童"",""9003"":""猫人儿童"",""9004"":""羊人儿童"",""9005"":""狼人儿童"",""9006"":""猪人儿童"",""9007"":""精灵族儿童"",""9008"":""三眼人儿童"",""9009"":""蜥蜴人儿童"",""9101"":""三眼人学生"",""9102"":""蜥蜴人学生"",""9201"":""蚁人杂工"",""9202"":""鼠人杂工"",""9203"":""猫人杂工"",""9204"":""羊人杂工"",""9205"":""狼人成人"",""9206"":""猪人杂工"",""9207"":""精灵族成人"",""9208"":""三眼人成人"",""9209"":""蜥蜴人成人"",""9301"":""蚁人搬运工"",""9302"":""鼠人矿工"",""9303"":""猫人渔民"",""9304"":""羊人牧民"",""9305"":""狼人士兵"",""9306"":""猪人农民"",""9307"":""精灵法师"",""9308"":""三眼人先知"",""9309"":""蜥蜴人学者"",""9310"":""敌人狼人士兵"",""9311"":""敌人精灵法师"",""9312"":""三眼法师"",""9313"":""敌人三眼法师""};
+function getNpcTypeName(typeId) {
+  return NPC_TYPES[String(typeId)] || ('类型' + typeId);
+}
+
 function renderNpcCard(npc) {
   const ptrHash = npc.ptrHash || 0;
   const displayName = npc.npcName || npc.name || ('NPC#' + npc.guid);
   const soldierType = npc.soldierTypeName || '';
+  const npcTypeName = getNpcTypeName(npc.npcType || 0);
   const fieldCount = npc.fieldCount || 0;
   let h = '';
 
   h += '<div style=""background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius)"">';
 
-  // 头部：名称 + 兵种
+  // 头部：名称 + 兵种 + NPC类型
   h += '<div style=""display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--border)"">';
   h += '<span style=""font-weight:600;color:var(--text-primary);font-size:14px"">' + esc(displayName) + '</span>';
+  if (npcTypeName) h += '<span style=""font-size:11px;padding:1px 8px;border-radius:8px;background:var(--warning,#e67e22);color:#fff"">' + esc(npcTypeName) + '</span>';
   if (soldierType) h += '<span style=""font-size:11px;padding:1px 8px;border-radius:8px;background:var(--accent);color:#fff"">' + esc(soldierType) + '</span>';
   h += '<span style=""font-size:11px;color:var(--text-muted);margin-left:auto"">GUID:' + npc.guid + '</span>';
   h += '<button onclick=""event.stopPropagation();locateEditorEntity(' + ptrHash + ')"" style=""padding:3px 8px;background:var(--info,#3498db);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px"">定位</button>';

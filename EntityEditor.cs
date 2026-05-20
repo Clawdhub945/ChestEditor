@@ -2959,6 +2959,10 @@ internal static class EntityEditor
                     sb.Append($"\"age\":{ReadIl2CppInt(e.Ptr, ageFe.Offset)},");
             }
 
+            // 读取 _npc_type
+            if (e.FieldMeta.TryGetValue("_npc_type", out var npcTypeFe) && !npcTypeFe.IsString && !npcTypeFe.IsPointer)
+                sb.Append($"\"npcType\":{ReadIl2CppInt(e.Ptr, npcTypeFe.Offset)},");
+
             // 去掉末尾多余逗号
             if (sb[sb.Length - 1] == ',') sb.Length--;
             sb.Append('}');
