@@ -216,12 +216,9 @@ internal static class EntityEditor
         try
         {
             try { CacheIl2CppApi(); } catch (Exception ex) { Plugin.LogError($"[EntityEditor] CacheIl2CppApi error: {ex.Message}"); return; }
-            Plugin.LogInfo("[EntityEditor] 开始统一扫描...");
-
             GameObject[] allGOs;
             try { allGOs = Resources.FindObjectsOfTypeAll<GameObject>(); }
             catch (Exception ex) { Plugin.LogError($"[EntityEditor] FindObjectsOfTypeAll error: {ex.Message}"); return; }
-            Plugin.LogInfo($"[EntityEditor] 共 {allGOs.Length} 个 GameObject");
 
             var seenPtrHash = new HashSet<int>();
             int found = 0;
@@ -269,7 +266,6 @@ internal static class EntityEditor
                                 d2++;
                             }
                             _classFieldCache[compClass] = fieldMap;
-                            Plugin.LogInfo($"[EntityEditor] 强制重枚举 {className}: {fieldMap.Count} 字段");
                         }
 
                         // 判断是否匹配：有 stuff_id 字段 且 stuffId>0,guid>0  OR  类名含 Npc/Soldier/BattleUnit
@@ -425,16 +421,6 @@ internal static class EntityEditor
 
                         _entities.Add(entity);
                         found++;
-
-                        // 诊断日志：打印所有 NPC 类型实体的 className 和 _npc_type
-                        if (isNpc)
-                        {
-                            int diagNpcType = 0;
-                            if (fieldMap.TryGetValue("_npc_type", out var diagNtFe) && !diagNtFe.IsString && !diagNtFe.IsPointer)
-                                try { diagNpcType = ReadIl2CppInt(compPtr, diagNtFe.Offset); } catch { }
-                            Plugin.LogInfo($"[EntityEditor] NPC: {className} go={go.name} npcName={npcName} npcType={diagNpcType} stuffId={stuffId} guid={guid} npcId={entity.NpcId}");
-                        }
-
                         break; // 每个 GO 只取第一个匹配组件
                     }
                 }
@@ -447,13 +433,6 @@ internal static class EntityEditor
                 int cmp = string.Compare(a.ClassName, b.ClassName, StringComparison.Ordinal);
                 return cmp != 0 ? cmp : a.StuffId.CompareTo(b.StuffId);
             });
-
-            Plugin.LogInfo($"[EntityEditor] 完成, 找到 {found} 个实体");
-            for (int i = 0; i < Math.Min(20, _entities.Count); i++)
-            {
-                var e = _entities[i];
-                Plugin.LogInfo($"[EntityEditor]   {e.GoName} [{e.ClassName}] guid={e.Guid} stuffId={e.StuffId} npcName={e.NpcName} fields={e.FieldMeta.Count}");
-            }
         }
         catch (Exception ex) { Plugin.LogError($"[EntityEditor] 异常: {ex.Message}\n{ex.StackTrace}"); }
     }
@@ -501,21 +480,9 @@ internal static class EntityEditor
     /// </summary>
     internal static string GetFieldsJson(int ptrHash)
     {
-        Plugin.LogInfo($"[GetFieldsJson] ptrHash={ptrHash}, _entities.Count={_entities.Count}");
         foreach (var e in _entities)
         {
             if (e.PtrHash != ptrHash) continue;
-            Plugin.LogInfo($"[GetFieldsJson] 匹配: {e.ClassName} guid={e.Guid} FieldMeta.Count={e.FieldMeta.Count}");
-            int ptrCnt = 0, nonPtrCnt = 0;
-            foreach (var kv in e.FieldMeta) { if (kv.Value.IsPointer) ptrCnt++; else nonPtrCnt++; }
-            Plugin.LogInfo($"[GetFieldsJson] ptr={ptrCnt} nonPtr={nonPtrCnt}");
-            // 显示前5个字段的类型
-            int shown = 0;
-            foreach (var kv in e.FieldMeta) {
-                if (shown >= 5) break;
-                Plugin.LogInfo($"[GetFieldsJson]   {kv.Key}: type={kv.Value.TypeName} isFloat={kv.Value.IsFloat} isString={kv.Value.IsString} isPtr={kv.Value.IsPointer}");
-                shown++;
-            }
 
             var sb = new System.Text.StringBuilder();
             sb.Append('{');
@@ -554,7 +521,6 @@ internal static class EntityEditor
             }
             sb.Append('}');
             var result = sb.ToString();
-            Plugin.LogInfo($"[GetFieldsJson] 返回 {result.Length} 字节, keys约{nonPtrCnt}个");
             return result;
         }
         return "{\"error\":\"not found\"}";
@@ -2645,7 +2611,6 @@ internal static class EntityEditor
         if (guid <= 0 || string.IsNullOrEmpty(field)) return;
         string key = $"{guid}:{field}";
         _pendingModifications[key] = value;
-        Plugin.LogInfo($"[EntityEditor] RecordModification: {key} = {value}");
         SaveModificationsToDisk();
     }
 
@@ -2654,7 +2619,6 @@ internal static class EntityEditor
         if (npcId <= 0 || string.IsNullOrEmpty(field)) return;
         string key = $"npc:{npcId}:{field}";
         _pendingModifications[key] = value;
-        Plugin.LogInfo($"[EntityEditor] RecordModificationById: {key} = {value}");
         SaveModificationsToDisk();
     }
 
@@ -2756,10 +2720,8 @@ internal static class EntityEditor
         try
         {
             string path = GetSavePath();
-            Plugin.LogInfo($"[EntityEditor] 加载修改文件: {path}, 存在={System.IO.File.Exists(path)}");
             if (!System.IO.File.Exists(path)) return;
             string json = System.IO.File.ReadAllText(path);
-            Plugin.LogInfo($"[EntityEditor] 修改文件内容长度: {json.Length}");
             if (string.IsNullOrWhiteSpace(json) || json == "{}") return;
 
             // 简单 JSON 解析: {"key":value, ...}
@@ -2799,9 +2761,6 @@ internal static class EntityEditor
                 else if (field == "hp") _hpOverrides[npcId] = kv.Value;
                 else if (field == "hp_total") _hpTotalOverrides[npcId] = kv.Value;
             }
-            Plugin.LogInfo($"[EntityEditor] 从磁盘加载 {_pendingModifications.Count} 条修改, 速度{_speedOverrides.Count} 血量{_hpOverrides.Count} 血量上限{_hpTotalOverrides.Count}");
-            foreach (var kv in _pendingModifications)
-                Plugin.LogInfo($"[EntityEditor]   {kv.Key} = {kv.Value}");
         }
         catch (Exception ex) { Plugin.LogError($"[EntityEditor] 加载修改失败: {ex.Message}"); }
     }
@@ -2901,7 +2860,6 @@ internal static class EntityEditor
             }
             catch { missed++; }
         }
-        Plugin.LogInfo($"[EntityEditor] ApplyPendingModifications: applied={applied}, missed={missed}");
     }
 
     /// <summary>
@@ -2910,10 +2868,7 @@ internal static class EntityEditor
     internal static string ReapplyModifications()
     {
         if (_pendingModifications.Count == 0)
-        {
-            Plugin.LogInfo("[EntityEditor] ReapplyModifications: 无待应用修改");
             return "{\"ok\":true,\"applied\":0}";
-        }
         ScanAll();
         ApplyPendingModifications();
         return "{\"ok\":true}";
@@ -2952,7 +2907,6 @@ internal static class EntityEditor
             foreach (var kv in e.FieldMeta)
                 if (!kv.Value.IsPointer) slimCount++; else pointerCount++;
             sb.Append($"\"fieldCount\":{slimCount},");
-            Plugin.LogInfo($"[GetNpcListJson] {e.NpcName} guid={e.Guid} ptrHash={e.PtrHash} className={e.ClassName} total={e.FieldMeta.Count} slim={slimCount} ptr={pointerCount}");
 
             // speed, hp, hp_total
             if (e.FieldMeta.TryGetValue("speed", out var speedFe) && speedFe.IsFloat)

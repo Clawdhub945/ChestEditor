@@ -131,7 +131,6 @@ public partial class ChestEditorComponent : MonoBehaviour
             {
                 try
                 {
-                    Plugin.LogInfo($"[ChestEditor] 重应用 NPC 修改 (剩余{ _reapplyRemaining}次)...");
                     EntityEditor.ReapplyModifications();
                 }
                 catch (Exception ex) { Plugin.LogError($"[ChestEditor] NPC 修改重应用失败: {ex.Message}"); }
