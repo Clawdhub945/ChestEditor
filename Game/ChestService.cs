@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -7,51 +6,25 @@ using System.Text;
 using UnityEngine;
 using static ChestEditor.Core.JsonUtil;
 using static ChestEditor.Interop.Il2CppApi;
+using static ChestEditor.Interop.Il2CppInvoke;
+using static ChestEditor.Interop.Il2CppMemory;
 using static ChestEditor.Interop.ManagedReflect;
 
-namespace ChestEditor;
+namespace ChestEditor.Game;
 
-public partial class ChestEditorComponent : MonoBehaviour
+/// <summary>
+/// 箱子/背包：设施扫描、物品增删、计划库存、筛选、定位、JSON 构建
+/// </summary>
+internal static class ChestService
 {
-    internal static ChestEditorComponent? Instance;
 
-    // HTTP 服务器写请求队列
-    internal struct WriteRequest
-    {
-        public int ChestIndex; // >=0:操作箱子, -1:刷新, -2:筛选切换, -3:筛选全选, -4:设置计划库存
-        public int StuffId;
-        public int Count;
-        public bool IsAdd;
-        public int ExtraIndex; // 计划库存操作时存储目标箱子索引, 龙素材操作时存储stuffId
-        public float ExtraFloat1; // 定位功能用: x坐标
-        public float ExtraFloat2; // 定位功能用: y坐标
-        public int[]? NatureIds; // 召唤龙时的nature列表
-        public string? ResultJson;
-        public System.Threading.ManualResetEventSlim Signal;
-    }
-    internal readonly ConcurrentQueue<WriteRequest> WriteQueue = new();
+    internal struct ItemInfo { public int StuffId; public int Count; }
 
-    // JSON 缓存（主线程写，HTTP 线程读，volatile 保证可见性）
-    internal volatile string ChestsJson = "[]";
-    internal volatile string ItemsJson = "[]";
-    internal volatile string DragonBagJson = "[]";
-    internal volatile string DragonEntitiesJson = "[]";
-    internal volatile string EntityEditorJson = "[]";
-    internal volatile string EntityEditorFieldsJson = "{}";
-    internal volatile string NpcListJson = "[]";
-    internal volatile string NpcFieldsJson = "{}";
-    internal volatile string? LastSummonResult;
+    internal struct ChestInfo { public int Guid; public int StuffId; public string Name; public List<ItemInfo> Items; public int MaxCap; public int UsedCap; public float PosX; public float PosY; public object Facility; public List<ItemInfo> PlanStock; }
 
-    // 读档后延迟重应用 NPC 修改（多次，防止被游戏覆盖）
-    private int _reapplyCountdown;
-    private int _reapplyRemaining;
-    private bool _reapplyPending;
+    private static readonly List<ChestInfo> _chests = new();
+    internal static IReadOnlyList<ChestInfo> Chests => _chests;
 
-    // 龙素材物品 ID 列表
-    private static readonly int[] DragonItemIds = { 815001, 815002, 815003, 815004, 815005 };
-
-    private List<ChestInfo> _chests = new();
-    private HashSet<int> _collapsedChests = new();
 
     // 筛选
     private static readonly Dictionary<int, (string Name, bool Enabled)> _filterItems = new()
@@ -92,386 +65,15 @@ public partial class ChestEditorComponent : MonoBehaviour
         { 111005, ("永恒圣殿", false) },
     };
 
-    internal struct ItemInfo { public int StuffId; public int Count; }
-    internal struct ChestInfo { public int Guid; public int StuffId; public string Name; public List<ItemInfo> Items; public int MaxCap; public int UsedCap; public float PosX; public float PosY; public object Facility; public List<ItemInfo> PlanStock; }
 
     private static List<KeyValuePair<int, string>>? _allItems;
+
 
     // 缓存方法
     private static MethodInfo? _addStuffMethod;
     private static MethodInfo? _removeStuffMethod;
     private static MethodInfo? _addStuffNoNotifyMethod;
     private static bool _methodCached;
-
-    public ChestEditorComponent(IntPtr ptr) : base(ptr)
-    {
-        Instance = this;
-    }
-
-    internal List<ChestInfo> GetChests() => _chests;
-
-    internal void ScheduleNpcReapply()
-    {
-        _reapplyCountdown = 60;
-        _reapplyRemaining = 5; // 重应用5次，确保不被游戏覆盖
-        _reapplyPending = true;
-        Plugin.LogInfo("[ChestEditor] 已调度 NPC 修改重应用 x5...");
-    }
-
-    private void Update()
-    {
-        if (Input.GetKeyDown(KeyCode.F11))
-        {
-            try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("http://localhost:8765/") { UseShellExecute = true }); }
-            catch (Exception ex) { Plugin.LogError($"打开浏览器失败: {ex.Message}"); }
-        }
-
-        // 读档后延迟重应用 NPC 修改（多次）
-        if (_reapplyPending)
-        {
-            _reapplyCountdown--;
-            if (_reapplyCountdown <= 0)
-            {
-                try
-                {
-                    EntityEditor.ReapplyModifications();
-                }
-                catch (Exception ex) { Plugin.LogError($"[ChestEditor] NPC 修改重应用失败: {ex.Message}"); }
-                _reapplyRemaining--;
-                if (_reapplyRemaining <= 0)
-                    _reapplyPending = false;
-                else
-                    _reapplyCountdown = 120; // 下一次等120帧
-            }
-        }
-
-        // 每帧更新 JSON 缓存
-        UpdateJsonCache();
-
-        // 处理 HTTP 写请求
-        ProcessWriteRequests();
-    }
-
-    private void UpdateJsonCache()
-    {
-        try
-        {
-            // 龙系统一次性诊断（等存档加载后再执行）
-            if (SaveLoadPatches.CachedTerritory != null)
-                Il2CppHelper.DiagnoseDragonSystem();
-            var sb = new StringBuilder();
-            sb.Append('[');
-            for (int i = 0; i < _chests.Count; i++)
-            {
-                var c = _chests[i];
-                if (i > 0) sb.Append(',');
-                sb.Append($"{{\"index\":{i},\"guid\":{c.Guid},\"stuffId\":{c.StuffId},\"name\":\"{Escape(c.Name)}\",\"maxCap\":{c.MaxCap},\"usedCap\":{c.UsedCap},\"posX\":{c.PosX.ToString(System.Globalization.CultureInfo.InvariantCulture)},\"posY\":{c.PosY.ToString(System.Globalization.CultureInfo.InvariantCulture)},\"items\":[");
-                for (int j = 0; j < c.Items.Count; j++)
-                {
-                    var item = c.Items[j];
-                    if (j > 0) sb.Append(',');
-                    sb.Append($"{{\"stuffId\":{item.StuffId},\"name\":\"{Escape(ItemNames.GetName(item.StuffId))}\",\"count\":{item.Count}}}");
-                }
-                sb.Append("],\"planStock\":[");
-                if (c.PlanStock != null)
-                {
-                    for (int j = 0; j < c.PlanStock.Count; j++)
-                    {
-                        if (j > 0) sb.Append(',');
-                        var ps = c.PlanStock[j];
-                        sb.Append($"{{\"stuffId\":{ps.StuffId},\"name\":\"{Escape(ItemNames.GetName(ps.StuffId))}\",\"count\":{ps.Count}}}");
-                    }
-                }
-                sb.Append("]}");
-            }
-            sb.Append(']');
-            ChestsJson = sb.ToString();
-
-            // 物品列表（用于添加物品下拉）
-            if (_allItems == null)
-                _allItems = ItemNames.GetAllItems().ToList();
-            if (_allItems != null)
-            {
-                var sb2 = new StringBuilder();
-                sb2.Append('[');
-                bool first = true;
-                foreach (var kvp in _allItems)
-                {
-                    if (!first) sb2.Append(',');
-                    first = false;
-                    sb2.Append($"{{\"stuffId\":{kvp.Key},\"name\":\"{Escape(kvp.Value)}\"}}");
-                }
-                sb2.Append(']');
-                ItemsJson = sb2.ToString();
-            }
-
-            // 龙素材背包 JSON
-            UpdateDragonBagJson();
-        }
-        catch { }
-    }
-
-    private void UpdateDragonBagJson()
-    {
-        try
-        {
-            // 从游戏实时读取 dragon_stuff_bag 内容
-            var liveItems = Il2CppHelper.ReadDragonBagLive();
-            // 合并本地缓存（本地缓存跟踪通过 mod 修改过的值）
-            var cache = Il2CppHelper.GetDragonItemCache();
-            var merged = new Dictionary<int, int>();
-            foreach (var kv in liveItems)
-                merged[kv.Key] = kv.Value;
-            foreach (var kv in cache)
-            {
-                if (kv.Value > 0 && !merged.ContainsKey(kv.Key))
-                    merged[kv.Key] = kv.Value;
-            }
-
-            var sb = new StringBuilder();
-            sb.Append('[');
-            bool first = true;
-            foreach (var kv in merged.OrderByDescending(x => x.Value))
-            {
-                if (!first) sb.Append(',');
-                first = false;
-                sb.Append($"{{\"stuffId\":{kv.Key},\"name\":\"{Escape(ItemNames.GetName(kv.Key))}\",\"count\":{kv.Value}}}");
-            }
-            sb.Append(']');
-            DragonBagJson = sb.ToString();
-        }
-        catch { DragonBagJson = "[]"; }
-    }
-
-    private static string Escape(string s) => s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "");
-
-    internal static string GetFiltersJson()
-    {
-        var sb = new StringBuilder();
-        sb.Append('[');
-        bool first = true;
-        foreach (var kvp in _filterItems)
-        {
-            if (!first) sb.Append(',');
-            first = false;
-            sb.Append($"{{\"stuffId\":{kvp.Key},\"name\":\"{Escape(kvp.Value.Name)}\",\"enabled\":{(kvp.Value.Enabled ? "true" : "false")}}}");
-        }
-        sb.Append(']');
-        return sb.ToString();
-    }
-
-    private void ProcessWriteRequests()
-    {
-        while (WriteQueue.TryDequeue(out var req))
-        {
-            try
-            {
-                // ChestIndex == -1 表示刷新操作, -2=筛选切换, -3=全选/清空筛选
-                if (req.ChestIndex == -1)
-                {
-                    RefreshChestList();
-                    req.ResultJson = "{\"ok\":true}";
-                }
-                else if (req.ChestIndex == -2)
-                {
-                    if (_filterItems.ContainsKey(req.StuffId))
-                    {
-                        var (name, enabled) = _filterItems[req.StuffId];
-                        _filterItems[req.StuffId] = (name, !enabled);
-                    }
-                    RefreshChestList();
-                    req.ResultJson = "{\"ok\":true}";
-                }
-                else if (req.ChestIndex == -3)
-                {
-                    foreach (var k in _filterItems.Keys.ToList())
-                        _filterItems[k] = (_filterItems[k].Name, req.IsAdd);
-                    RefreshChestList();
-                    req.ResultJson = "{\"ok\":true}";
-                }
-                else if (req.ChestIndex == -4)
-                {
-                    // 设置计划库存: ExtraIndex=箱子索引, StuffId=物品ID, Count=新数量
-                    if (req.ExtraIndex >= 0 && req.ExtraIndex < _chests.Count)
-                    {
-                        Il2CppHelper.SetStuffPlanValue(_chests[req.ExtraIndex].Facility, req.StuffId, req.Count);
-                        RefreshChestList();
-                    }
-                    req.ResultJson = "{\"ok\":true}";
-                }
-                else if (req.ChestIndex == -5)
-                {
-                    // 定位设施: ExtraIndex=箱子索引
-                    if (req.ExtraIndex >= 0 && req.ExtraIndex < _chests.Count)
-                    {
-                        var c = _chests[req.ExtraIndex];
-                        LocateFacility(c.PosX, c.PosY);
-                        req.ResultJson = $"{{\"ok\":true,\"posX\":{c.PosX.ToString(System.Globalization.CultureInfo.InvariantCulture)},\"posY\":{c.PosY.ToString(System.Globalization.CultureInfo.InvariantCulture)}}}";
-                    }
-                    else
-                    {
-                        req.ResultJson = "{\"error\":\"chest not found\"}";
-                    }
-                }
-                else if (req.ChestIndex == -6)
-                {
-                    // 设置龙素材数量: ExtraIndex=stuffId, Count=新数量
-                    Il2CppHelper.SetDragonItemQuantity(req.ExtraIndex, req.Count);
-                    UpdateDragonBagJson();
-                    req.ResultJson = DragonBagJson;
-                }
-                else if (req.ChestIndex == -7)
-                {
-                    // 召唤龙: ExtraIndex=dragon_stuff_id, NatureIds=nature列表
-                    string result = Il2CppHelper.SummonDragon(req.ExtraIndex, req.NatureIds);
-                    LastSummonResult = $"{{\"result\":\"{Escape(result)}\"}}";
-                    req.ResultJson = LastSummonResult;
-                }
-                else if (req.ChestIndex == -8)
-                {
-                    // 读取龙实体属性（主线程执行避免GC崩溃）
-                    Plugin.LogInfo("[MainThread] 开始读取龙实体...");
-                    DragonEntitiesJson = Il2CppHelper.GetDragonEntitiesJson();
-                    Plugin.LogInfo($"[MainThread] 龙实体读取完成, JSON长度={DragonEntitiesJson.Length}");
-                    req.ResultJson = DragonEntitiesJson;
-                }
-                else if (req.ChestIndex == -9)
-                {
-                    // 设置龙实体属性（主线程执行）
-                    string field = req.ResultJson ?? "";
-                    float val = BitConverter.Int32BitsToSingle(req.Count);
-                    string result = Il2CppHelper.SetDragonEntityField(req.ExtraIndex, field, val);
-                    req.ResultJson = result == "ok" ? "{\"ok\":true}" : $"{{\"error\":\"{Escape(result)}\"}}";
-                }
-                else if (req.ChestIndex == -24)
-                {
-                    // 统一实体编辑器扫描（主线程执行）
-                    Plugin.LogInfo("[MainThread] 开始统一实体编辑器扫描...");
-                    EntityEditor.ScanAll();
-                    EntityEditor.ApplyPendingModifications();
-                    EntityEditorJson = EntityEditor.GetAllJson();
-                    Plugin.LogInfo($"[MainThread] 统一扫描完成, JSON长度={EntityEditorJson.Length}");
-                    req.ResultJson = "{\"ok\":true}";
-                }
-                else if (req.ChestIndex == -25)
-                {
-                    // 读取统一扫描结果
-                    req.ResultJson = EntityEditorJson;
-                }
-                else if (req.ChestIndex == -26)
-                {
-                    // 读取单个实体精简字段
-                    EntityEditorFieldsJson = EntityEditor.GetFieldsJson(req.ExtraIndex);
-                    req.ResultJson = EntityEditorFieldsJson;
-                }
-                else if (req.ChestIndex == -27)
-                {
-                    // 设置实体字段（主线程执行）
-                    string field = req.ResultJson ?? "";
-                    float val = BitConverter.Int32BitsToSingle(req.Count);
-                    string result = EntityEditor.SetField(req.ExtraIndex, field, val);
-                    req.ResultJson = result == "ok" ? "{\"ok\":true}" : $"{{\"error\":\"{Escape(result)}\"}}";
-                }
-                else if (req.ChestIndex == -28)
-                {
-                    // 消除实体（主线程执行）
-                    string result = EntityEditor.DestroyEntity(req.ExtraIndex);
-                    if (result == "ok") EntityEditorJson = EntityEditor.GetAllJson();
-                    req.ResultJson = result == "ok" ? "{\"ok\":true}" : $"{{\"error\":\"{Escape(result)}\"}}";
-                }
-                else if (req.ChestIndex == -29)
-                {
-                    // 列出实体方法（调试）
-                    string methods = EntityEditor.ListMethods(req.ExtraIndex);
-                    Plugin.LogInfo($"[EntityEditor] ListMethods ptrHash={req.ExtraIndex}:\n{methods}");
-                    req.ResultJson = $"{{\"methods\":\"{Escape(methods)}\"}}";
-                }
-                else if (req.ChestIndex == -30)
-                {
-                    // 定位实体: ExtraFloat1=x, ExtraFloat2=y
-                    LocateFacility(req.ExtraFloat1, req.ExtraFloat2);
-                    req.ResultJson = $"{{\"ok\":true,\"x\":{req.ExtraFloat1.ToString(System.Globalization.CultureInfo.InvariantCulture)},\"y\":{req.ExtraFloat2.ToString(System.Globalization.CultureInfo.InvariantCulture)}}}";
-                }
-                else if (req.ChestIndex == -31)
-                {
-                    // NPC 扫描：先做全量扫描，再返回我方 NPC 列表
-                    Plugin.LogInfo("[MainThread] 开始 NPC 扫描...");
-                    EntityEditor.ScanAll();
-                    EntityEditor.ApplyPendingModifications();
-                    NpcListJson = EntityEditor.GetNpcListJson();
-                    Plugin.LogInfo($"[MainThread] NPC 扫描完成, JSON长度={NpcListJson.Length}");
-                    req.ResultJson = NpcListJson;
-                }
-                else if (req.ChestIndex == -32)
-                {
-                    // NPC 字段读取: ExtraIndex=ptrHash
-                    NpcFieldsJson = EntityEditor.GetFieldsJson(req.ExtraIndex);
-                    req.ResultJson = NpcFieldsJson;
-                    Plugin.LogInfo($"[MainThread] -32 完成, NpcFieldsJson={NpcFieldsJson.Length} 字节, ptrHash={req.ExtraIndex}");
-                }
-                else if (req.ChestIndex == -33)
-                {
-                    // NPC 字段修改: ExtraIndex=ptrHash, ResultJson=fieldName, Count=floatBits
-                    string field = req.ResultJson ?? "";
-                    float val = BitConverter.Int32BitsToSingle(req.Count);
-                    string result = EntityEditor.SetNpcField(req.ExtraIndex, field, val);
-                    req.ResultJson = result == "ok" ? "{\"ok\":true}" : $"{{\"error\":\"{Escape(result)}\"}}";
-                }
-                else if (req.IsAdd)
-                {
-                    AddAndUpdate(req.ChestIndex, req.StuffId, req.Count);
-                }
-                else
-                {
-                    RemoveAndUpdate(req.ChestIndex, req.StuffId, req.Count);
-                }
-
-                // 返回更新后的箱子 JSON（非刷新操作时）
-                if (req.ChestIndex >= 0 && req.ChestIndex < _chests.Count)
-                {
-                    var c = _chests[req.ChestIndex];
-                    var sb = new StringBuilder();
-                    sb.Append("{\"index\":").Append(req.ChestIndex);
-                    sb.Append(",\"guid\":").Append(c.Guid);
-                    sb.Append(",\"stuffId\":").Append(c.StuffId);
-                    sb.Append(",\"name\":\"").Append(Escape(c.Name)).Append('"');
-                    sb.Append(",\"maxCap\":").Append(c.MaxCap);
-                    sb.Append(",\"usedCap\":").Append(c.UsedCap);
-                    sb.Append(",\"items\":[");
-                    for (int j = 0; j < c.Items.Count; j++)
-                    {
-                        var item = c.Items[j];
-                        if (j > 0) sb.Append(',');
-                        sb.Append($"{{\"stuffId\":{item.StuffId},\"name\":\"{Escape(ItemNames.GetName(item.StuffId))}\",\"count\":{item.Count}}}");
-                    }
-                    sb.Append("],\"planStock\":[");
-                    if (c.PlanStock != null)
-                    {
-                        for (int j = 0; j < c.PlanStock.Count; j++)
-                        {
-                            if (j > 0) sb.Append(',');
-                            var ps = c.PlanStock[j];
-                            sb.Append($"{{\"stuffId\":{ps.StuffId},\"name\":\"{Escape(ItemNames.GetName(ps.StuffId))}\",\"count\":{ps.Count}}}");
-                        }
-                    }
-                    sb.Append("]}");
-                    req.ResultJson = sb.ToString();
-                }
-                else if (req.ChestIndex >= 0)
-                {
-                    req.ResultJson = "{\"error\":\"chest not found\"}";
-                }
-            }
-            catch (Exception ex)
-            {
-                req.ResultJson = $"{{\"error\":\"{Escape(ex.Message)}\"}}";
-            }
-            finally
-            {
-                req.Signal.Set();
-            }
-        }
-    }
 
     // ====== 物品操作方法 ======
 
@@ -532,7 +134,8 @@ public partial class ChestEditorComponent : MonoBehaviour
         }
     }
 
-    internal void RemoveAndUpdate(int chestIndex, int stuffId, int count)
+
+    internal static void RemoveAndUpdate(int chestIndex, int stuffId, int count)
     {
         if (chestIndex < 0 || chestIndex >= _chests.Count) return;
 
@@ -567,7 +170,8 @@ public partial class ChestEditorComponent : MonoBehaviour
         }
     }
 
-    internal void AddAndUpdate(int chestIndex, int stuffId, int count)
+
+    internal static void AddAndUpdate(int chestIndex, int stuffId, int count)
     {
         if (chestIndex < 0 || chestIndex >= _chests.Count) return;
 
@@ -609,7 +213,8 @@ public partial class ChestEditorComponent : MonoBehaviour
         }
     }
 
-    internal void UpdateChestItems(int chestIndex)
+
+    internal static void UpdateChestItems(int chestIndex)
     {
         if (chestIndex < 0 || chestIndex >= _chests.Count) return;
 
@@ -634,14 +239,13 @@ public partial class ChestEditorComponent : MonoBehaviour
         };
     }
 
+
     // ====== 核心逻辑 ======
 
-    internal void RefreshChestList()
+    internal static void RefreshChestList()
     {
         _chests.Clear();
-        _collapsedChests.Clear();
-        Il2CppHelper.ClearDebuggedTypes();
-
+        
         try
         {
             var territory = SaveLoadPatches.CachedTerritory;
@@ -670,11 +274,6 @@ public partial class ChestEditorComponent : MonoBehaviour
 
                 int stuffId = GetInt(facility, "stuff_id");
 
-                // 调试：检查 stuff_plan_dic 是否存在（只检查 _filterItems 中的）
-                if (_filterItems.ContainsKey(stuffId))
-                    Il2CppHelper.DebugStuffPlanDic(facility, stuffId,
-                        _filterItems[stuffId].Name);
-
                 bool show = _filterItems.ContainsKey(stuffId) && _filterItems[stuffId].Enabled;
                 if (!show) continue;
 
@@ -700,7 +299,7 @@ public partial class ChestEditorComponent : MonoBehaviour
                 float px = 0, py = 0;
                 ReadFacilityPos(facility, ref px, ref py);
 
-                var planDic = Il2CppHelper.ReadStuffPlanDic(facility);
+                var planDic = ReadStuffPlanDic(facility);
                 var planStock = new List<ItemInfo>();
                 if (planDic != null)
                     foreach (var kv in planDic)
@@ -721,9 +320,6 @@ public partial class ChestEditorComponent : MonoBehaviour
                 });
             }
 
-            // 默认全部收起
-            foreach (var c in _chests)
-                _collapsedChests.Add(c.Guid);
 
 
         }
@@ -733,7 +329,8 @@ public partial class ChestEditorComponent : MonoBehaviour
         }
     }
 
-    private List<ItemInfo> ReadItemsFromBag(object facility)
+
+    private static List<ItemInfo> ReadItemsFromBag(object facility)
     {
         var items = new List<ItemInfo>();
 
@@ -949,29 +546,8 @@ public partial class ChestEditorComponent : MonoBehaviour
         return items;
     }
 
-    private static int GetListCount(object list)
-    {
-        try
-        {
-            var countProp = list.GetType().GetProperty("Count", BF);
-            if (countProp != null) return (int)(countProp.GetValue(list) ?? 0);
-        }
-        catch { }
-        return 0;
-    }
 
-    private static int GetListItem(object list, int index)
-    {
-        try
-        {
-            var getItem = list.GetType().GetMethod("get_Item", BF);
-            if (getItem != null) return (int)(getItem.Invoke(list, new object[] { index }) ?? 0);
-        }
-        catch { }
-        return 0;
-    }
-
-    private void ReadCapacityFromBag(object facility, ref int maxCap, ref int usedCap)
+    private static void ReadCapacityFromBag(object facility, ref int maxCap, ref int usedCap)
     {
         try
         {
@@ -988,7 +564,8 @@ public partial class ChestEditorComponent : MonoBehaviour
         catch { }
     }
 
-    private void ReadFacilityPos(object facility, ref float px, ref float py)
+
+    private static void ReadFacilityPos(object facility, ref float px, ref float py)
     {
         try
         {
@@ -1019,7 +596,8 @@ public partial class ChestEditorComponent : MonoBehaviour
         catch { }
     }
 
-    private void LocateFacility(float targetX, float targetY)
+
+    internal static void LocateFacility(float targetX, float targetY)
     {
         try
         {
@@ -1088,7 +666,7 @@ public partial class ChestEditorComponent : MonoBehaviour
                 else
                 {
                     // 直接设置 camera_con.position
-                    IntPtr cameraConPtr = EntityEditor.ReadFieldSafe(chPtr, chClass, "camera_con");
+                    IntPtr cameraConPtr = ReadFieldSafe(chPtr, chClass, "camera_con");
                     if (cameraConPtr != IntPtr.Zero)
                     {
                         var transform = GetProp(cameraHelper, "camera_con");
@@ -1118,6 +696,7 @@ public partial class ChestEditorComponent : MonoBehaviour
     }
 
 
+
     private static void FallbackLocate(float targetX, float targetY)
     {
         try
@@ -1130,6 +709,250 @@ public partial class ChestEditorComponent : MonoBehaviour
             cam.transform.position = pos;
         }
         catch { }
+    }
+
+
+    internal static string GetFiltersJson()
+    {
+        var sb = new StringBuilder();
+        sb.Append('[');
+        bool first = true;
+        foreach (var kvp in _filterItems)
+        {
+            if (!first) sb.Append(',');
+            first = false;
+            sb.Append($"{{\"stuffId\":{kvp.Key},\"name\":\"{Escape(kvp.Value.Name)}\",\"enabled\":{(kvp.Value.Enabled ? "true" : "false")}}}");
+        }
+        sb.Append(']');
+        return sb.ToString();
+    }
+
+
+    internal static List<KeyValuePair<int, int>>? ReadStuffPlanDic(object facility)
+    {
+        try
+        {
+            if (facility is not Il2CppInterop.Runtime.InteropTypes.Il2CppObjectBase il2cppObj) return null;
+            IntPtr objPtr = Il2CppInterop.Runtime.IL2CPP.Il2CppObjectBaseToPtrNotNull(il2cppObj);
+            var methodPtr = FindIl2CppMethod(facility, "GetStuffPlanDic");
+            if (methodPtr == IntPtr.Zero) return null;
+
+            IntPtr dictPtr;
+            unsafe
+            {
+                IntPtr exception = IntPtr.Zero;
+                void** args = null;
+                dictPtr = Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(methodPtr, objPtr, args, ref exception);
+            }
+            if (dictPtr == IntPtr.Zero) return null;
+
+            var dict = new Il2CppSystem.Collections.Generic.Dictionary<int, int>(dictPtr);
+            var result = new List<KeyValuePair<int, int>>();
+            var enumerator = dict.GetEnumerator();
+            while (enumerator.MoveNext())
+                result.Add(new KeyValuePair<int, int>(enumerator.Current.Key, enumerator.Current.Value));
+            return result;
+        }
+        catch { return null; }
+    }
+
+
+    internal static void Il2CppDictSetItem(IntPtr dictPtr, int key, int value)
+    {
+        IntPtr dictClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(dictPtr);
+        string className = System.Runtime.InteropServices.Marshal.PtrToStringAnsi(
+            Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_name(dictClass)) ?? "?";
+        Plugin.LogInfo($"[Plan] dictClass={className}, dictPtr={dictPtr}");
+
+        IntPtr iter = IntPtr.Zero;
+        IntPtr m;
+        while ((m = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_methods(dictClass, ref iter)) != IntPtr.Zero)
+        {
+            string mName = System.Runtime.InteropServices.Marshal.PtrToStringAnsi(
+                Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_name(m)) ?? "?";
+            if (mName.Contains("Item") || mName.Contains("Remove") || mName.Contains("Add") || mName.Contains("Set"))
+                Plugin.LogInfo($"[Plan] 方法: {mName}");
+        }
+
+        IntPtr setItemMethod = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(dictClass, "set_Item", 2);
+        Plugin.LogInfo($"[Plan] set_Item ptr={setItemMethod}");
+        if (setItemMethod == IntPtr.Zero) return;
+
+        unsafe
+        {
+            int k = key, v = value;
+            void** args = stackalloc void*[2];
+            args[0] = &k;
+            args[1] = &v;
+            IntPtr exception = IntPtr.Zero;
+            Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(setItemMethod, dictPtr, args, ref exception);
+            Plugin.LogInfo($"[Plan] set_Item({key},{value}) exception={exception}");
+        }
+    }
+
+
+    internal static void Il2CppDictRemove(IntPtr dictPtr, int key)
+    {
+        IntPtr dictClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(dictPtr);
+        IntPtr removeMethod = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(dictClass, "Remove", 1);
+        Plugin.LogInfo($"[Plan] Remove ptr={removeMethod}");
+        if (removeMethod == IntPtr.Zero) return;
+
+        unsafe
+        {
+            int k = key;
+            void** args = stackalloc void*[1];
+            args[0] = &k;
+            IntPtr exception = IntPtr.Zero;
+            Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(removeMethod, dictPtr, args, ref exception);
+            Plugin.LogInfo($"[Plan] Remove({key}) exception={exception}");
+        }
+    }
+
+
+    internal static void SetStuffPlanValue(object facility, int itemId, int count)
+    {
+        try
+        {
+            if (facility is not Il2CppInterop.Runtime.InteropTypes.Il2CppObjectBase il2cppObj) return;
+            IntPtr objPtr = Il2CppInterop.Runtime.IL2CPP.Il2CppObjectBaseToPtrNotNull(il2cppObj);
+            var methodPtr = FindIl2CppMethod(facility, "GetStuffPlanDic");
+            if (methodPtr == IntPtr.Zero) return;
+
+            IntPtr dictPtr;
+            unsafe
+            {
+                IntPtr exception = IntPtr.Zero;
+                void** args = null;
+                dictPtr = Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(methodPtr, objPtr, args, ref exception);
+            }
+            if (dictPtr == IntPtr.Zero) return;
+
+            if (count <= 0)
+                Il2CppDictRemove(dictPtr, itemId);
+            else
+                Il2CppDictSetItem(dictPtr, itemId, count);
+        }
+        catch (Exception ex) { Plugin.LogError($"SetStuffPlanValue 出错: {ex.Message}"); }
+    }
+    // ====== 筛选 ======
+
+    internal static void ToggleFilter(int stuffId)
+    {
+        if (_filterItems.ContainsKey(stuffId))
+        {
+            var (name, enabled) = _filterItems[stuffId];
+            _filterItems[stuffId] = (name, !enabled);
+        }
+        RefreshChestList();
+    }
+
+    internal static void SetAllFilters(bool enabled)
+    {
+        foreach (var k in _filterItems.Keys.ToList())
+            _filterItems[k] = (_filterItems[k].Name, enabled);
+        RefreshChestList();
+    }
+
+    // ====== 计划库存 ======
+
+    internal static void SetPlanStock(int chestIndex, int stuffId, int count)
+    {
+        if (chestIndex < 0 || chestIndex >= _chests.Count) return;
+        SetStuffPlanValue(_chests[chestIndex].Facility, stuffId, count);
+        RefreshChestList();
+    }
+
+    // ====== 定位 ======
+
+    internal static string LocateChest(int chestIndex)
+    {
+        if (chestIndex < 0 || chestIndex >= _chests.Count)
+            return "{\"error\":\"chest not found\"}";
+        var c = _chests[chestIndex];
+        LocateFacility(c.PosX, c.PosY);
+        return $"{{\"ok\":true,\"posX\":{c.PosX.ToString(System.Globalization.CultureInfo.InvariantCulture)},\"posY\":{c.PosY.ToString(System.Globalization.CultureInfo.InvariantCulture)}}}";
+    }
+
+    // ====== JSON 构建（带 500ms TTL 缓存，操作后 Invalidate） ======
+
+    private static string _chestsJson = "[]";
+    private static long _chestsJsonAt;
+    private static string _itemsJson = "[]";
+    private static long _itemsJsonAt;
+
+    internal static void InvalidateCaches()
+    {
+        _chestsJsonAt = 0;
+        _itemsJsonAt = 0;
+    }
+
+    internal static string GetChestsJson()
+    {
+        if (System.Environment.TickCount64 - _chestsJsonAt < 500) return _chestsJson;
+        var sb = new System.Text.StringBuilder();
+        sb.Append('[');
+        for (int i = 0; i < _chests.Count; i++)
+        {
+            if (i > 0) sb.Append(',');
+            AppendChestJson(sb, i, _chests[i]);
+        }
+        sb.Append(']');
+        _chestsJson = sb.ToString();
+        _chestsJsonAt = System.Environment.TickCount64;
+        return _chestsJson;
+    }
+
+    internal static string GetItemsJson()
+    {
+        if (System.Environment.TickCount64 - _itemsJsonAt < 500) return _itemsJson;
+        if (_allItems == null)
+            _allItems = ItemNames.GetAllItems().ToList();
+        var sb = new System.Text.StringBuilder();
+        sb.Append('[');
+        bool first = true;
+        foreach (var kvp in _allItems)
+        {
+            if (!first) sb.Append(',');
+            first = false;
+            sb.Append($"{{\"stuffId\":{kvp.Key},\"name\":\"{Escape(kvp.Value)}\"}}");
+        }
+        sb.Append(']');
+        _itemsJson = sb.ToString();
+        _itemsJsonAt = System.Environment.TickCount64;
+        return _itemsJson;
+    }
+
+    /// <summary>单个箱子的 JSON（增删物品后返回最新状态）</summary>
+    internal static string BuildChestJson(int chestIndex)
+    {
+        if (chestIndex < 0 || chestIndex >= _chests.Count)
+            return "{\"error\":\"chest not found\"}";
+        var sb = new System.Text.StringBuilder();
+        AppendChestJson(sb, chestIndex, _chests[chestIndex]);
+        return sb.ToString();
+    }
+
+    private static void AppendChestJson(System.Text.StringBuilder sb, int index, ChestInfo c)
+    {
+        sb.Append($"{{\"index\":{index},\"guid\":{c.Guid},\"stuffId\":{c.StuffId},\"name\":\"{Escape(c.Name)}\",\"maxCap\":{c.MaxCap},\"usedCap\":{c.UsedCap},\"posX\":{c.PosX.ToString(System.Globalization.CultureInfo.InvariantCulture)},\"posY\":{c.PosY.ToString(System.Globalization.CultureInfo.InvariantCulture)},\"items\":[");
+        for (int j = 0; j < c.Items.Count; j++)
+        {
+            var item = c.Items[j];
+            if (j > 0) sb.Append(',');
+            sb.Append($"{{\"stuffId\":{item.StuffId},\"name\":\"{Escape(ItemNames.GetName(item.StuffId))}\",\"count\":{item.Count}}}");
+        }
+        sb.Append("],\"planStock\":[");
+        if (c.PlanStock != null)
+        {
+            for (int j = 0; j < c.PlanStock.Count; j++)
+            {
+                if (j > 0) sb.Append(',');
+                var ps = c.PlanStock[j];
+                sb.Append($"{{\"stuffId\":{ps.StuffId},\"name\":\"{Escape(ItemNames.GetName(ps.StuffId))}\",\"count\":{ps.Count}}}");
+            }
+        }
+        sb.Append("]}");
     }
 
 }

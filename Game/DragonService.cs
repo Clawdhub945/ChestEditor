@@ -8,121 +8,19 @@ using static ChestEditor.Interop.Il2CppInvoke;
 using static ChestEditor.Interop.Il2CppMemory;
 using static ChestEditor.Interop.ManagedReflect;
 
-namespace ChestEditor;
+namespace ChestEditor.Game;
 
-internal static class Il2CppHelper
+/// <summary>龙系统：素材背包、龙魂、召唤、龙实体扫描与属性修改</summary>
+internal static class DragonService
 {
-
-    internal static List<KeyValuePair<int, int>>? ReadStuffPlanDic(object facility)
-    {
-        try
-        {
-            if (facility is not Il2CppInterop.Runtime.InteropTypes.Il2CppObjectBase il2cppObj) return null;
-            IntPtr objPtr = Il2CppInterop.Runtime.IL2CPP.Il2CppObjectBaseToPtrNotNull(il2cppObj);
-            var methodPtr = FindIl2CppMethod(facility, "GetStuffPlanDic");
-            if (methodPtr == IntPtr.Zero) return null;
-
-            IntPtr dictPtr;
-            unsafe
-            {
-                IntPtr exception = IntPtr.Zero;
-                void** args = null;
-                dictPtr = Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(methodPtr, objPtr, args, ref exception);
-            }
-            if (dictPtr == IntPtr.Zero) return null;
-
-            var dict = new Il2CppSystem.Collections.Generic.Dictionary<int, int>(dictPtr);
-            var result = new List<KeyValuePair<int, int>>();
-            var enumerator = dict.GetEnumerator();
-            while (enumerator.MoveNext())
-                result.Add(new KeyValuePair<int, int>(enumerator.Current.Key, enumerator.Current.Value));
-            return result;
-        }
-        catch { return null; }
-    }
-
-    internal static void Il2CppDictSetItem(IntPtr dictPtr, int key, int value)
-    {
-        IntPtr dictClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(dictPtr);
-        string className = System.Runtime.InteropServices.Marshal.PtrToStringAnsi(
-            Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_name(dictClass)) ?? "?";
-        Plugin.LogInfo($"[Plan] dictClass={className}, dictPtr={dictPtr}");
-
-        IntPtr iter = IntPtr.Zero;
-        IntPtr m;
-        while ((m = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_methods(dictClass, ref iter)) != IntPtr.Zero)
-        {
-            string mName = System.Runtime.InteropServices.Marshal.PtrToStringAnsi(
-                Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_name(m)) ?? "?";
-            if (mName.Contains("Item") || mName.Contains("Remove") || mName.Contains("Add") || mName.Contains("Set"))
-                Plugin.LogInfo($"[Plan] 方法: {mName}");
-        }
-
-        IntPtr setItemMethod = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(dictClass, "set_Item", 2);
-        Plugin.LogInfo($"[Plan] set_Item ptr={setItemMethod}");
-        if (setItemMethod == IntPtr.Zero) return;
-
-        unsafe
-        {
-            int k = key, v = value;
-            void** args = stackalloc void*[2];
-            args[0] = &k;
-            args[1] = &v;
-            IntPtr exception = IntPtr.Zero;
-            Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(setItemMethod, dictPtr, args, ref exception);
-            Plugin.LogInfo($"[Plan] set_Item({key},{value}) exception={exception}");
-        }
-    }
-
-    internal static void Il2CppDictRemove(IntPtr dictPtr, int key)
-    {
-        IntPtr dictClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(dictPtr);
-        IntPtr removeMethod = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(dictClass, "Remove", 1);
-        Plugin.LogInfo($"[Plan] Remove ptr={removeMethod}");
-        if (removeMethod == IntPtr.Zero) return;
-
-        unsafe
-        {
-            int k = key;
-            void** args = stackalloc void*[1];
-            args[0] = &k;
-            IntPtr exception = IntPtr.Zero;
-            Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(removeMethod, dictPtr, args, ref exception);
-            Plugin.LogInfo($"[Plan] Remove({key}) exception={exception}");
-        }
-    }
-
-    internal static void SetStuffPlanValue(object facility, int itemId, int count)
-    {
-        try
-        {
-            if (facility is not Il2CppInterop.Runtime.InteropTypes.Il2CppObjectBase il2cppObj) return;
-            IntPtr objPtr = Il2CppInterop.Runtime.IL2CPP.Il2CppObjectBaseToPtrNotNull(il2cppObj);
-            var methodPtr = FindIl2CppMethod(facility, "GetStuffPlanDic");
-            if (methodPtr == IntPtr.Zero) return;
-
-            IntPtr dictPtr;
-            unsafe
-            {
-                IntPtr exception = IntPtr.Zero;
-                void** args = null;
-                dictPtr = Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(methodPtr, objPtr, args, ref exception);
-            }
-            if (dictPtr == IntPtr.Zero) return;
-
-            if (count <= 0)
-                Il2CppDictRemove(dictPtr, itemId);
-            else
-                Il2CppDictSetItem(dictPtr, itemId, count);
-        }
-        catch (Exception ex) { Plugin.LogError($"SetStuffPlanValue 出错: {ex.Message}"); }
-    }
 
     // ====== 龙素材背包 (Game.w.dragon_stuff_bag) ======
 
     // 本地缓存：IL2CPP 读取 StuffCount 始终返回 0，所以用本地缓存跟踪数量
     private static Dictionary<int, int>? _dragonItemCache;
+
     private static bool _dragonCacheInitialized;
+
 
     private static void EnsureDragonCache()
     {
@@ -136,7 +34,7 @@ internal static class Il2CppHelper
         // 尝试从游戏读取初始值（如果读不到就是 0）
         try
         {
-            var w = GetGameW();
+            var w = GameContext.GetGame();
             if (w == null) return;
             object? dragonBag = GetProp(w, "dragon_stuff_bag");
             if (dragonBag == null) return;
@@ -156,11 +54,13 @@ internal static class Il2CppHelper
         catch { }
     }
 
+
     internal static Dictionary<int, int> GetDragonItemCache()
     {
         EnsureDragonCache();
         return _dragonItemCache!;
     }
+
 
     private static void UpdateDragonCache(int stuffId, int newCount)
     {
@@ -169,60 +69,19 @@ internal static class Il2CppHelper
             _dragonItemCache[stuffId] = Math.Max(0, newCount);
     }
 
-    internal static object? GetGameW()
-    {
-        // 存档未加载时不要调用 Game.get_w()，否则 IL2CPP 会 AccessViolation 崩溃
-        if (SaveLoadPatches.CachedTerritory == null) return null;
-
-        try
-        {
-            // Game.get_w() 是静态方法
-            var csharpAsm = AppDomain.CurrentDomain.GetAssemblies()
-                .FirstOrDefault(a => a.GetName().Name == "Assembly-CSharp");
-            if (csharpAsm == null) return null;
-
-            var gameType = csharpAsm.GetTypes().FirstOrDefault(t => t.Name == "Game");
-            if (gameType == null) return null;
-
-            var getW = gameType.GetMethod("get_w", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-            if (getW != null)
-                return getW.Invoke(null, null);
-
-            // 备选：找静态字段 w 或 _w 或 Ins
-            foreach (var name in new[] { "w", "_w", "Ins", "instance" })
-            {
-                var field = gameType.GetField(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-                if (field != null)
-                {
-                    var val = field.GetValue(null);
-                    if (val != null) return val;
-                }
-                var prop = gameType.GetProperty(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-                if (prop != null)
-                {
-                    var getter = prop.GetGetMethod(true);
-                    if (getter != null) return getter.Invoke(null, null);
-                }
-            }
-        }
-        catch { }
-        return null;
-    }
-
-    // ====== 龙系统诊断 (已禁用) ======
-    internal static void DiagnoseDragonSystem() { }
 
     /// <summary>
     /// 直接从游戏 dragon_stuff_bag 读取所有龙素材（每次调用都重新读取）
     /// </summary>
     private static MethodInfo? _dragonStuffCountMethod;
 
+
     internal static List<KeyValuePair<int, int>> ReadDragonBagLive()
     {
         var result = new List<KeyValuePair<int, int>>();
         try
         {
-            var w = GetGameW();
+            var w = GameContext.GetGame();
             if (w == null) return result;
             object? dragonBag = GetProp(w, "dragon_stuff_bag");
             if (dragonBag == null) return result;
@@ -262,6 +121,7 @@ internal static class Il2CppHelper
         return result;
     }
 
+
     internal static List<KeyValuePair<int, int>>? ReadDragonStuffBag()
     {
         try
@@ -278,8 +138,11 @@ internal static class Il2CppHelper
         catch { return null; }
     }
 
+
     private static bool _dragonMethodsLogged;
+
     private static bool _dragonDicLogged;
+
 
     internal static List<KeyValuePair<int, int>> ReadBagContents(object bag)
     {
@@ -566,11 +429,12 @@ internal static class Il2CppHelper
         return result;
     }
 
+
     internal static void SetDragonItemQuantity(int stuffId, int newCount)
     {
         try
         {
-            var w = GetGameW();
+            var w = GameContext.GetGame();
             if (w == null) { Plugin.LogError("Game.w 为 null"); return; }
 
             object? dragonBag = GetProp(w, "dragon_stuff_bag");
@@ -599,8 +463,10 @@ internal static class Il2CppHelper
         catch (Exception ex) { Plugin.LogError($"SetDragonItemQuantity 出错: {ex.Message}"); }
     }
 
+
     // ====== 召唤龙 ======
     private static MethodInfo? _addDragonSoulMethod;
+
 
     internal static readonly (string Name, string ChineseName, int BaseId)[] DragonTypes = new[]
     {
@@ -622,12 +488,14 @@ internal static class Il2CppHelper
         ("MonsterDragon16AncientTree", "远古树龙", 201551),
     };
 
+
     internal static readonly (int Id, string Name)[] DragonNatures = new[]
     {
         (1, "坚韧"), (2, "洞察"), (3, "再生"), (4, "反震"), (5, "迅捷"), (6, "穿透"),
         (7, "蓄能"), (8, "破防"), (9, "护盾"), (10, "警觉"), (11, "刚毅"), (12, "沉稳"),
         (13, "狂怒"), (14, "重创"), (15, "牵制"), (16, "反制"), (17, "冷血"), (18, "血誓"),
     };
+
 
     internal static string GetDragonTypesJson()
     {
@@ -643,6 +511,7 @@ internal static class Il2CppHelper
         return sb.ToString();
     }
 
+
     internal static string GetDragonNaturesJson()
     {
         var sb = new System.Text.StringBuilder();
@@ -656,11 +525,12 @@ internal static class Il2CppHelper
         return sb.ToString();
     }
 
+
     internal static string SummonDragon(int dragonStuffId, int[]? natureIds = null)
     {
         try
         {
-            var w = GetGameW();
+            var w = GameContext.GetGame();
             if (w == null) return "Game.w 为 null";
 
             // 确保驭龙数量上限足够
@@ -733,12 +603,13 @@ internal static class Il2CppHelper
     }
 
 
+
     // ====== 龙魂列表读取 ======
     internal static List<Dictionary<string, object?>>? ReadDragonSouls()
     {
         try
         {
-            var w = GetGameW();
+            var w = GameContext.GetGame();
             if (w == null) return null;
             object? soulList = GetProp(w, "dragon_soul_list");
             if (soulList == null) return null;
@@ -811,6 +682,7 @@ internal static class Il2CppHelper
         catch { return null; }
     }
 
+
     internal static string GetDragonSoulsJson()
     {
         var souls = ReadDragonSouls();
@@ -845,12 +717,13 @@ internal static class Il2CppHelper
         return sb.ToString();
     }
 
+
     // 修改龙魂属性 (通过 IL2CPP 原生字段写入)
     internal static string SetDragonSoulProperty(int soulIndex, string property, int value)
     {
         try
         {
-            var w = GetGameW();
+            var w = GameContext.GetGame();
             if (w == null) return "Game.w 为 null";
             object? soulList = GetProp(w, "dragon_soul_list");
             if (soulList == null) return "dragon_soul_list 为 null";
@@ -881,13 +754,16 @@ internal static class Il2CppHelper
         catch (Exception ex) { return ex.Message; }
     }
 
+
     /// <summary>
     /// 搜索地图上的龙实体 GameObject
     /// </summary>
 
     // 龙实体战斗属性字段偏移缓存
     private static readonly Dictionary<string, int> _dragonFieldOffsets = new();
+
     private static bool _dragonOffsetsCached;
+
 
     private static void CacheDragonFieldOffsets(IntPtr compPtr, IntPtr compClass)
     {
@@ -912,9 +788,12 @@ internal static class Il2CppHelper
         }
     }
 
+
     private static readonly string[] _dragonStatFields = { "stuff_id", "guid", "hp", "hp_total", "atk_min", "atk_max", "magic_atk_min", "magic_atk_max", "speed", "power", "atk_range", "atk_cd", "view_range", "create_days",
         "train_increase_hp", "train_increase_atk", "train_increase_ability_power", "train_increase_phys_res", "train_increase_magic_res" };
+
     private static readonly HashSet<string> _dragonFloatFields = new() { "hp", "hp_total", "atk_min", "atk_max", "magic_atk_min", "magic_atk_max", "speed", "power", "atk_range", "atk_cd", "view_range" };
+
 
     internal static List<Dictionary<string, object>> ReadDragonEntities()
     {
@@ -1006,6 +885,7 @@ internal static class Il2CppHelper
         return result;
     }
 
+
     internal static string GetDragonEntitiesJson()
     {
         var entities = ReadDragonEntities();
@@ -1034,6 +914,7 @@ internal static class Il2CppHelper
         sb.Append(']');
         return sb.ToString();
     }
+
 
     internal static string SetDragonEntityField(int guid, string fieldName, float value)
     {
@@ -1102,6 +983,7 @@ internal static class Il2CppHelper
         }
         catch (Exception ex) { return ex.Message; }
     }
+
 
     internal static void SearchMapDragonEntities()
     {
@@ -1190,68 +1072,15 @@ internal static class Il2CppHelper
         catch (Exception ex) { Plugin.LogError($"[DragonEntity] 搜索异常: {ex.Message}"); }
     }
 
-    // 查找地图上的龙对象 - 通过 IL2CPP 原生字段读取
-    internal static void SearchMapDragons()
-    {
-        try
-        {
-            var souls = ReadDragonSouls();
-            if (souls == null || souls.Count == 0)
-            {
-                Plugin.LogInfo("[MapDragon] 未找到龙魂数据");
-                return;
-            }
-
-            Plugin.LogInfo($"[MapDragon] 共 {souls.Count} 条龙魂:");
-            for (int i = 0; i < souls.Count; i++)
-            {
-                var soul = souls[i];
-                string guid = soul.TryGetValue("guid", out var g) ? (g?.ToString() ?? "") : "";
-                int stuffId = soul.TryGetValue("stuff_id", out var sid) ? Convert.ToInt32(sid ?? 0) : 0;
-                int isActive = soul.TryGetValue("is_active", out var ia) ? Convert.ToInt32(ia ?? 0) : 0;
-
-                // 查找龙类型名
-                string typeName = "未知";
-                foreach (var (Name, ChineseName, BaseId) in DragonTypes)
-                {
-                    if (stuffId >= BaseId && stuffId < BaseId + 10)
-                    {
-                        int level = stuffId - BaseId + 1;
-                        typeName = $"{ChineseName} Lv{level}";
-                        break;
-                    }
-                }
-
-                string natureStr = "";
-                if (soul.TryGetValue("nature_list", out var nl) && nl is List<int> natures && natures.Count > 0)
-                {
-                    var natureNames = natures.Select(nid =>
-                    {
-                        var found = DragonNatures.FirstOrDefault(x => x.Id == nid);
-                        return found.Id > 0 ? found.Name : $"#{nid}";
-                    });
-                    natureStr = $" [{string.Join(",", natureNames)}]";
-                }
-
-                // 读取属性值
-                int head = soul.TryGetValue("head", out var hv) ? Convert.ToInt32(hv ?? 0) : 0;
-                int claw = soul.TryGetValue("claw", out var cv) ? Convert.ToInt32(cv ?? 0) : 0;
-                int shield = soul.TryGetValue("shield", out var sv) ? Convert.ToInt32(sv ?? 0) : 0;
-                int cloud = soul.TryGetValue("cloud", out var clv) ? Convert.ToInt32(clv ?? 0) : 0;
-                int pot = soul.TryGetValue("potentiality", out var pv) ? Convert.ToInt32(pv ?? 0) : 0;
-
-                // 输出所有字段
-                var allFields = string.Join(" ", soul.Select(kv => $"{kv.Key}={kv.Value}"));
-                Plugin.LogInfo($"[MapDragon] #{i}: {typeName} (stuffId={stuffId}) active={isActive} {allFields}");
-            }
-        }
-        catch (Exception ex) { Plugin.LogError($"[MapDragon] 搜索异常: {ex.Message}"); }
-    }
 
     private static MethodInfo? _dragonAddMethod;
+
     private static MethodInfo? _dragonRemoveMethod;
+
     private static MethodInfo? _dragonAddNoNotifyMethod;
+
     private static bool _dragonMethodsCached;
+
 
     private static void CacheBagOps(object bag)
     {
@@ -1282,321 +1111,48 @@ internal static class Il2CppHelper
         }
     }
 
-    private static HashSet<int> _debuggedTypes = new();
-    internal static void ClearDebuggedTypes() => _debuggedTypes.Clear();
-    internal static void DebugStuffPlanDic(object facility, int stuffId, string name) { }
-
-
-    // 尝试智能读取 IL2CPP 字段（检测 string vs int）
-    private static void AppendIl2CppField(System.Text.StringBuilder sb, IntPtr objPtr, (string Name, int Offset) vf, bool leadingComma)
+    internal static void InvalidateBagJsonCache()
     {
-        if (vf.Offset <= 0) return;
-        if (leadingComma) sb.Append(',');
-        sb.Append('"').Append(Escape(vf.Name)).Append("\":");
-        // 尝试读取为 string
+        _bagJsonAt = 0;
+    }
+
+    private static string _bagJson = "[]";
+    private static long _bagJsonAt;
+
+    /// <summary>合并实时读取与本地记账缓存，生成龙素材背包 JSON（带 500ms TTL 缓存）</summary>
+    internal static string GetBagJson()
+    {
+        if (System.Environment.TickCount64 - _bagJsonAt < 500) return _bagJson;
         try
         {
-            string? strVal = ReadIl2CppString(objPtr, vf.Offset);
-            if (strVal != null && strVal.Length > 0 && strVal.Length < 500)
+            var liveItems = ReadDragonBagLive();
+            var cache = GetDragonItemCache();
+            var merged = new Dictionary<int, int>();
+            foreach (var kv in liveItems)
+                merged[kv.Key] = kv.Value;
+            if (cache != null)
             {
-                // 验证是否是合理的字符串（不是垃圾数据）
-                bool valid = true;
-                for (int i = 0; i < Math.Min(strVal.Length, 20); i++)
+                foreach (var kv in cache)
                 {
-                    char c = strVal[i];
-                    if (c < 0x20 && c != '\n' && c != '\r' && c != '\t') { valid = false; break; }
-                }
-                if (valid)
-                {
-                    sb.Append('"').Append(Escape(strVal)).Append('"');
-                    return;
+                    if (kv.Value > 0 && !merged.ContainsKey(kv.Key))
+                        merged[kv.Key] = kv.Value;
                 }
             }
-        }
-        catch { }
-        // 读取为 int
-        try
-        {
-            int intVal = ReadIl2CppInt(objPtr, vf.Offset);
-            sb.Append(intVal);
-        }
-        catch { sb.Append("0"); }
-    }
-
-    // ====== 科技树 ======
-
-    internal static string DiagnoseTechTree()
-    {
-        try
-        {
-            var w = GetGameW();
-            if (w == null) return "{\"error\":\"Game.w is null\"}";
-
-            // 科技树存储在 Game.w 的多个字段中
-            var sb = new System.Text.StringBuilder();
-            sb.Append('{');
-
-            // 读取 unlock_tech_list
-            var unlockList = GetProp(w, "unlock_tech_list");
-            sb.Append("\"unlock_tech_list\":");
-            sb.Append(SerializeList(unlockList));
-
-            // 读取 tech_has_paid
-            var paidList = GetProp(w, "tech_has_paid");
-            sb.Append(",\"tech_has_paid\":");
-            sb.Append(SerializeList(paidList));
-
-            // 读取 research_queue_list
-            var queueList = GetProp(w, "research_queue_list");
-            sb.Append(",\"research_queue_list\":");
-            sb.Append(SerializeList(queueList));
-
-            // 读取简单字段
-            sb.Append(",\"cur_research_tech\":").Append(GetInt(w, "cur_research_tech"));
-            sb.Append(",\"cur_research_progress\":").Append(GetFloat(w, "cur_research_progress").ToString(System.Globalization.CultureInfo.InvariantCulture));
-            sb.Append(",\"is_unlock_tech_inspiration\":").Append(GetBool(w, "is_unlock_tech_inspiration") ? "true" : "false");
-
-            // 读取 unlock_facility_list
-            var facilityList = GetProp(w, "unlock_facility_list");
-            sb.Append(",\"unlock_facility_list\":");
-            sb.Append(SerializeList(facilityList));
-
-            sb.Append('}');
-            return sb.ToString();
-        }
-        catch (Exception ex)
-        {
-            return $"{{\"error\":\"{Escape(ex.Message)}\"}}";
-        }
-    }
-
-
-    private static string SerializeList(object? list)
-    {
-        if (list == null) return "[]";
-        var sb = new System.Text.StringBuilder();
-        sb.Append('[');
-
-        // 先尝试直接 IList cast
-        if (list is System.Collections.IList ilist)
-        {
-            for (int i = 0; i < ilist.Count; i++)
-            {
-                if (i > 0) sb.Append(',');
-                AppendValue(sb, ilist[i]);
-            }
-        }
-        else
-        {
-            // IL2CPP List<T> 不能直接 cast，用反射读取 Count + get_Item
-            var listType = list.GetType();
-            var countProp = listType.GetProperty("Count", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            var getItem = listType.GetMethod("get_Item", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            if (countProp != null && getItem != null)
-            {
-                int count = Convert.ToInt32(countProp.GetValue(list) ?? 0);
-                for (int i = 0; i < count; i++)
-                {
-                    if (i > 0) sb.Append(',');
-                    try
-                    {
-                        var item = getItem.Invoke(list, new object[] { i });
-                        AppendValue(sb, item);
-                    }
-                    catch { sb.Append("null"); }
-                }
-            }
-        }
-
-        sb.Append(']');
-        return sb.ToString();
-    }
-
-    private static void AppendValue(System.Text.StringBuilder sb, object? val)
-    {
-        if (val == null) { sb.Append("null"); return; }
-        if (val is int || val is long || val is short || val is byte)
-            sb.Append(val);
-        else if (val is bool b)
-            sb.Append(b ? "true" : "false");
-        else if (val is float f)
-            sb.Append(f.ToString(System.Globalization.CultureInfo.InvariantCulture));
-        else if (val is double d)
-            sb.Append(d.ToString(System.Globalization.CultureInfo.InvariantCulture));
-        else
-            sb.Append('"').Append(Escape(val.ToString() ?? "")).Append('"');
-    }
-
-    internal static string GetTechTreeJson()
-    {
-        try
-        {
-            var w = GetGameW();
-            if (w == null) return "{}";
 
             var sb = new System.Text.StringBuilder();
-            sb.Append('{');
-
-            // 已解锁科技列表
-            var unlockList = GetProp(w, "unlock_tech_list");
-            sb.Append("\"unlockTechList\":");
-            sb.Append(SerializeList(unlockList));
-
-            // 已付费科技列表
-            var paidList = GetProp(w, "tech_has_paid");
-            sb.Append(",\"techHasPaid\":");
-            sb.Append(SerializeList(paidList));
-
-            // 研究队列
-            var queueList = GetProp(w, "research_queue_list");
-            sb.Append(",\"researchQueue\":");
-            sb.Append(SerializeList(queueList));
-
-            // 当前研究
-            sb.Append(",\"curResearchTech\":").Append(GetInt(w, "cur_research_tech"));
-            sb.Append(",\"curResearchProgress\":").Append(GetFloat(w, "cur_research_progress").ToString(System.Globalization.CultureInfo.InvariantCulture));
-
-            // 灵感解锁
-            sb.Append(",\"isUnlockTechInspiration\":").Append(GetBool(w, "is_unlock_tech_inspiration") ? "true" : "false");
-
-            // 其他相关解锁状态
-            sb.Append(",\"isUnlockFreeLove\":").Append(GetBool(w, "is_unlock_free_love") ? "true" : "false");
-            sb.Append(",\"isUnlockCourage\":").Append(GetBool(w, "is_unlock_courage") ? "true" : "false");
-            sb.Append(",\"isUnlockPenaltySystem\":").Append(GetBool(w, "is_unlock_penalty_system") ? "true" : "false");
-            sb.Append(",\"isUnlockRewardsSystem\":").Append(GetBool(w, "is_unlock_rewards_system") ? "true" : "false");
-            sb.Append(",\"isUnlockPersonalAwareness\":").Append(GetBool(w, "is_unlock_personal_awareness") ? "true" : "false");
-            sb.Append(",\"isUnlockHearken\":").Append(GetBool(w, "is_unlock_hearken") ? "true" : "false");
-            sb.Append(",\"isUnlockSocialSupport\":").Append(GetBool(w, "is_unlock_social_support") ? "true" : "false");
-            sb.Append(",\"isUnlockEfficientStorage\":").Append(GetBool(w, "is_unlock_efficient_storage") ? "true" : "false");
-            sb.Append(",\"isUnlockEncyclopedia\":").Append(GetBool(w, "is_unlock_encyclopedia") ? "true" : "false");
-
-            sb.Append('}');
-            return sb.ToString();
-        }
-        catch (Exception ex)
-        {
-            return $"{{\"error\":\"{Escape(ex.Message)}\"}}";
-        }
-    }
-
-    internal static string ToggleTechUnlock(int techId, bool unlock)
-    {
-        try
-        {
-            var w = GetGameW();
-            if (w == null) return "{\"error\":\"Game.w is null\"}";
-
-            var unlockList = GetProp(w, "unlock_tech_list");
-            if (unlockList == null) return "{\"error\":\"unlock_tech_list is null\"}";
-
-            var listType = unlockList.GetType();
-            var containsMethod = listType.GetMethod("Contains", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            var addMethod = listType.GetMethod("Add", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            var removeMethod = listType.GetMethod("Remove", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-
-            if (containsMethod == null || addMethod == null || removeMethod == null)
-                return "{\"error\":\"List methods not found\"}";
-
-            bool contains = Convert.ToBoolean(containsMethod.Invoke(unlockList, new object[] { techId }));
-
-            if (unlock && !contains)
+            sb.Append('[');
+            bool first = true;
+            foreach (var kv in merged.OrderByDescending(x => x.Value))
             {
-                addMethod.Invoke(unlockList, new object[] { techId });
-                return "{\"ok\":true,\"action\":\"added\"}";
+                if (!first) sb.Append(',');
+                first = false;
+                sb.Append($"{{\"stuffId\":{kv.Key},\"name\":\"{Escape(ItemNames.GetName(kv.Key))}\",\"count\":{kv.Value}}}");
             }
-            else if (!unlock && contains)
-            {
-                removeMethod.Invoke(unlockList, new object[] { techId });
-                return "{\"ok\":true,\"action\":\"removed\"}";
-            }
-
-            return "{\"ok\":true,\"action\":\"unchanged\"}";
+            sb.Append(']');
+            _bagJson = sb.ToString();
+            _bagJsonAt = System.Environment.TickCount64;
         }
-        catch (Exception ex)
-        {
-            return $"{{\"error\":\"{Escape(ex.Message)}\"}}";
-        }
-    }
-
-    internal static string UnlockAllTechs()
-    {
-        try
-        {
-            var w = GetGameW();
-            if (w == null) return "{\"error\":\"Game.w is null\"}";
-
-            var unlockList = GetProp(w, "unlock_tech_list");
-            if (unlockList == null) return "{\"error\":\"unlock_tech_list is null\"}";
-
-            var listType = unlockList.GetType();
-            var containsMethod = listType.GetMethod("Contains", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            var addMethod = listType.GetMethod("Add", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            if (containsMethod == null || addMethod == null) return "{\"error\":\"List methods not found\"}";
-
-            // All tech IDs from TECH_TREE data
-            int[] allTechIds = {
-                902022,902035,902024,902034,902023,902037,902038,902084,902036,902160,
-                902017,902020,902018,902109,902019,902021,902012,902039,902116,902013,
-                902005,902004,902007,902156,902113,902154,902155,902153,902130,902131,
-                902010,902011,902157,902158,902159,902147,902003,902099,902140,902065,
-                902066,902144,902061,902152,902075,902104,902122,902135,902136,902137,
-                902138,902139,902002,902091,902014,902015,902102,902063,902064,902009,
-                902161,902008,902112,902114,902016,902106,902134,902141,902032,902033,
-                902060,902120,902150,902059,902151,902111,902082,902083,902125,902146,
-                902126,902124,902077,902117,902078,902080,902110,902149,902081,902025,
-                902090,902143,902074,902115,902142,902133,902068,902069,902070,902071,
-                902072,902073,902052,902053,902057,902127,902055,902056,902128,902108,
-                902103,902129,902092,902097,902123,902098,902100,902094,902093,902095,
-                902049,902050,902051,902026,902027,902028,902029,902030,902031,902040,
-                902041,902042,902043,902044,902045,902046,902047,902048,902132,902096,
-                902101,902105,902118,902119,902148,902085,902086,902087,902088,902089,
-                902162,902145
-            };
-
-            int added = 0;
-            foreach (var techId in allTechIds)
-            {
-                bool contains = Convert.ToBoolean(containsMethod.Invoke(unlockList, new object[] { techId }));
-                if (!contains)
-                {
-                    addMethod.Invoke(unlockList, new object[] { techId });
-                    added++;
-                }
-            }
-
-            return $"{{\"ok\":true,\"added\":{added},\"total\":{allTechIds.Length}}}";
-        }
-        catch (Exception ex)
-        {
-            return $"{{\"error\":\"{Escape(ex.Message)}\"}}";
-        }
-    }
-
-    internal static string SetResearchTech(int techId)
-    {
-        try
-        {
-            var w = GetGameW();
-            if (w == null) return "{\"error\":\"Game.w is null\"}";
-
-            var wType = w.GetType();
-            var prop = wType.GetProperty("cur_research_tech", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.FlattenHierarchy);
-            if (prop != null && prop.CanWrite)
-            {
-                prop.SetValue(w, techId);
-                return "{\"ok\":true}";
-            }
-            var field = wType.GetField("cur_research_tech", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.FlattenHierarchy);
-            if (field != null)
-            {
-                field.SetValue(w, techId);
-                return "{\"ok\":true}";
-            }
-            return "{\"error\":\"cur_research_tech not writable\"}";
-        }
-        catch (Exception ex)
-        {
-            return $"{{\"error\":\"{Escape(ex.Message)}\"}}";
-        }
+        catch { _bagJson = "[]"; }
+        return _bagJson;
     }
 }

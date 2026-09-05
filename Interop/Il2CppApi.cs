@@ -135,4 +135,78 @@ internal static class Il2CppApi
             Plugin.LogInfo($"[Il2CppApi] 类 {className} 无字段 (depth={depth})");
         return fieldMap;
     }
+
+    /// <summary>安全读取对象的指针字段（含父类搜索，校验偏移范围）</summary>
+
+    /// <summary>
+    /// 安全读取对象的指针字段（含父类搜索），使用 il2cpp_field_get_offset
+    /// </summary>
+    internal static IntPtr ReadFieldSafe(IntPtr objPtr, IntPtr classPtr, string fieldName)
+    {
+        try
+        {
+            IntPtr searchCls = classPtr;
+            int depth = 0;
+            while (searchCls != IntPtr.Zero && depth < 10)
+            {
+                IntPtr fi = IntPtr.Zero;
+                IntPtr field;
+                while ((field = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_fields(searchCls, ref fi)) != IntPtr.Zero)
+                {
+                    string? fn = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_field_get_name(field));
+                    if (fn == fieldName)
+                    {
+                        int offset = (int)Il2CppInterop.Runtime.IL2CPP.il2cpp_field_get_offset(field);
+                        // 验证偏移量合理（对象头至少 0x10 字节）
+                        if (offset < 0x10 || offset > 0x10000)
+                        {
+                            Plugin.LogInfo($"[EntityEditor] ReadFieldSafe: {fieldName} offset={offset} seems invalid, skipping");
+                            return IntPtr.Zero;
+                        }
+                        unsafe
+                        {
+                            IntPtr value = *(IntPtr*)(objPtr + offset);
+                            return value;
+                        }
+                    }
+                }
+                searchCls = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(searchCls);
+                depth++;
+            }
+        }
+        catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] ReadFieldSafe({fieldName}) error: {ex.Message}"); }
+        return IntPtr.Zero;
+    }
+
+
+    /// <summary>
+    /// 安全读取对象的 int 字段（含父类搜索）
+    /// </summary>
+    internal static int ReadIntFieldSafe(IntPtr objPtr, IntPtr classPtr, string fieldName, int defaultVal = 0)
+    {
+        try
+        {
+            IntPtr searchCls = classPtr;
+            int depth = 0;
+            while (searchCls != IntPtr.Zero && depth < 10)
+            {
+                IntPtr fi = IntPtr.Zero;
+                IntPtr field;
+                while ((field = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_fields(searchCls, ref fi)) != IntPtr.Zero)
+                {
+                    string? fn = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_field_get_name(field));
+                    if (fn == fieldName)
+                    {
+                        int offset = (int)Il2CppInterop.Runtime.IL2CPP.il2cpp_field_get_offset(field);
+                        if (offset < 0x10 || offset > 0x10000) return defaultVal;
+                        unsafe { return *(int*)(objPtr + offset); }
+                    }
+                }
+                searchCls = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(searchCls);
+                depth++;
+            }
+        }
+        catch { }
+        return defaultVal;
+    }
 }

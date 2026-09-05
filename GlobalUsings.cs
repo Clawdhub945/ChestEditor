@@ -4,3 +4,6 @@ global using System.Collections.Generic;
 global using ChestEditor;
 global using ChestEditor.Core;
 global using ChestEditor.Interop;
+global using ChestEditor.Game;
+global using ChestEditor.Threading;
+global using ChestEditor.Web;

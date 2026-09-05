@@ -30,8 +30,8 @@ public class Plugin : BasePlugin
         SaveLoadPatches.Apply(_harmony);
         try
         {
-            EntityEditor.LoadModificationsFromDisk();
-            LogInfo("[Plugin] LoadModificationsFromDisk 完成");
+            ModificationStore.LoadFromDisk();
+            LogInfo("[Plugin] ModificationStore.LoadFromDisk 完成");
         }
         catch (Exception ex) { LogError($"[Plugin] LoadModificationsFromDisk 失败: {ex}"); }
 

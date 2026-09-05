@@ -129,7 +129,7 @@ public static class SaveLoadPatches
         {
             IntPtr ptr = GetIl2CppPtr(__instance);
             if (ptr != IntPtr.Zero)
-                EntityEditor.OnPostUpdate(ptr);
+                NpcEditor.OnPostUpdate(ptr);
         }
         catch { }
     }
