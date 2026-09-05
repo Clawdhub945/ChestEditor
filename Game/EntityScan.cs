@@ -309,7 +309,7 @@ internal static class EntityScan
             sb.Append($"\"ptrHash\":{e.PtrHash},");
             sb.Append($"\"guid\":{e.Guid},");
             sb.Append($"\"stuffId\":{e.StuffId},");
-            sb.Append($"\"name\":\"{Escape(StuffIdNames.GetName(e.StuffId))}\",");
+            sb.Append($"\"name\":\"{Escape(ItemCatalog.GetName(e.StuffId))}\",");
             sb.Append($"\"fieldCount\":{slimCount}");
             sb.Append('}');
         }

@@ -154,7 +154,7 @@ internal static class ChestService
             if (_removeStuffMethod != null)
             {
                 _removeStuffMethod.Invoke(bag, new object[] { stuffId, count, false });
-                Plugin.LogInfo($"删除成功: {ItemNames.GetName(stuffId)}({stuffId}) x{count}");
+                Plugin.LogInfo($"删除成功: {ItemCatalog.GetName(stuffId)}({stuffId}) x{count}");
 
                 // 只更新当前箱子的物品数据
                 UpdateChestItems(chestIndex);
@@ -191,12 +191,12 @@ internal static class ChestService
             if (_addStuffNoNotifyMethod != null)
             {
                 _addStuffNoNotifyMethod.Invoke(bag, new object[] { stuffId, count });
-                Plugin.LogInfo($"添加成功: {ItemNames.GetName(stuffId)}({stuffId}) x{count}");
+                Plugin.LogInfo($"添加成功: {ItemCatalog.GetName(stuffId)}({stuffId}) x{count}");
             }
             else if (_addStuffMethod != null)
             {
                 _addStuffMethod.Invoke(bag, new object[] { stuffId, count, false });
-                Plugin.LogInfo($"添加成功: {ItemNames.GetName(stuffId)}({stuffId}) x{count}");
+                Plugin.LogInfo($"添加成功: {ItemCatalog.GetName(stuffId)}({stuffId}) x{count}");
             }
             else
             {
@@ -222,7 +222,7 @@ internal static class ChestService
         var newItems = ReadItemsFromBag(chest.Facility);
 
         int maxCap = 0, usedCap = 0;
-        ReadCapacityFromBag(chest.Facility, ref maxCap, ref usedCap);
+        ReadCapacityFromBag(chest.Facility, newItems, ref maxCap, ref usedCap);
 
         _chests[chestIndex] = new ChestInfo
         {
@@ -289,12 +289,12 @@ internal static class ChestService
                 if (string.IsNullOrEmpty(name))
                     name = GetProp(facility, "stuff_name_with_id_index")?.ToString() ?? "";
                 if (string.IsNullOrEmpty(name))
-                    name = ItemNames.GetName(stuffId);
+                    name = ItemCatalog.GetName(stuffId);
 
                 var items = ReadItemsFromBag(facility);
 
                 int maxCap = 0, usedCap = 0;
-                ReadCapacityFromBag(facility, ref maxCap, ref usedCap);
+                ReadCapacityFromBag(facility, items, ref maxCap, ref usedCap);
 
                 float px = 0, py = 0;
                 ReadFacilityPos(facility, ref px, ref py);
@@ -402,7 +402,7 @@ internal static class ChestService
         if (getStuffCountMethod != null)
         {
             var possibleIds = new List<int>();
-            foreach (var kvp in ItemNames.GetAllItems())
+            foreach (var kvp in ItemCatalog.GetAllItems())
                 possibleIds.Add(kvp.Key);
 
 
@@ -547,7 +547,7 @@ internal static class ChestService
     }
 
 
-    private static void ReadCapacityFromBag(object facility, ref int maxCap, ref int usedCap)
+    private static void ReadCapacityFromBag(object facility, List<ItemInfo>? precomputedItems, ref int maxCap, ref int usedCap)
     {
         try
         {
@@ -558,7 +558,7 @@ internal static class ChestService
             if (maxCap == 0) maxCap = GetInt(bag, "Limit");
 
             // 计算已用容量
-            var items = ReadItemsFromBag(facility);
+            var items = precomputedItems ?? ReadItemsFromBag(facility);
             usedCap = items.Sum(x => x.Count);
         }
         catch { }
@@ -907,7 +907,7 @@ internal static class ChestService
     {
         if (System.Environment.TickCount64 - _itemsJsonAt < 500) return _itemsJson;
         if (_allItems == null)
-            _allItems = ItemNames.GetAllItems().ToList();
+            _allItems = ItemCatalog.GetAllItems().ToList();
         var sb = new System.Text.StringBuilder();
         sb.Append('[');
         bool first = true;
@@ -940,7 +940,7 @@ internal static class ChestService
         {
             var item = c.Items[j];
             if (j > 0) sb.Append(',');
-            sb.Append($"{{\"stuffId\":{item.StuffId},\"name\":\"{Escape(ItemNames.GetName(item.StuffId))}\",\"count\":{item.Count}}}");
+            sb.Append($"{{\"stuffId\":{item.StuffId},\"name\":\"{Escape(ItemCatalog.GetName(item.StuffId))}\",\"count\":{item.Count}}}");
         }
         sb.Append("],\"planStock\":[");
         if (c.PlanStock != null)
@@ -949,7 +949,7 @@ internal static class ChestService
             {
                 if (j > 0) sb.Append(',');
                 var ps = c.PlanStock[j];
-                sb.Append($"{{\"stuffId\":{ps.StuffId},\"name\":\"{Escape(ItemNames.GetName(ps.StuffId))}\",\"count\":{ps.Count}}}");
+                sb.Append($"{{\"stuffId\":{ps.StuffId},\"name\":\"{Escape(ItemCatalog.GetName(ps.StuffId))}\",\"count\":{ps.Count}}}");
             }
         }
         sb.Append("]}");

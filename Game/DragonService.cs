@@ -182,7 +182,7 @@ internal static class DragonService
             }
             if (twoParamMethod != null)
             {
-                foreach (var kvp in ItemNames.GetAllItems())
+                foreach (var kvp in ItemCatalog.GetAllItems())
                 {
                     try
                     {
@@ -212,7 +212,7 @@ internal static class DragonService
             }
             if (singleParamMethod != null)
             {
-                foreach (var kvp in ItemNames.GetAllItems())
+                foreach (var kvp in ItemCatalog.GetAllItems())
                 {
                     try
                     {
@@ -296,7 +296,7 @@ internal static class DragonService
             // 用 GetStuffCount 遍历所有已知物品
             if (getStuffCountMethod != null)
             {
-                foreach (var kvp in ItemNames.GetAllItems())
+                foreach (var kvp in ItemCatalog.GetAllItems())
                 {
                     try
                     {
@@ -458,7 +458,7 @@ internal static class DragonService
 
             // 更新本地缓存
             UpdateDragonCache(stuffId, newCount);
-            Plugin.LogInfo($"龙素材设置: {ItemNames.GetName(stuffId)}({stuffId}) -> {newCount}");
+            Plugin.LogInfo($"龙素材设置: {ItemCatalog.GetName(stuffId)}({stuffId}) -> {newCount}");
         }
         catch (Exception ex) { Plugin.LogError($"SetDragonItemQuantity 出错: {ex.Message}"); }
     }
@@ -1146,7 +1146,7 @@ internal static class DragonService
             {
                 if (!first) sb.Append(',');
                 first = false;
-                sb.Append($"{{\"stuffId\":{kv.Key},\"name\":\"{Escape(ItemNames.GetName(kv.Key))}\",\"count\":{kv.Value}}}");
+                sb.Append($"{{\"stuffId\":{kv.Key},\"name\":\"{Escape(ItemCatalog.GetName(kv.Key))}\",\"count\":{kv.Value}}}");
             }
             sb.Append(']');
             _bagJson = sb.ToString();

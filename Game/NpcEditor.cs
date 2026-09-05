@@ -107,7 +107,7 @@ internal static class NpcEditor
             sb.Append($"\"npcName\":\"{Escape(e.NpcName)}\",");
             sb.Append($"\"soldierTypeId\":{e.SoldierTypeId},");
             sb.Append($"\"soldierTypeName\":\"{Escape(EntityScan.GetSoldierTypeName(e.SoldierTypeId))}\",");
-            sb.Append($"\"name\":\"{Escape(StuffIdNames.GetName(e.StuffId))}\",");
+            sb.Append($"\"name\":\"{Escape(ItemCatalog.GetName(e.StuffId))}\",");
 
             // 读取重点字段
             int slimCount = 0;
