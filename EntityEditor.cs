@@ -4,6 +4,10 @@ using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using UnityEngine;
+using static ChestEditor.Core.JsonUtil;
+using static ChestEditor.Interop.Il2CppApi;
+using static ChestEditor.Interop.Il2CppInvoke;
+using static ChestEditor.Interop.Il2CppMemory;
 
 namespace ChestEditor;
 
@@ -13,23 +17,6 @@ namespace ChestEditor;
 internal static class EntityEditor
 {
     private static readonly List<EditorEntity> _entities = new();
-
-    // IL2CPP API 缓存
-    private static bool _apiCached;
-    private static MethodInfo? _il2cpp_get_class;
-    private static MethodInfo? _il2cpp_field_get_offset;
-    private static MethodInfo? _il2cpp_class_get_fields;
-    private static MethodInfo? _il2cpp_class_get_parent;
-    private static MethodInfo? _il2cpp_field_get_name;
-    private static MethodInfo? _il2cpp_field_get_type;
-    private static MethodInfo? _il2cpp_type_get_name;
-
-    // 组件类字段偏移缓存
-    private static readonly Dictionary<IntPtr, Dictionary<string, FieldEntry>> _classFieldCache = new();
-
-    private static readonly HashSet<string> FloatTypeNames = new() { "System.Single", "float" };
-    private static readonly HashSet<string> StringTypeNames = new() { "System.String", "String", "Il2CppSystem.String" };
-    private static readonly HashSet<string> IntTypeNames = new() { "System.Int32", "int", "System.Int64", "long", "System.Boolean", "bool", "System.Byte", "byte", "System.Int16", "short", "System.UInt32", "System.UInt64", "System.UInt16", "System.SByte", "System.IntPtr" };
 
     // NPC 类名关键词
     private static readonly string[] NpcClassKeywords = { "Npc" };
@@ -73,137 +60,7 @@ internal static class EntityEditor
         public int StuffId;
         public GameObject? GoRef;
         public Component? CompRef;
-        public Dictionary<string, FieldEntry> FieldMeta = new();
-    }
-
-    internal class FieldEntry
-    {
-        public int Offset;
-        public string TypeName = "";
-        public bool IsFloat;
-        public bool IsString;
-        public bool IsPointer;
-    }
-
-    private static void CacheIl2CppApi()
-    {
-        if (_apiCached) return;
-        _apiCached = true;
-
-        var il2cppType = typeof(Il2CppInterop.Runtime.IL2CPP);
-        _il2cpp_get_class = il2cppType.GetMethod("il2cpp_object_get_class", BindingFlags.Static | BindingFlags.Public);
-        _il2cpp_field_get_offset = il2cppType.GetMethod("il2cpp_field_get_offset", BindingFlags.Static | BindingFlags.Public);
-        _il2cpp_class_get_fields = il2cppType.GetMethod("il2cpp_class_get_fields", BindingFlags.Static | BindingFlags.Public);
-        _il2cpp_class_get_parent = il2cppType.GetMethod("il2cpp_class_get_parent", BindingFlags.Static | BindingFlags.Public);
-        _il2cpp_field_get_name = il2cppType.GetMethod("il2cpp_field_get_name", BindingFlags.Static | BindingFlags.Public);
-        _il2cpp_field_get_type = il2cppType.GetMethod("il2cpp_field_get_type", BindingFlags.Static | BindingFlags.Public);
-        _il2cpp_type_get_name = il2cppType.GetMethod("il2cpp_type_get_name", BindingFlags.Static | BindingFlags.Public);
-    }
-
-    private static IntPtr GetIl2CppPtr(object obj)
-    {
-        try
-        {
-            var prop = obj.GetType().GetProperty("Pointer", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            if (prop != null) return (IntPtr)prop.GetValue(obj)!;
-        }
-        catch { }
-        return IntPtr.Zero;
-    }
-
-    private static string? PtrToString(IntPtr ptr)
-    {
-        if (ptr == IntPtr.Zero) return null;
-        try { return Marshal.PtrToStringAnsi(ptr); } catch { return null; }
-    }
-
-    private static List<(string Name, int Offset, string TypeName)> GetIl2CppFields(IntPtr classPtr)
-    {
-        var fields = new List<(string, int, string)>();
-        try
-        {
-            if (_il2cpp_class_get_fields == null || _il2cpp_field_get_name == null || _il2cpp_field_get_offset == null)
-                return fields;
-
-            IntPtr iter = IntPtr.Zero;
-            object[] args = new object[] { classPtr, iter };
-
-            while (true)
-            {
-                object? result = _il2cpp_class_get_fields.Invoke(null, args);
-                if (result == null) break;
-                IntPtr field = (IntPtr)result;
-                if (field == IntPtr.Zero) break;
-
-                IntPtr namePtr = (IntPtr)_il2cpp_field_get_name.Invoke(null, new object[] { field })!;
-                string? name = PtrToString(namePtr);
-                if (string.IsNullOrEmpty(name))
-                {
-                    args[1] = field;
-                    continue;
-                }
-
-                object offsetResult = _il2cpp_field_get_offset.Invoke(null, new object[] { field })!;
-                int offset = offsetResult is uint u ? (int)u : Convert.ToInt32(offsetResult);
-
-                string typeName = "";
-                if (_il2cpp_field_get_type != null && _il2cpp_type_get_name != null)
-                {
-                    try
-                    {
-                        IntPtr typePtr = (IntPtr)_il2cpp_field_get_type.Invoke(null, new object[] { field })!;
-                        if (typePtr != IntPtr.Zero)
-                            typeName = PtrToString((IntPtr)_il2cpp_type_get_name.Invoke(null, new object[] { typePtr })!) ?? "";
-                    }
-                    catch { }
-                }
-
-                fields.Add((name, offset, typeName));
-                args[1] = field;
-            }
-        }
-        catch { }
-        return fields;
-    }
-
-    private static Dictionary<string, FieldEntry> GetOrCacheClassFields(IntPtr compClass, string className)
-    {
-        if (_classFieldCache.TryGetValue(compClass, out var cached))
-            return cached;
-
-        var fieldMap = new Dictionary<string, FieldEntry>();
-        var seen = new HashSet<int>();
-        IntPtr cls = compClass;
-        int depth = 0;
-        while (cls != IntPtr.Zero && depth < 15)
-        {
-            int addr = cls.GetHashCode();
-            if (seen.Contains(addr)) break;
-            seen.Add(addr);
-
-            foreach (var (name, offset, typeName) in GetIl2CppFields(cls))
-            {
-                if (offset > 0 && !fieldMap.ContainsKey(name))
-                {
-                    fieldMap[name] = new FieldEntry
-                    {
-                        Offset = offset,
-                        TypeName = typeName,
-                        IsFloat = FloatTypeNames.Contains(typeName),
-                        IsString = StringTypeNames.Contains(typeName),
-                        IsPointer = !FloatTypeNames.Contains(typeName) && !StringTypeNames.Contains(typeName) && !IntTypeNames.Contains(typeName)
-                    };
-                }
-            }
-
-            try { cls = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(cls); } catch { break; }
-            depth++;
-        }
-
-        _classFieldCache[compClass] = fieldMap;
-        if (fieldMap.Count == 0)
-            Plugin.LogInfo($"[EntityEditor] 类 {className} 无字段 (depth={depth})");
-        return fieldMap;
+        public Dictionary<string, Il2CppField> FieldMeta = new();
     }
 
     /// <summary>
@@ -212,10 +69,9 @@ internal static class EntityEditor
     internal static void ScanAll()
     {
         try { _entities.Clear(); } catch (Exception ex) { Plugin.LogError($"[EntityEditor] Clear error: {ex.Message}"); return; }
-        _classFieldCache.Clear();
+        Il2CppApi.ClearClassFieldCache();
         try
         {
-            try { CacheIl2CppApi(); } catch (Exception ex) { Plugin.LogError($"[EntityEditor] CacheIl2CppApi error: {ex.Message}"); return; }
             GameObject[] allGOs;
             try { allGOs = Resources.FindObjectsOfTypeAll<GameObject>(); }
             catch (Exception ex) { Plugin.LogError($"[EntityEditor] FindObjectsOfTypeAll error: {ex.Message}"); return; }
@@ -238,35 +94,14 @@ internal static class EntityEditor
                         if (seenPtrHash.Contains(ptrHash)) continue;
 
                         IntPtr compClass = IntPtr.Zero;
-                        try { compClass = (IntPtr)_il2cpp_get_class!.Invoke(null, new object[] { compPtr })!; }
+                        try { compClass = Il2CppApi.GetClass(compPtr); }
                         catch { continue; }
                         if (compClass == IntPtr.Zero) continue;
 
                         string className = comp.GetIl2CppType().Name;
-                        var fieldMap = GetOrCacheClassFields(compClass, className);
-
-                        // 如果缓存的字段为空，强制重新枚举（不用缓存）
+                        var fieldMap = Il2CppApi.GetClassFieldsCached(compClass, className);
                         if (fieldMap.Count == 0)
-                        {
-                            fieldMap = new Dictionary<string, FieldEntry>();
-                            var seen = new HashSet<int>();
-                            IntPtr cls2 = compClass;
-                            int d2 = 0;
-                            while (cls2 != IntPtr.Zero && d2 < 15)
-                            {
-                                int addr2 = cls2.GetHashCode();
-                                if (seen.Contains(addr2)) break;
-                                seen.Add(addr2);
-                                foreach (var (name, offset, typeName) in GetIl2CppFields(cls2))
-                                {
-                                    if (offset > 0 && !fieldMap.ContainsKey(name))
-                                        fieldMap[name] = new FieldEntry { Offset = offset, TypeName = typeName, IsFloat = FloatTypeNames.Contains(typeName), IsString = StringTypeNames.Contains(typeName), IsPointer = !FloatTypeNames.Contains(typeName) && !StringTypeNames.Contains(typeName) && !IntTypeNames.Contains(typeName) };
-                                }
-                                try { cls2 = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(cls2); } catch { break; }
-                                d2++;
-                            }
-                            _classFieldCache[compClass] = fieldMap;
-                        }
+                            fieldMap = Il2CppApi.GetClassFieldsCached(compClass, className, force: true);
 
                         // 判断是否匹配：有 stuff_id 字段 且 stuffId>0,guid>0  OR  类名含 Npc/Soldier/BattleUnit
                         bool hasStuffId = fieldMap.ContainsKey("stuff_id");
@@ -2449,25 +2284,6 @@ internal static class EntityEditor
         catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] CleanupReferencesInScene error: {ex.Message}"); }
     }
 
-    private static string Escape(string s) => s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "").Replace("<", "\\u003c").Replace(">", "\\u003e");
-
-    private static unsafe int ReadIl2CppInt(IntPtr objPtr, int offset) => *(int*)(objPtr + offset);
-    private static unsafe float ReadIl2CppFloat(IntPtr objPtr, int offset) => *(float*)(objPtr + offset);
-    private static unsafe void WriteIl2CppInt(IntPtr objPtr, int offset, int value) => *(int*)(objPtr + offset) = value;
-    private static unsafe void WriteIl2CppFloat(IntPtr objPtr, int offset, float value) => *(float*)(objPtr + offset) = value;
-
-    private static unsafe string? ReadIl2CppString(IntPtr objPtr, int offset)
-    {
-        try
-        {
-            IntPtr strPtr = *(IntPtr*)(objPtr + offset);
-            if (strPtr == IntPtr.Zero) return null;
-            IntPtr charsPtr = strPtr + 0x14;
-            return Marshal.PtrToStringUni(charsPtr);
-        }
-        catch { return null; }
-    }
-
     // ====== 修改记录 + 读档重应用 (方案3) ======
 
     // key: "guid:fieldName", value: float value
@@ -2518,7 +2334,7 @@ internal static class EntityEditor
                 if (moveAgentPtr != IntPtr.Zero)
                 {
                     IntPtr maClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(moveAgentPtr);
-                    IntPtr mth = FindMethodInHierarchy(maClass, "SetSpeed", 1);
+                    IntPtr mth = Il2CppInvoke.FindMethodInHierarchy(maClass, "SetSpeed", 1);
                     if (mth != IntPtr.Zero)
                     {
                         IntPtr ex = IntPtr.Zero;
@@ -2820,7 +2636,7 @@ internal static class EntityEditor
                     if (moveAgentPtr != IntPtr.Zero)
                     {
                         IntPtr maClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(moveAgentPtr);
-                        IntPtr setSpeedMth = FindMethodInHierarchy(maClass, "SetSpeed", 1);
+                        IntPtr setSpeedMth = Il2CppInvoke.FindMethodInHierarchy(maClass, "SetSpeed", 1);
                         if (setSpeedMth != IntPtr.Zero)
                         {
                             IntPtr ex = IntPtr.Zero;
@@ -2841,7 +2657,7 @@ internal static class EntityEditor
                 if (e.NpcId > 0) SetHpOverride(e.NpcId, value);
                 // 调用 SetHp(float) 方法
                 IntPtr compClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(e.Ptr);
-                IntPtr setHpMth = FindMethodInHierarchy(compClass, "SetHp", 1);
+                IntPtr setHpMth = Il2CppInvoke.FindMethodInHierarchy(compClass, "SetHp", 1);
                 if (setHpMth != IntPtr.Zero)
                 {
                     IntPtr ex = IntPtr.Zero;
@@ -2860,7 +2676,7 @@ internal static class EntityEditor
                 if (e.NpcId > 0) SetHpTotalOverride(e.NpcId, value);
                 // 调用 UpdateHpProgressBarTotal()
                 IntPtr compClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(e.Ptr);
-                IntPtr mth = FindMethodInHierarchy(compClass, "UpdateHpProgressBarTotal", 0);
+                IntPtr mth = Il2CppInvoke.FindMethodInHierarchy(compClass, "UpdateHpProgressBarTotal", 0);
                 if (mth != IntPtr.Zero)
                 {
                     IntPtr ex = IntPtr.Zero;
@@ -2873,32 +2689,5 @@ internal static class EntityEditor
         {
             Plugin.LogError($"[ApplyNpcFieldChange] {fieldName}={value} 失败: {ex.Message}");
         }
-    }
-
-    private static IntPtr FindMethodInHierarchy(IntPtr cls, string name, int paramCount)
-    {
-        IntPtr c = cls;
-        int depth = 0;
-        while (c != IntPtr.Zero && depth < 15)
-        {
-            IntPtr m = FindMethod(c, name, paramCount);
-            if (m != IntPtr.Zero) return m;
-            try { c = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(c); } catch { break; }
-            depth++;
-        }
-        return IntPtr.Zero;
-    }
-
-    private static unsafe IntPtr FindMethod(IntPtr cls, string name, int paramCount)
-    {
-        IntPtr iter = IntPtr.Zero;
-        IntPtr m;
-        while ((m = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_methods(cls, ref iter)) != IntPtr.Zero)
-        {
-            string? mn = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_name(m));
-            if (mn == name && Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_param_count(m) == paramCount)
-                return m;
-        }
-        return IntPtr.Zero;
     }
 }

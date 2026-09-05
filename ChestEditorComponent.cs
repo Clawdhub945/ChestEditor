@@ -5,6 +5,9 @@ using System.Linq;
 using System.Reflection;
 using System.Text;
 using UnityEngine;
+using static ChestEditor.Core.JsonUtil;
+using static ChestEditor.Interop.Il2CppApi;
+using static ChestEditor.Interop.ManagedReflect;
 
 namespace ChestEditor;
 
@@ -536,7 +539,7 @@ public partial class ChestEditorComponent : MonoBehaviour
         var chest = _chests[chestIndex];
         try
         {
-            object? bag = Il2CppHelper.GetProp(chest.Facility, "bag");
+            object? bag = GetProp(chest.Facility, "bag");
             if (bag == null)
             {
                 Plugin.LogError("bag 为 null");
@@ -571,7 +574,7 @@ public partial class ChestEditorComponent : MonoBehaviour
         var chest = _chests[chestIndex];
         try
         {
-            object? bag = Il2CppHelper.GetProp(chest.Facility, "bag");
+            object? bag = GetProp(chest.Facility, "bag");
             if (bag == null)
             {
                 Plugin.LogError("bag 为 null");
@@ -648,24 +651,24 @@ public partial class ChestEditorComponent : MonoBehaviour
                 return;
             }
 
-            object? facilityDic = Il2CppHelper.GetProp(territory, "facility_dic");
+            object? facilityDic = GetProp(territory, "facility_dic");
             if (facilityDic == null) return;
 
-            var values = Il2CppHelper.GetProp(facilityDic, "Values");
+            var values = GetProp(facilityDic, "Values");
             if (values == null) return;
 
-            var getEnum = values.GetType().GetMethod("GetEnumerator", Il2CppHelper.BF);
+            var getEnum = values.GetType().GetMethod("GetEnumerator", BF);
             if (getEnum == null) return;
             var enumerator = getEnum.Invoke(values, null);
-            var moveNext = enumerator.GetType().GetMethod("MoveNext", Il2CppHelper.BF);
-            var current = enumerator.GetType().GetProperty("Current", Il2CppHelper.BF);
+            var moveNext = enumerator.GetType().GetMethod("MoveNext", BF);
+            var current = enumerator.GetType().GetProperty("Current", BF);
 
             while ((bool)(moveNext.Invoke(enumerator, null) ?? false))
             {
                 var facility = current.GetValue(enumerator);
                 if (facility == null) continue;
 
-                int stuffId = Il2CppHelper.GetInt(facility, "stuff_id");
+                int stuffId = GetInt(facility, "stuff_id");
 
                 // 调试：检查 stuff_plan_dic 是否存在（只检查 _filterItems 中的）
                 if (_filterItems.ContainsKey(stuffId))
@@ -675,17 +678,17 @@ public partial class ChestEditorComponent : MonoBehaviour
                 bool show = _filterItems.ContainsKey(stuffId) && _filterItems[stuffId].Enabled;
                 if (!show) continue;
 
-                int guid = Il2CppHelper.GetGuid(facility);
+                int guid = GetGuid(facility);
 
                 string name = "";
-                string logPrefix = Il2CppHelper.GetProp(facility, "LOG_PREFIX")?.ToString() ?? "";
+                string logPrefix = GetProp(facility, "LOG_PREFIX")?.ToString() ?? "";
                 if (!string.IsNullOrEmpty(logPrefix))
                 {
                     var parts = logPrefix.Split(' ');
                     if (parts.Length >= 2) name = parts[1];
                 }
                 if (string.IsNullOrEmpty(name))
-                    name = Il2CppHelper.GetProp(facility, "stuff_name_with_id_index")?.ToString() ?? "";
+                    name = GetProp(facility, "stuff_name_with_id_index")?.ToString() ?? "";
                 if (string.IsNullOrEmpty(name))
                     name = ItemNames.GetName(stuffId);
 
@@ -734,11 +737,11 @@ public partial class ChestEditorComponent : MonoBehaviour
     {
         var items = new List<ItemInfo>();
 
-        object? bag = Il2CppHelper.GetProp(facility, "bag");
+        object? bag = GetProp(facility, "bag");
         if (bag == null) return items;
 
         // 获取 BagDic 对象
-        object? bagDic = Il2CppHelper.GetProp(bag, "dic");
+        object? bagDic = GetProp(bag, "dic");
 
         // 1. 找到 bag.GetStuffCount(int, Dictionary, Dictionary) 方法
         MethodInfo? getStuffCountMethod = null;
@@ -858,20 +861,20 @@ public partial class ChestEditorComponent : MonoBehaviour
                             if (args.Length == 2 && args[0] == typeof(int) && args[1] == typeof(int))
                             {
 
-                                var ge = valType.GetMethod("GetEnumerator", Il2CppHelper.BF);
+                                var ge = valType.GetMethod("GetEnumerator", BF);
                                 if (ge != null)
                                 {
                                     var en = ge.Invoke(val, null);
-                                    var mn = en.GetType().GetMethod("MoveNext", Il2CppHelper.BF);
-                                    var cr = en.GetType().GetProperty("Current", Il2CppHelper.BF);
+                                    var mn = en.GetType().GetMethod("MoveNext", BF);
+                                    var cr = en.GetType().GetProperty("Current", BF);
 
                                     while ((bool)(mn.Invoke(en, null) ?? false))
                                     {
                                         var entry = cr.GetValue(en);
                                         if (entry == null) continue;
 
-                                        int key = Il2CppHelper.GetInt(entry, "Key");
-                                        int v = Il2CppHelper.GetInt(entry, "Value");
+                                        int key = GetInt(entry, "Key");
+                                        int v = GetInt(entry, "Value");
                                         if (v > 0)
                                             items.Add(new ItemInfo { StuffId = key, Count = v });
                                     }
@@ -904,13 +907,13 @@ public partial class ChestEditorComponent : MonoBehaviour
                 {
                     // 尝试遍历返回的集合
                     var resultType = result.GetType();
-                    var countProp = resultType.GetProperty("Count", Il2CppHelper.BF);
+                    var countProp = resultType.GetProperty("Count", BF);
                     if (countProp != null)
                     {
                         int count = (int)(countProp.GetValue(result) ?? 0);
 
                         // 遍历每一项
-                        var getItem = resultType.GetMethod("get_Item", Il2CppHelper.BF);
+                        var getItem = resultType.GetMethod("get_Item", BF);
                         if (getItem != null)
                         {
                             for (int i = 0; i < count; i++)
@@ -919,8 +922,8 @@ public partial class ChestEditorComponent : MonoBehaviour
                                 {
                                     var entry = getItem.Invoke(result, new object[] { i });
                                     if (entry == null) continue;
-                                    int key = Il2CppHelper.GetInt(entry, "stuff_id") != 0 ? Il2CppHelper.GetInt(entry, "stuff_id") : Il2CppHelper.GetInt(entry, "Key") != 0 ? Il2CppHelper.GetInt(entry, "Key") : Il2CppHelper.GetInt(entry, "StuffId");
-                                    int val = Il2CppHelper.GetInt(entry, "count") != 0 ? Il2CppHelper.GetInt(entry, "count") : Il2CppHelper.GetInt(entry, "Value") != 0 ? Il2CppHelper.GetInt(entry, "Value") : Il2CppHelper.GetInt(entry, "Count");
+                                    int key = GetInt(entry, "stuff_id") != 0 ? GetInt(entry, "stuff_id") : GetInt(entry, "Key") != 0 ? GetInt(entry, "Key") : GetInt(entry, "StuffId");
+                                    int val = GetInt(entry, "count") != 0 ? GetInt(entry, "count") : GetInt(entry, "Value") != 0 ? GetInt(entry, "Value") : GetInt(entry, "Count");
                                     if (key > 0 && val > 0)
                                         items.Add(new ItemInfo { StuffId = key, Count = val });
                                 }
@@ -950,7 +953,7 @@ public partial class ChestEditorComponent : MonoBehaviour
     {
         try
         {
-            var countProp = list.GetType().GetProperty("Count", Il2CppHelper.BF);
+            var countProp = list.GetType().GetProperty("Count", BF);
             if (countProp != null) return (int)(countProp.GetValue(list) ?? 0);
         }
         catch { }
@@ -961,7 +964,7 @@ public partial class ChestEditorComponent : MonoBehaviour
     {
         try
         {
-            var getItem = list.GetType().GetMethod("get_Item", Il2CppHelper.BF);
+            var getItem = list.GetType().GetMethod("get_Item", BF);
             if (getItem != null) return (int)(getItem.Invoke(list, new object[] { index }) ?? 0);
         }
         catch { }
@@ -972,11 +975,11 @@ public partial class ChestEditorComponent : MonoBehaviour
     {
         try
         {
-            object? bag = Il2CppHelper.GetProp(facility, "bag");
+            object? bag = GetProp(facility, "bag");
             if (bag == null) return;
 
-            maxCap = Il2CppHelper.GetInt(bag, "limit");
-            if (maxCap == 0) maxCap = Il2CppHelper.GetInt(bag, "Limit");
+            maxCap = GetInt(bag, "limit");
+            if (maxCap == 0) maxCap = GetInt(bag, "Limit");
 
             // 计算已用容量
             var items = ReadItemsFromBag(facility);
@@ -994,22 +997,22 @@ public partial class ChestEditorComponent : MonoBehaviour
 
             foreach (var n in xNames)
             {
-                float v = Il2CppHelper.GetFloat(facility, n);
+                float v = GetFloat(facility, n);
                 if (v != 0) { px = v; break; }
             }
             foreach (var n in yNames)
             {
-                float v = Il2CppHelper.GetFloat(facility, n);
+                float v = GetFloat(facility, n);
                 if (v != 0) { py = v; break; }
             }
 
             if (px == 0 && py == 0)
             {
-                var pos = Il2CppHelper.GetProp(facility, "position") ?? Il2CppHelper.GetProp(facility, "Position") ?? Il2CppHelper.GetProp(facility, "pos");
+                var pos = GetProp(facility, "position") ?? GetProp(facility, "Position") ?? GetProp(facility, "pos");
                 if (pos != null)
                 {
-                    px = Il2CppHelper.GetFloat(pos, "x");
-                    py = Il2CppHelper.GetFloat(pos, "y");
+                    px = GetFloat(pos, "x");
+                    py = GetFloat(pos, "y");
                 }
             }
         }
@@ -1035,7 +1038,7 @@ public partial class ChestEditorComponent : MonoBehaviour
             if (mainScene == null) { Plugin.LogInfo("[Locate] mainScene is null"); FallbackLocate(targetX, targetY); return; }
 
             // 获取 camera_helper
-            var cameraHelper = Il2CppHelper.GetProp(mainScene, "camera_helper");
+            var cameraHelper = GetProp(mainScene, "camera_helper");
             if (cameraHelper == null) { Plugin.LogInfo("[Locate] cameraHelper is null"); FallbackLocate(targetX, targetY); return; }
 
             // 调用 CameraSetTo(float, float, bool)
@@ -1052,7 +1055,7 @@ public partial class ChestEditorComponent : MonoBehaviour
             {
                 Plugin.LogInfo("[Locate] CameraSetTo(float,float,bool) not found, trying IL2CPP");
                 // 回退: IL2CPP 方式
-                IntPtr chPtr = GetIl2CppPtrFromObj(cameraHelper);
+                IntPtr chPtr = GetIl2CppPtr(cameraHelper);
                 if (chPtr == IntPtr.Zero) { FallbackLocate(targetX, targetY); return; }
                 IntPtr chClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(chPtr);
 
@@ -1088,7 +1091,7 @@ public partial class ChestEditorComponent : MonoBehaviour
                     IntPtr cameraConPtr = EntityEditor.ReadFieldSafe(chPtr, chClass, "camera_con");
                     if (cameraConPtr != IntPtr.Zero)
                     {
-                        var transform = Il2CppHelper.GetProp(cameraHelper, "camera_con");
+                        var transform = GetProp(cameraHelper, "camera_con");
                         if (transform != null)
                         {
                             var tType = transform.GetType();
@@ -1114,16 +1117,6 @@ public partial class ChestEditorComponent : MonoBehaviour
         }
     }
 
-    private static IntPtr GetIl2CppPtrFromObj(object obj)
-    {
-        try
-        {
-            var prop = obj.GetType().GetProperty("Pointer", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            if (prop != null) return (IntPtr)prop.GetValue(obj)!;
-        }
-        catch { }
-        return IntPtr.Zero;
-    }
 
     private static void FallbackLocate(float targetX, float targetY)
     {
@@ -1139,14 +1132,4 @@ public partial class ChestEditorComponent : MonoBehaviour
         catch { }
     }
 
-    private static IntPtr GetIl2CppPtr(Component comp)
-    {
-        try
-        {
-            var prop = comp.GetType().GetProperty("Pointer", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            if (prop != null) return (IntPtr)prop.GetValue(comp)!;
-        }
-        catch { }
-        return IntPtr.Zero;
-    }
 }

@@ -2,322 +2,16 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using static ChestEditor.Core.JsonUtil;
+using static ChestEditor.Interop.Il2CppApi;
+using static ChestEditor.Interop.Il2CppInvoke;
+using static ChestEditor.Interop.Il2CppMemory;
+using static ChestEditor.Interop.ManagedReflect;
 
 namespace ChestEditor;
 
 internal static class Il2CppHelper
 {
-    internal const BindingFlags BF = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.FlattenHierarchy;
-
-    // IL2CPP 原生 API 缓存
-    private static MethodInfo? _il2cpp_get_class;
-    private static MethodInfo? _il2cpp_class_get_name;
-    private static MethodInfo? _il2cpp_class_get_fields;
-    private static MethodInfo? _il2cpp_field_get_name;
-    private static MethodInfo? _il2cpp_field_get_offset;
-    private static MethodInfo? _il2cpp_field_get_type;
-    private static MethodInfo? _il2cpp_type_get_type;
-    private static bool _il2cppApiCached;
-
-    private static void CacheIl2CppApi()
-    {
-        if (_il2cppApiCached) return;
-        _il2cppApiCached = true;
-        var asm = AppDomain.CurrentDomain.GetAssemblies()
-            .FirstOrDefault(a => a.GetName().Name == "Il2CppInterop.Runtime");
-        if (asm == null) { Plugin.LogInfo("[Il2CppApi] Il2CppInterop.Runtime 未找到"); return; }
-        var t = asm.GetTypes().FirstOrDefault(x => x.Name == "IL2CPP");
-        if (t == null) { Plugin.LogInfo("[Il2CppApi] IL2CPP 类未找到"); return; }
-        _il2cpp_get_class = t.GetMethod("il2cpp_object_get_class", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
-        _il2cpp_class_get_name = t.GetMethod("il2cpp_class_get_name", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
-        _il2cpp_class_get_fields = t.GetMethod("il2cpp_class_get_fields", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
-        _il2cpp_field_get_name = t.GetMethod("il2cpp_field_get_name", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
-        _il2cpp_field_get_offset = t.GetMethod("il2cpp_field_get_offset", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
-        _il2cpp_field_get_type = t.GetMethod("il2cpp_field_get_type", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
-        _il2cpp_type_get_type = t.GetMethod("il2cpp_type_get_type", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
-        Plugin.LogInfo($"[Il2CppApi] get_class={_il2cpp_get_class != null}, class_get_name={_il2cpp_class_get_name != null}, " +
-            $"class_get_fields={_il2cpp_class_get_fields != null}, field_get_name={_il2cpp_field_get_name != null}, " +
-            $"field_get_offset={_il2cpp_field_get_offset != null}");
-    }
-
-    // 从 Il2CppObjectBase 获取原生指针
-    private static IntPtr GetIl2CppPtr(object obj)
-    {
-        try
-        {
-            var prop = obj.GetType().GetProperty("Pointer", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            if (prop != null) return (IntPtr)prop.GetValue(obj)!;
-        }
-        catch { }
-        return IntPtr.Zero;
-    }
-
-    // 将 IL2CPP 返回的 char* (IntPtr) 转为 string
-    private static unsafe string? PtrToString(IntPtr ptr)
-    {
-        if (ptr == IntPtr.Zero) return null;
-        try { return System.Runtime.InteropServices.Marshal.PtrToStringAnsi(ptr); } catch { return null; }
-    }
-
-    // 获取 IL2CPP 对象的真实类名
-    private static string? GetIl2CppClassName(IntPtr ptr)
-    {
-        try
-        {
-            CacheIl2CppApi();
-            if (_il2cpp_get_class == null || _il2cpp_class_get_name == null) return null;
-            IntPtr classPtr = (IntPtr)_il2cpp_get_class.Invoke(null, new object[] { ptr })!;
-            if (classPtr == IntPtr.Zero) return null;
-            // il2cpp_class_get_name 返回 char* (IntPtr), 不是 string
-            IntPtr namePtr = (IntPtr)_il2cpp_class_get_name.Invoke(null, new object[] { classPtr })!;
-            return PtrToString(namePtr);
-        }
-        catch { return null; }
-    }
-
-    // 获取 IL2CPP 类的所有字段名和偏移
-    private static List<(string Name, int Offset)> GetIl2CppFields(IntPtr classPtr)
-    {
-        var fields = new List<(string, int)>();
-        try
-        {
-            CacheIl2CppApi();
-            if (_il2cpp_class_get_fields == null || _il2cpp_field_get_name == null || _il2cpp_field_get_offset == null)
-                return fields;
-
-            // il2cpp_class_get_fields(klass, IntPtr& iter) - iter 是 ref IntPtr
-            // 使用 IntPtr[] 数组来模拟 ref 传递
-            IntPtr iter = IntPtr.Zero;
-            object[] args = new object[] { classPtr, iter };
-
-            while (true)
-            {
-                object? result = _il2cpp_class_get_fields.Invoke(null, args);
-                if (result == null) break;
-                IntPtr field = (IntPtr)result;
-                if (field == IntPtr.Zero) break;
-
-                // 读取字段名 (返回 char*)
-                IntPtr namePtr = (IntPtr)_il2cpp_field_get_name.Invoke(null, new object[] { field })!;
-                string? name = PtrToString(namePtr);
-
-                // il2cpp_field_get_offset 返回 UInt32
-                object offsetResult = _il2cpp_field_get_offset.Invoke(null, new object[] { field })!;
-                int offset = offsetResult is uint u ? (int)u : Convert.ToInt32(offsetResult);
-
-                if (name != null) fields.Add((name, offset));
-
-                // 更新 iter 为当前 field 指针，用于下一次迭代
-                args[1] = field;
-            }
-        }
-        catch { }
-        return fields;
-    }
-
-    // 从 IL2CPP 对象指针读取 int 字段
-    private static unsafe int ReadIl2CppInt(IntPtr objPtr, int offset)
-    {
-        try { return *(int*)(objPtr + offset); } catch { return 0; }
-    }
-
-    // 从 IL2CPP 对象指针读取 float 字段
-    private static unsafe float ReadIl2CppFloat(IntPtr objPtr, int offset)
-    {
-        try { return *(float*)(objPtr + offset); } catch { return 0; }
-    }
-
-    // 从 IL2CPP 对象指针读取 string 字段
-    private static unsafe string? ReadIl2CppString(IntPtr objPtr, int offset)
-    {
-        try
-        {
-            IntPtr strPtr = *(IntPtr*)(objPtr + offset);
-            if (strPtr == IntPtr.Zero) return null;
-            // IL2CPP string 对象布局: [klass(IntPtr), monitor(IntPtr), length(int), chars...]
-            // 但实际布局取决于平台。在 64 位上: 前 8 字节是 klass, 接下来 4 字节是 length
-            int len = *(int*)(strPtr + IntPtr.Size);
-            if (len <= 0 || len > 10000) return null;
-            // UTF-16 chars 从 IntPtr.Size + 4 开始（无 padding 在 64 位上）
-            char* chars = (char*)(strPtr + IntPtr.Size + 4);
-            return new string(chars, 0, len);
-        }
-        catch { return null; }
-    }
-
-    // 从 IL2CPP 对象指针读取 List<int> 的内容
-    private static unsafe List<int>? ReadIl2CppIntList(IntPtr objPtr, int offset)
-    {
-        try
-        {
-            IntPtr listPtr = *(IntPtr*)(objPtr + offset);
-            if (listPtr == IntPtr.Zero) return null;
-
-            CacheIl2CppApi();
-            if (_il2cpp_get_class == null) return null;
-
-            IntPtr classPtr = (IntPtr)_il2cpp_get_class.Invoke(null, new object[] { listPtr })!;
-            if (classPtr == IntPtr.Zero) return null;
-
-            // 遍历字段找 _size 和 _items
-            int size = -1;
-            int itemsOffset = -1;
-            var fields = GetIl2CppFields(classPtr);
-            foreach (var (name, off) in fields)
-            {
-                if (name == "_size") size = ReadIl2CppInt(listPtr, off);
-                else if (name == "_items") itemsOffset = off;
-            }
-
-            if (size <= 0 || itemsOffset < 0) return null;
-
-            // _items 是 T[] 数组
-            IntPtr itemsPtr = *(IntPtr*)(listPtr + itemsOffset);
-            if (itemsPtr == IntPtr.Zero) return null;
-
-            // 数组对象布局: [klass(IntPtr), monitor(IntPtr), max_length(int), length(int), data...]
-            // 但实际上 IL2CPP 数组: [Il2CppObject(2*IntPtr), bounds(Il2CppArrayBounds), max_length(int), data...]
-            // Il2CppObject = klass(8) + monitor(8), bounds = length(4) + lower_bound(4)
-            // 所以数据从 offset = 2*IntPtr.Size + 8 开始
-            int dataStart = 2 * IntPtr.Size + 8;
-            var result = new List<int>();
-            for (int i = 0; i < size; i++)
-            {
-                int val = *(int*)(itemsPtr + dataStart + i * 4);
-                result.Add(val);
-            }
-            return result;
-        }
-        catch { return null; }
-    }
-
-    // 写入 IL2CPP 对象的 int 字段
-    private static unsafe void WriteIl2CppInt(IntPtr objPtr, int offset, int value)
-    {
-        try { *(int*)(objPtr + offset) = value; } catch { }
-    }
-
-    // 读取 IL2CPP 对象的所有字段
-    internal static Dictionary<string, object?> ReadIl2CppFields(object obj)
-    {
-        var dict = new Dictionary<string, object?>();
-        try
-        {
-            IntPtr ptr = GetIl2CppPtr(obj);
-            if (ptr == IntPtr.Zero) return dict;
-
-            CacheIl2CppApi();
-            if (_il2cpp_get_class == null) return dict;
-
-            IntPtr classPtr = (IntPtr)_il2cpp_get_class.Invoke(null, new object[] { ptr })!;
-            if (classPtr == IntPtr.Zero) return dict;
-
-            var fields = GetIl2CppFields(classPtr);
-            foreach (var (name, offset) in fields)
-            {
-                try
-                {
-                    // 简单启发：偏移大的是引用类型（string 等），偏移小且对齐的是值类型
-                    // 对于 string 类型字段，尝试读取为 string
-                    // 对于 int 类型字段，尝试读取为 int
-                    // 先尝试 int，如果值看起来像指针则尝试 string
-                    int intVal = ReadIl2CppInt(ptr, offset);
-                    // IL2CPP 对象的字段从 IntPtr.Size 开始（前 IntPtr.Size 是类指针）
-                    // 所以实际偏移需要加上 IntPtr.Size... 等等，offset 已经是相对于对象起始的偏移了
-                    dict[name] = intVal;
-                }
-                catch { }
-            }
-        }
-        catch { }
-        return dict;
-    }
-
-    internal static object? GetProp(object obj, string name)
-    {
-        try
-        {
-            var t = obj.GetType();
-            while (t != null && t != typeof(object))
-            {
-                var prop = t.GetProperty(name, BF);
-                if (prop != null) return prop.GetValue(obj);
-                t = t.BaseType;
-            }
-        }
-        catch { }
-        return null;
-    }
-
-    internal static int GetInt(object obj, string name)
-    {
-        try
-        {
-            var t = obj.GetType();
-            while (t != null && t != typeof(object))
-            {
-                var field = t.GetField(name, BF);
-                if (field != null) return (int)(field.GetValue(obj) ?? 0);
-                var prop = t.GetProperty(name, BF);
-                if (prop != null) return (int)(prop.GetValue(obj) ?? 0);
-                t = t.BaseType;
-            }
-        }
-        catch { }
-        return 0;
-    }
-
-    internal static int GetGuid(object obj)
-    {
-        try
-        {
-            var t = obj.GetType();
-            while (t != null && t != typeof(object))
-            {
-                foreach (var name in new[] { "Guid", "guid" })
-                {
-                    var prop = t.GetProperty(name, BF);
-                    if (prop != null) { var g = prop.GetGetMethod(); if (g != null) return (int)(g.Invoke(obj, null) ?? 0); }
-                }
-                t = t.BaseType;
-            }
-        }
-        catch { }
-        return 0;
-    }
-
-    internal static float GetFloat(object obj, string name)
-    {
-        try
-        {
-            var t = obj.GetType();
-            while (t != null && t != typeof(object))
-            {
-                var field = t.GetField(name, BF);
-                if (field != null) return Convert.ToSingle(field.GetValue(obj) ?? 0);
-                var prop = t.GetProperty(name, BF);
-                if (prop != null) return Convert.ToSingle(prop.GetValue(obj) ?? 0);
-                t = t.BaseType;
-            }
-        }
-        catch { }
-        return 0;
-    }
-
-    internal static IntPtr FindIl2CppMethod(object facility, string methodName)
-    {
-        if (facility is not Il2CppInterop.Runtime.InteropTypes.Il2CppObjectBase il2cppObj) return IntPtr.Zero;
-        IntPtr objPtr = Il2CppInterop.Runtime.IL2CPP.Il2CppObjectBaseToPtrNotNull(il2cppObj);
-        IntPtr realClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(objPtr);
-        IntPtr searchClass = realClass;
-        while (searchClass != IntPtr.Zero)
-        {
-            var m = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(searchClass, methodName, 0);
-            if (m != IntPtr.Zero) return m;
-            searchClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(searchClass);
-        }
-        return IntPtr.Zero;
-    }
 
     internal static List<KeyValuePair<int, int>>? ReadStuffPlanDic(object facility)
     {
@@ -1038,22 +732,6 @@ internal static class Il2CppHelper
         }
     }
 
-    internal static void SetInt(object obj, string name, int value)
-    {
-        try
-        {
-            var t = obj.GetType();
-            while (t != null && t != typeof(object))
-            {
-                var field = t.GetField(name, BF);
-                if (field != null) { field.SetValue(obj, value); return; }
-                var prop = t.GetProperty(name, BF);
-                if (prop != null) { prop.SetValue(obj, value); return; }
-                t = t.BaseType;
-            }
-        }
-        catch { }
-    }
 
     // ====== 龙魂列表读取 ======
     internal static List<Dictionary<string, object?>>? ReadDragonSouls()
@@ -1081,9 +759,8 @@ internal static class Il2CppHelper
             IntPtr firstPtr = GetIl2CppPtr(first);
             if (firstPtr == IntPtr.Zero) return null;
 
-            CacheIl2CppApi();
-            IntPtr classPtr = (IntPtr)_il2cpp_get_class!.Invoke(null, new object[] { firstPtr })!;
-            var fields = GetIl2CppFields(classPtr);
+            IntPtr classPtr = Il2CppApi.GetClass(firstPtr);
+            var fields = Il2CppApi.EnumerateFields(classPtr);
 
             // 过滤掉静态字段 (offset=0 且不是第一个字段) 和已知常量
             var instanceFields = fields.Where(f =>
@@ -1091,33 +768,13 @@ internal static class Il2CppHelper
                 f.Name != "HEAD" && f.Name != "SHIELD" && f.Name != "CLAW" && f.Name != "CLOUD"
             ).ToList();
 
-            // 获取字段类型信息
-            var fieldTypes = new Dictionary<string, int>(); // 0=int, 1=string, 2=list
-            if (_il2cpp_field_get_type != null && _il2cpp_type_get_type != null && _il2cpp_class_get_fields != null)
+            // 获取字段类型信息（0=int, 1=string, 2=list）
+            var fieldTypes = new Dictionary<string, int>();
+            foreach (var f in fields)
             {
-                object[] args = new object[] { classPtr, IntPtr.Zero };
-                int fi = 0;
-                while (fi < fields.Count)
-                {
-                    object? fieldResult = _il2cpp_class_get_fields.Invoke(null, args);
-                    if (fieldResult == null) break;
-                    IntPtr fieldPtr = (IntPtr)fieldResult;
-                    if (fieldPtr == IntPtr.Zero) break;
-
-                    IntPtr typePtr = (IntPtr)_il2cpp_field_get_type.Invoke(null, new object[] { fieldPtr })!;
-                    if (typePtr != IntPtr.Zero)
-                    {
-                        int typeEnum = (int)_il2cpp_type_get_type.Invoke(null, new object[] { typePtr })!;
-                        // typeEnum: 14=string, 8=i4(int), 9=u4, 1=void*, etc.
-                        // 对于引用类型 (class/interface), typeEnum 可能是其他值
-                        string fn = fields[fi].Name;
-                        if (typeEnum == 14) fieldTypes[fn] = 1; // string
-                        else if (fn == "nature_list") fieldTypes[fn] = 2; // List<int>, 已知
-                        else fieldTypes[fn] = 0; // int/其他值类型
-                    }
-                    args[1] = fieldPtr;
-                    fi++;
-                }
+                if (f.TypeName.Contains("String")) fieldTypes[f.Name] = 1;
+                else if (f.Name == "nature_list") fieldTypes[f.Name] = 2;
+                else fieldTypes[f.Name] = 0;
             }
 
             // 读取所有龙魂数据
@@ -1130,7 +787,7 @@ internal static class Il2CppHelper
                 if (ptr == IntPtr.Zero) continue;
 
                 var dict = new Dictionary<string, object?>();
-                foreach (var (name, offset) in instanceFields)
+                foreach (var (name, offset, _) in instanceFields)
                 {
                     try
                     {
@@ -1211,9 +868,8 @@ internal static class Il2CppHelper
             IntPtr ptr = GetIl2CppPtr(soul);
             if (ptr == IntPtr.Zero) return "无法获取原生指针";
 
-            CacheIl2CppApi();
-            IntPtr classPtr = (IntPtr)_il2cpp_get_class!.Invoke(null, new object[] { ptr })!;
-            var fields = GetIl2CppFields(classPtr);
+            IntPtr classPtr = Il2CppApi.GetClass(ptr);
+            var fields = Il2CppApi.EnumerateFields(classPtr);
             var field = fields.FirstOrDefault(f => f.Name == property);
             if (field.Name == null) return $"字段 {property} 未找到";
             if (field.Offset <= 0) return $"字段 {property} 是静态字段，不可修改";
@@ -1245,8 +901,8 @@ internal static class Il2CppHelper
             int clsAddr = cls.GetHashCode();
             if (seen.Contains(clsAddr)) break;
             seen.Add(clsAddr);
-            var fields = GetIl2CppFields(cls);
-            foreach (var (name, offset) in fields)
+            var fields = Il2CppApi.EnumerateFields(cls);
+            foreach (var (name, offset, _) in fields)
             {
                 if (offset > 0 && !_dragonFieldOffsets.ContainsKey(name))
                     _dragonFieldOffsets[name] = offset;
@@ -1265,7 +921,6 @@ internal static class Il2CppHelper
         var result = new List<Dictionary<string, object>>();
         try
         {
-            CacheIl2CppApi();
             Plugin.LogInfo("[ReadDragonEntities] 开始扫描...");
             var allGOs = UnityEngine.Resources.FindObjectsOfTypeAll<UnityEngine.GameObject>();
             Plugin.LogInfo($"[ReadDragonEntities] 共 {allGOs.Length} 个 GO");
@@ -1286,7 +941,7 @@ internal static class Il2CppHelper
                         IntPtr compPtr = GetIl2CppPtr(comp);
                         if (compPtr == IntPtr.Zero) continue;
                         IntPtr compClass = IntPtr.Zero;
-                        try { compClass = (IntPtr)_il2cpp_get_class!.Invoke(null, new object[] { compPtr })!; } catch { }
+                        try { compClass = Il2CppApi.GetClass(compPtr); } catch { }
                         if (compClass == IntPtr.Zero) continue;
 
                         // 检查是否有 hp_total 字段（战斗组件）
@@ -1301,7 +956,7 @@ internal static class Il2CppHelper
                                 int ca = cls.GetHashCode();
                                 if (seen.Contains(ca)) break;
                                 seen.Add(ca);
-                                var ff = GetIl2CppFields(cls);
+                                var ff = Il2CppApi.EnumerateFields(cls);
                                 foreach (var f in ff) { if (f.Offset > 0 && !tmpFields.Any(x => x.Item1 == f.Name)) tmpFields.Add((f.Name, f.Offset)); }
                                 try { cls = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(cls); } catch { break; }
                                 d++;
@@ -1384,7 +1039,6 @@ internal static class Il2CppHelper
     {
         try
         {
-            CacheIl2CppApi();
             var allGOs = UnityEngine.Resources.FindObjectsOfTypeAll<UnityEngine.GameObject>();
             int found = 0;
             foreach (var go in allGOs)
@@ -1402,7 +1056,7 @@ internal static class Il2CppHelper
                         IntPtr compPtr = GetIl2CppPtr(comp);
                         if (compPtr == IntPtr.Zero) continue;
                         IntPtr compClass = IntPtr.Zero;
-                        try { compClass = (IntPtr)_il2cpp_get_class!.Invoke(null, new object[] { compPtr })!; } catch { }
+                        try { compClass = Il2CppApi.GetClass(compPtr); } catch { }
                         if (compClass == IntPtr.Zero) continue;
 
                         if (!_dragonFieldOffsets.ContainsKey("hp_total"))
@@ -1416,7 +1070,7 @@ internal static class Il2CppHelper
                                 int ca = cls.GetHashCode();
                                 if (seen.Contains(ca)) break;
                                 seen.Add(ca);
-                                var ff = GetIl2CppFields(cls);
+                                var ff = Il2CppApi.EnumerateFields(cls);
                                 foreach (var f in ff) { if (f.Offset > 0 && !tmpFields.Any(x => x.Item1 == f.Name)) tmpFields.Add((f.Name, f.Offset)); }
                                 try { cls = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(cls); } catch { break; }
                                 d++;
@@ -1453,7 +1107,6 @@ internal static class Il2CppHelper
     {
         try
         {
-            CacheIl2CppApi();
 
             var allGOs = UnityEngine.Resources.FindObjectsOfTypeAll<UnityEngine.GameObject>();
             Plugin.LogInfo($"[DragonEntity] 扫描 {allGOs.Length} 个 GameObject...");
@@ -1478,10 +1131,10 @@ internal static class Il2CppHelper
                             IntPtr compPtr = GetIl2CppPtr(comp);
                             if (compPtr == IntPtr.Zero) continue;
                             IntPtr compClass = IntPtr.Zero;
-                            try { compClass = (IntPtr)_il2cpp_get_class!.Invoke(null, new object[] { compPtr })!; } catch { }
+                            try { compClass = Il2CppApi.GetClass(compPtr); } catch { }
                             if (compClass == IntPtr.Zero) continue;
 
-                            var allFields = new List<(string Name, int Offset)>();
+                            var allFields = new List<(string Name, int Offset, string TypeName)>();
                             var seen = new HashSet<int>();
                             IntPtr cls = compClass;
                             int depth = 0;
@@ -1490,7 +1143,7 @@ internal static class Il2CppHelper
                                 int clsAddr = cls.GetHashCode();
                                 if (seen.Contains(clsAddr)) break;
                                 seen.Add(clsAddr);
-                                var clsFields = GetIl2CppFields(cls);
+                                var clsFields = Il2CppApi.EnumerateFields(cls);
                                 foreach (var f in clsFields)
                                 {
                                     if (f.Offset > 0 && !allFields.Any(x => x.Name == f.Name))
@@ -1505,7 +1158,7 @@ internal static class Il2CppHelper
 
                             int stuffId = 0, guid = 0;
                             float hp = 0, hpTotal = 0, atkMax = 0, mAtkMax = 0, speed = 0, power = 0;
-                            foreach (var (name, offset) in allFields)
+                            foreach (var (name, offset, _) in allFields)
                             {
                                 try
                                 {
@@ -1633,7 +1286,6 @@ internal static class Il2CppHelper
     internal static void ClearDebuggedTypes() => _debuggedTypes.Clear();
     internal static void DebugStuffPlanDic(object facility, int stuffId, string name) { }
 
-    private static string Escape(string s) => s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "").Replace("<", "\\u003c").Replace(">", "\\u003e");
 
     // 尝试智能读取 IL2CPP 字段（检测 string vs int）
     private static void AppendIl2CppField(System.Text.StringBuilder sb, IntPtr objPtr, (string Name, int Offset) vf, bool leadingComma)
@@ -1718,19 +1370,6 @@ internal static class Il2CppHelper
         }
     }
 
-    private static bool GetBool(object obj, string name)
-    {
-        try
-        {
-            var t = obj.GetType();
-            var prop = t.GetProperty(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.FlattenHierarchy);
-            if (prop != null) return Convert.ToBoolean(prop.GetValue(obj));
-            var field = t.GetField(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.FlattenHierarchy);
-            if (field != null) return Convert.ToBoolean(field.GetValue(obj));
-        }
-        catch { }
-        return false;
-    }
 
     private static string SerializeList(object? list)
     {
