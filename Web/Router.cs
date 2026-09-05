@@ -104,7 +104,7 @@ internal static class Router
                 else if (result != null)
                     HttpUtil.SendJson(resp, JsonSerializer.Serialize(result));
                 else
-                    HttpUtil.SendJson(resp, "{\"ok\":true}");
+                    HttpUtil.SendJson(resp, ErrorJson("not found"), 404);
             }
             catch (HttpError he)
             {

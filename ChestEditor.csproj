@@ -26,10 +26,14 @@
 
   <ItemGroup>
     <EmbeddedResource Include="ic_app.png" LogicalName="ChestEditor.ic_app.png" />
-    <EmbeddedResource Include="Icon\**\*.png" LogicalName="ChestEditor.Icon.%(RecursiveDir)%(Filename)%(Extension)" />
-    <EmbeddedResource Include="Dragon\**\*.png" LogicalName="ChestEditor.Dragon.%(RecursiveDir)%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Icon\*.png" LogicalName="ChestEditor.Icon.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Dragon\*.png" LogicalName="ChestEditor.Dragon.%(Filename)%(Extension)" />
     <EmbeddedResource Include="field_translations.json" LogicalName="ChestEditor.field_translations.json" />
-    <EmbeddedResource Include="Web\Static\**\*" LogicalName="ChestEditor.Static.%(RecursiveDir)%(Filename)%(Extension)" />
+    <!-- 前端静态资源：按目录显式声明，避免 %(RecursiveDir) 携带反斜杠导致资源名不一致 -->
+    <EmbeddedResource Include="Web\Static\index.html" LogicalName="ChestEditor.Static.index.html" />
+    <EmbeddedResource Include="Web\Static\css\*.css" LogicalName="ChestEditor.Static.css.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Web\Static\js\*.js" LogicalName="ChestEditor.Static.js.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Web\Static\data\*.json" LogicalName="ChestEditor.Static.data.%(Filename)%(Extension)" />
   </ItemGroup>
 
   <Target Name="PostBuild" AfterTargets="PostBuildEvent">
