@@ -2262,36 +2262,6 @@ internal static class EntityEditor
     }
 
     /// <summary>
-    /// 在对象上读取指定名称的指针字段（含父类搜索）
-    /// </summary>
-    private static IntPtr ReadFieldRecursive(IntPtr objPtr, IntPtr classPtr, string fieldName)
-    {
-        IntPtr searchCls = classPtr;
-        int depth = 0;
-        while (searchCls != IntPtr.Zero && depth < 10)
-        {
-            IntPtr fi = IntPtr.Zero;
-            IntPtr field;
-            while ((field = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_fields(searchCls, ref fi)) != IntPtr.Zero)
-            {
-                string? fn = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_field_get_name(field));
-                if (fn == fieldName)
-                {
-                    int offset = (int)Il2CppInterop.Runtime.IL2CPP.il2cpp_field_get_offset(field);
-                    unsafe
-                    {
-                        IntPtr* ptr = (IntPtr*)(objPtr + offset);
-                        return *ptr;
-                    }
-                }
-            }
-            searchCls = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(searchCls);
-            depth++;
-        }
-        return IntPtr.Zero;
-    }
-
-    /// <summary>
     /// 从游戏管理器（PrefabManager 等）中移除实体引用，防止 OnGameExit 时空引用
     /// </summary>
     private static void RemoveFromManagers(IntPtr entityPtr, IntPtr classPtr, string className)
@@ -2477,109 +2447,6 @@ internal static class EntityEditor
             }
         }
         catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] CleanupReferencesInScene error: {ex.Message}"); }
-    }
-
-    /// <summary>
-    /// 从 Territory 实例中读取 build_helper 字段
-    /// </summary>
-    private static IntPtr ReadBuildHelperFromTerritory(IntPtr territoryPtr, IntPtr territoryClass)
-    {
-        try
-        {
-            // 在 Territory 类（含父类）中查找 build_helper 字段
-            IntPtr searchCls = territoryClass;
-            int depth = 0;
-            while (searchCls != IntPtr.Zero && depth < 10)
-            {
-                IntPtr fi = IntPtr.Zero;
-                IntPtr field;
-                while ((field = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_fields(searchCls, ref fi)) != IntPtr.Zero)
-                {
-                    string? fieldName = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_field_get_name(field));
-                    if (fieldName == "build_helper")
-                    {
-                        int offset = (int)Il2CppInterop.Runtime.IL2CPP.il2cpp_field_get_offset(field);
-                        string clsNm = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_name(searchCls)) ?? "?";
-                        Plugin.LogInfo($"[EntityEditor] Found build_helper field on {clsNm} offset={offset}");
-                        unsafe
-                        {
-                            IntPtr* ptr = (IntPtr*)(territoryPtr + offset);
-                            IntPtr buildHelper = *ptr;
-                            Plugin.LogInfo($"[EntityEditor] build_helper value={buildHelper.ToInt64():X}");
-                            return buildHelper;
-                        }
-                    }
-                }
-                searchCls = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(searchCls);
-                depth++;
-            }
-            Plugin.LogInfo($"[EntityEditor] build_helper field not found on Territory");
-        }
-        catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] ReadBuildHelperFromTerritory error: {ex.Message}"); }
-        return IntPtr.Zero;
-    }
-
-    /// <summary>
-    /// 遍历所有 GameObject 查找 NpcHelper 组件，尝试移除指定 NPC
-    /// </summary>
-    private static void RemoveFromNpcHelper(IntPtr npcPtr, string className)
-    {
-        var allGOs = Resources.FindObjectsOfTypeAll<GameObject>();
-        foreach (var go in allGOs)
-        {
-            try
-            {
-                var comps = go.GetComponents<Component>();
-                foreach (var comp in comps)
-                {
-                    if (comp == null) continue;
-                    string cn = comp.GetIl2CppType().Name;
-                    if (cn != "NpcHelper") continue;
-
-                    IntPtr compPtr = GetIl2CppPtr(comp);
-                    if (compPtr == IntPtr.Zero) continue;
-
-                    IntPtr compClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(compPtr);
-
-                    // 列出 NpcHelper 的所有方法
-                    IntPtr iter = IntPtr.Zero;
-                    IntPtr m;
-                    Plugin.LogInfo($"[EntityEditor] Found NpcHelper on {go.name}, listing methods:");
-                    while ((m = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_methods(compClass, ref iter)) != IntPtr.Zero)
-                    {
-                        string? mName = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_name(m));
-                        if (mName != null && (mName.Contains("Remove") || mName.Contains("Delete") || mName.Contains("Despawn") || mName.Contains("Kill") || mName.Contains("Npc") || mName.Contains("npc")))
-                            Plugin.LogInfo($"[EntityEditor]   NpcHelper.{mName}");
-                    }
-
-                    // 尝试调用 RemoveNpc / Remove / Delete 等方法
-                    string[] removeNames = { "RemoveNpc", "Remove", "Delete", "Despawn", "Kill", "RemoveEntity", "RemoveById" };
-                    foreach (var methodName in removeNames)
-                    {
-                        IntPtr methodPtr = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(compClass, methodName, 1);
-                        if (methodPtr != IntPtr.Zero)
-                        {
-                            Plugin.LogInfo($"[EntityEditor] Trying NpcHelper.{methodName}(ptr)");
-                            try
-                            {
-                                IntPtr exception = IntPtr.Zero;
-                                unsafe
-                                {
-                                    void* argPtr = (void*)npcPtr;
-                                    void** args = &argPtr;
-                                    Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(methodPtr, compPtr, args, ref exception);
-                                }
-                                Plugin.LogInfo($"[EntityEditor] Called NpcHelper.{methodName} OK");
-                                return;
-                            }
-                            catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] NpcHelper.{methodName} failed: {ex.Message}"); }
-                        }
-                    }
-                    return;
-                }
-            }
-            catch { }
-        }
     }
 
     private static string Escape(string s) => s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "").Replace("<", "\\u003c").Replace(">", "\\u003e");
@@ -2783,35 +2650,6 @@ internal static class EntityEditor
         if (start < content.Length)
             result.Add(content.Substring(start));
         return result;
-    }
-
-    internal static void ClearModification(int guid, string field)
-    {
-        if (guid <= 0 || string.IsNullOrEmpty(field)) return;
-        string key = $"{guid}:{field}";
-        _pendingModifications.Remove(key);
-    }
-
-    internal static void ClearAllModificationsForGuid(int guid)
-    {
-        var prefix = $"{guid}:";
-        var keysToRemove = _pendingModifications.Keys.Where(k => k.StartsWith(prefix)).ToList();
-        foreach (var k in keysToRemove) _pendingModifications.Remove(k);
-    }
-
-    internal static string GetPendingModificationsJson()
-    {
-        var sb = new System.Text.StringBuilder();
-        sb.Append('{');
-        bool first = true;
-        foreach (var kv in _pendingModifications)
-        {
-            if (!first) sb.Append(',');
-            first = false;
-            sb.Append($"\"{Escape(kv.Key)}\":{kv.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
-        }
-        sb.Append('}');
-        return sb.ToString();
     }
 
     /// <summary>
