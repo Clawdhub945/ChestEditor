@@ -23,10 +23,21 @@ internal sealed class Route
         pathParams = new Dictionary<string, string>();
         if (Method != "*" && Method != method) return false;
         var parts = path.Trim('/').Split('/');
-        if (parts.Length != Segments.Length) return false;
+        // 末段 *name：通配剩余所有段
+        if (Segments.Length > 0 && Segments[^1].StartsWith('*'))
+        {
+            if (parts.Length < Segments.Length) return false;
+        }
+        else if (parts.Length != Segments.Length) return false;
+
         for (int i = 0; i < Segments.Length; i++)
         {
             var seg = Segments[i];
+            if (seg.StartsWith('*'))
+            {
+                pathParams[seg[1..]] = string.Join("/", parts[i..]);
+                return true;
+            }
             if (seg.StartsWith('{') && seg.EndsWith('}'))
             {
                 if (parts[i].Length == 0) return false;

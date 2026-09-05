@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>领地修改器</title>
+<link rel="icon" href="/favicon.png" type="image/png">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+<div class="header">
+  <h1>领地修改器</h1>
+  <button id="btnRefresh">刷新</button>
+  <button id="btnAuto">自动: <span id="autoLabel">开</span></button>
+  <span class="status" id="status">就绪</span>
+</div>
+<div class="main">
+  <div class="sidebar">
+    <div class="sidebar-search"><input id="searchChest" placeholder="搜索箱子..." oninput="render()"></div>
+    <div class="chest-list" id="chestList"></div>
+  </div>
+  <div class="content" id="content">
+    <div class="empty-state">
+      <div class="icon">&#128230;</div>
+      <div class="title">选择一个箱子</div>
+      <div class="desc">从左侧列表中选择箱子查看物品</div>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="addModal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2 id="addTitle">添加物品</h2>
+      <button class="close" onclick="closeAddModal()">&times;</button>
+    </div>
+    <div class="modal-search"><input id="addSearch" placeholder="搜索物品..." oninput="renderAddList()"></div>
+    <div class="modal-count">
+      <span>数量:</span>
+      <input id="addCount" type="number" value="1" min="1">
+      <button onclick="addN(1)">+1</button>
+      <button onclick="addN(10)">+10</button>
+      <button onclick="addN(100)">+100</button>
+      <button onclick="addN(99999)">最大</button>
+    </div>
+    <div class="modal-list" id="addList"></div>
+  </div>
+</div>
+
+<div class="modal" id="planModal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2 id="planTitle">添加计划库存</h2>
+      <button class="close" onclick="closePlanModal()">&times;</button>
+    </div>
+    <div class="modal-search"><input id="planSearch" placeholder="搜索物品..." oninput="renderPlanList()"></div>
+    <div class="modal-count">
+      <span>计划数量:</span>
+      <input id="planCount" type="number" value="1" min="1">
+      <button onclick="planN(1)">+1</button>
+      <button onclick="planN(10)">+10</button>
+      <button onclick="planN(100)">+100</button>
+    </div>
+    <div class="modal-list" id="planList"></div>
+  </div>
+</div>
+
+<script src="/static/js/state.js"></script>
+<script src="/static/js/ui.js"></script>
+<script src="/static/js/api.js"></script>
+<script src="/static/js/chest.js"></script>
+<script src="/static/js/dragon.js"></script>
+<script src="/static/js/npc.js"></script>
+<script src="/static/js/tech.js"></script>
+<script src="/static/js/entity.js"></script>
+<script src="/static/js/main.js"></script>
+</body>
+</html>

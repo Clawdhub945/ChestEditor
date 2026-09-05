@@ -29,6 +29,7 @@
     <EmbeddedResource Include="Icon\**\*.png" LogicalName="ChestEditor.Icon.%(RecursiveDir)%(Filename)%(Extension)" />
     <EmbeddedResource Include="Dragon\**\*.png" LogicalName="ChestEditor.Dragon.%(RecursiveDir)%(Filename)%(Extension)" />
     <EmbeddedResource Include="field_translations.json" LogicalName="ChestEditor.field_translations.json" />
+    <EmbeddedResource Include="Web\Static\**\*" LogicalName="ChestEditor.Static.%(RecursiveDir)%(Filename)%(Extension)" />
   </ItemGroup>
 
   <Target Name="PostBuild" AfterTargets="PostBuildEvent">
