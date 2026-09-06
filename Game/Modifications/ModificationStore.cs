@@ -35,6 +35,15 @@ internal static class ModificationStore
         SaveToDisk();
     }
 
+    /// <summary>是否有 NPC 类待恢复记录（npc: 前缀 或 裸 guid: 键）</summary>
+    internal static bool HasNpcRecords()
+    {
+        foreach (var kv in _pendingModifications)
+            if (!kv.Key.StartsWith("dragon:", StringComparison.Ordinal) && !kv.Key.StartsWith("dragone:", StringComparison.Ordinal))
+                return true;
+        return false;
+    }
+
     /// <summary>取某前缀下的全部修改（返回完整 key，前缀后的部分自行解析）</summary>
     internal static List<KeyValuePair<string, float>> GetByPrefix(string prefix)
     {

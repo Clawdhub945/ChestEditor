@@ -50,14 +50,31 @@ public class ChestEditorComponent : MonoBehaviour
             catch (Exception ex) { Plugin.LogError($"打开浏览器失败: {ex.Message}"); }
         }
 
-        // 读档后延迟重应用（一次全场景扫描：NPC修改 + 地图龙实体属性）
+        // 读档后延迟重应用（只扫有记录的部分；NPC 与龙实体共享同一次 GO 枚举）
         if (_deferredReapplyPending && Time.time >= _deferredReapplyAt)
         {
             _deferredReapplyPending = false;
             try
             {
-                ModificationStore.ReapplyModifications();
-                DragonService.RestoreEntityModificationsViaScan();
+                bool needNpc = ModificationStore.HasNpcRecords();
+                bool needDragonEnt = ModificationStore.GetByPrefix("dragone:").Count > 0;
+                if (needNpc || needDragonEnt)
+                {
+                    // 一次 FindObjectsOfTypeAll 喂给两个扫描器，省一半枚举开销
+                    var allGOs = UnityEngine.Resources.FindObjectsOfTypeAll<UnityEngine.GameObject>();
+                    if (needNpc)
+                    {
+                        EntityScan.ScanAll(allGOs);
+                        ModificationStore.ApplyPendingModifications();
+                    }
+                    if (needDragonEnt)
+                        DragonService.RestoreEntityModificationsViaScan(allGOs);
+                    Plugin.LogInfo($"[ChestEditor] 延迟恢复完成 (npc={needNpc}, dragonEntity={needDragonEnt})");
+                }
+                else
+                {
+                    Plugin.LogInfo("[ChestEditor] 无待恢复记录，跳过延迟扫描");
+                }
             }
             catch (Exception ex) { Plugin.LogError($"[ChestEditor] 读档后重应用失败: {ex.Message}"); }
         }

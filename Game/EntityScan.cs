@@ -75,7 +75,7 @@ internal static class EntityScan
     /// <summary>
     /// 统一扫描：实体扫描(stuff_id) + NPC查找(类名含Npc)，按ptrHash去重
     /// </summary>
-    internal static void ScanAll()
+    internal static void ScanAll(GameObject[]? source = null)
     {
         _byPtrHash.Clear();
         try { _entities.Clear(); } catch (Exception ex) { Plugin.LogError($"[EntityEditor] Clear error: {ex.Message}"); return; }
@@ -83,7 +83,7 @@ internal static class EntityScan
         try
         {
             GameObject[] allGOs;
-            try { allGOs = Resources.FindObjectsOfTypeAll<GameObject>(); }
+            try { allGOs = source ?? Resources.FindObjectsOfTypeAll<GameObject>(); }
             catch (Exception ex) { Plugin.LogError($"[EntityEditor] FindObjectsOfTypeAll error: {ex.Message}"); return; }
 
             var seenPtrHash = new HashSet<int>();

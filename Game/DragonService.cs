@@ -801,7 +801,7 @@ internal static class DragonService
     /// <summary>
     /// 游戏侧恢复入口：扫描地图实体并内联应用 dragone: 记录（需要一次场景扫描）。
     /// </summary>
-    internal static void RestoreEntityModificationsViaScan() => ReadDragonEntities();
+    internal static void RestoreEntityModificationsViaScan(UnityEngine.GameObject[]? source = null) => ReadDragonEntities(source);
 
     private static void ApplySoulModifications()
     {
@@ -909,14 +909,12 @@ internal static class DragonService
     private static readonly HashSet<string> _dragonFloatFields = new() { "hp", "hp_total", "atk_min", "atk_max", "magic_atk_min", "magic_atk_max", "speed", "power", "atk_range", "atk_cd", "view_range" };
 
 
-    internal static List<Dictionary<string, object>> ReadDragonEntities()
+    internal static List<Dictionary<string, object>> ReadDragonEntities(UnityEngine.GameObject[]? source = null)
     {
         var result = new List<Dictionary<string, object>>();
         try
         {
-            Plugin.LogInfo("[ReadDragonEntities] 开始扫描...");
-            var allGOs = UnityEngine.Resources.FindObjectsOfTypeAll<UnityEngine.GameObject>();
-            Plugin.LogInfo($"[ReadDragonEntities] 共 {allGOs.Length} 个 GO");
+            var allGOs = source ?? UnityEngine.Resources.FindObjectsOfTypeAll<UnityEngine.GameObject>();
             int found = 0;
             foreach (var go in allGOs)
             {
@@ -1009,13 +1007,6 @@ internal static class DragonService
         }
         catch (Exception ex) { Plugin.LogError($"[ReadDragonEntities] 异常: {ex.Message}"); }
         Plugin.LogInfo($"[ReadDragonEntities] 完成, 找到 {result.Count} 个实体");
-        foreach (var d in result)
-        {
-            int sid = d.TryGetValue("stuff_id", out var sv) ? Convert.ToInt32(sv) : 0;
-            int g = d.TryGetValue("guid", out var gv) ? Convert.ToInt32(gv) : 0;
-            float hp = d.TryGetValue("hp", out var hv) ? Convert.ToSingle(hv) : 0;
-            Plugin.LogInfo($"[ReadDragonEntities]   {d["goName"]} stuffId={sid} guid={g} hp={hp}");
-        }
         return result;
     }
 
