@@ -21,7 +21,30 @@ internal static class ModificationStore
     // ====== 修改记录 + 读档重应用 (方案3) ======
 
     // key: "guid:fieldName", value: float value
+    // 前缀约定: "npc:{npcId}:{field}"=NPC按npcId | "{guid}:{field}"=NPC按guid
+    //           "dragon:{soulGuid}:{field}"=龙魂强化(跨读档稳定的字符串GUID)
+    //           "dragone:{stuffId}:{field}"=地图龙实体战斗属性(按stuff_id匹配)
     private static readonly Dictionary<string, float> _pendingModifications = new();
+
+
+    /// <summary>按前缀约定记录任意修改，立即落盘</summary>
+    internal static void RecordRaw(string key, float value)
+    {
+        if (string.IsNullOrEmpty(key)) return;
+        _pendingModifications[key] = value;
+        SaveToDisk();
+    }
+
+    /// <summary>取某前缀下的全部修改（返回完整 key，前缀后的部分自行解析）</summary>
+    internal static List<KeyValuePair<string, float>> GetByPrefix(string prefix)
+    {
+        var list = new List<KeyValuePair<string, float>>();
+        if (_pendingModifications.Count == 0) return list;
+        foreach (var kv in _pendingModifications)
+            if (kv.Key.StartsWith(prefix, StringComparison.Ordinal))
+                list.Add(kv);
+        return list;
+    }
 
 
     internal static void RecordModification(int guid, string field, float value)

@@ -685,6 +685,7 @@ internal static class DragonService
 
     internal static string GetDragonSoulsJson()
     {
+        ApplySoulModifications(); // 读档自动恢复：直接遍历龙魂列表，无场景扫描，零卡顿
         var souls = ReadDragonSouls();
         if (souls == null) return "[]";
         var sb = new System.Text.StringBuilder();
@@ -747,11 +748,102 @@ internal static class DragonService
             if (field.Name == null) return $"字段 {property} 未找到";
             if (field.Offset <= 0) return $"字段 {property} 是静态字段，不可修改";
 
+            // 强化五项服务端同样钳制到 0-50（防止绕过前端直调 API）
+            if (IsSoulStrengthenProp(property))
+                value = Math.Clamp(value, 0, SoulStrengthenMax);
+
             WriteIl2CppInt(ptr, field.Offset, value);
             Plugin.LogInfo($"[DragonSoul] 设置 soul[{soulIndex}].{property} = {value}");
+            RecordSoulModification(soul, property, value);
             return "ok";
         }
         catch (Exception ex) { return ex.Message; }
+    }
+
+    // ====== 龙魂强化持久化 ======
+    // 龙魂带跨读档稳定的 string guid，按 "dragon:{guid}:{field}" 记录；
+    // 每次读取龙魂列表（含 3 秒轮询）前自动恢复，无场景扫描，不卡顿。
+
+    internal const int SoulStrengthenMax = 50;
+
+    private static readonly HashSet<string> _soulStrengthenProps = new() { "head", "claw", "shield", "cloud", "potentiality" };
+
+    private static bool IsSoulStrengthenProp(string p) => _soulStrengthenProps.Contains(p);
+
+    private static void RecordSoulModification(object soul, string property, int value)
+    {
+        try
+        {
+            var guid = GetProp(soul, "guid")?.ToString();
+            if (!string.IsNullOrEmpty(guid))
+                ModificationStore.RecordRaw($"dragon:{guid}:{property}", value);
+        }
+        catch { }
+    }
+
+    private static void ApplySoulModifications()
+    {
+        try
+        {
+            var pending = ModificationStore.GetByPrefix("dragon:");
+            if (pending.Count == 0) return;
+
+            var w = GameContext.GetGame();
+            if (w == null) return;
+            object? soulList = GetProp(w, "dragon_soul_list");
+            if (soulList == null) return;
+
+            var slType = soulList.GetType();
+            int count = Convert.ToInt32(slType.GetProperty("Count", BF)?.GetValue(soulList) ?? 0);
+            var getItem = slType.GetMethod("get_Item", BF);
+            if (getItem == null || count == 0) return;
+
+            // guid -> (field -> value)
+            var byGuid = new Dictionary<string, List<KeyValuePair<string, float>>>();
+            foreach (var kv in pending)
+            {
+                int a = kv.Key.IndexOf(':') + 1;
+                int b = kv.Key.IndexOf(':', a);
+                if (b <= a) continue;
+                var guid = kv.Key.Substring(a, b - a);
+                var field = kv.Key.Substring(b + 1);
+                if (!byGuid.TryGetValue(guid, out var list2)) { list2 = new List<KeyValuePair<string, float>>(); byGuid[guid] = list2; }
+                list2.Add(new KeyValuePair<string, float>(field, kv.Value));
+            }
+
+            IntPtr? classPtrCache = null;
+            var fields = new List<(string Name, int Offset, string TypeName)>();
+            for (int i = 0; i < count; i++)
+            {
+                var soul = getItem.Invoke(soulList, new object[] { i });
+                if (soul == null) continue;
+                var guid = GetProp(soul, "guid")?.ToString();
+                if (string.IsNullOrEmpty(guid) || !byGuid.TryGetValue(guid!, out var mods)) continue;
+
+                IntPtr ptr = GetIl2CppPtr(soul);
+                if (ptr == IntPtr.Zero) continue;
+                IntPtr classPtr = Il2CppApi.GetClass(ptr);
+                if (classPtr != classPtrCache)
+                {
+                    fields = Il2CppApi.EnumerateFields(classPtr);
+                    classPtrCache = classPtr;
+                }
+                foreach (var m in mods)
+                {
+                    int target = (int)m.Value;
+                    if (IsSoulStrengthenProp(m.Key)) target = Math.Clamp(target, 0, SoulStrengthenMax);
+                    var f = fields.FirstOrDefault(x => x.Name == m.Key);
+                    if (f.Name == null || f.Offset <= 0) continue;
+                    int cur = ReadIl2CppInt(ptr, f.Offset);
+                    if (cur != target)
+                    {
+                        WriteIl2CppInt(ptr, f.Offset, target);
+                        Plugin.LogInfo($"[DragonService] 恢复龙魂 {guid}.{m.Key} = {target}");
+                    }
+                }
+            }
+        }
+        catch (Exception ex) { Plugin.LogError($"[DragonService] 恢复龙魂强化失败: {ex.Message}"); }
     }
 
 
@@ -866,6 +958,26 @@ internal static class DragonService
                             }
                             catch { }
                         }
+
+                        // 应用持久化的实体属性修改（按 stuff_id 匹配，直接写内存并同步显示值）
+                        var pendingEnt = ModificationStore.GetByPrefix("dragone:" + stuffId + ":");
+                        foreach (var kv in pendingEnt)
+                        {
+                            int c = kv.Key.LastIndexOf(':');
+                            if (c < 0) continue;
+                            var fname2 = kv.Key.Substring(c + 1);
+                            if (!_dragonFieldOffsets.TryGetValue(fname2, out int off2)) continue;
+                            if (_dragonFloatFields.Contains(fname2))
+                            {
+                                WriteIl2CppFloat(compPtr, off2, kv.Value);
+                                dict[fname2] = kv.Value;
+                            }
+                            else
+                            {
+                                WriteIl2CppInt(compPtr, off2, (int)kv.Value);
+                                dict[fname2] = (int)kv.Value;
+                            }
+                        }
                         result.Add(dict);
                         break;
                     }
@@ -974,6 +1086,16 @@ internal static class DragonService
                             else
                                 *(int*)(compPtr + offset) = (int)value;
                         }
+
+                        // 记录持久化：实体读档后重建、指针会变，按 stuff_id 匹配（与面板关联方式一致）
+                        try
+                        {
+                            int stuffId = _dragonFieldOffsets.TryGetValue("stuff_id", out int sidOff)
+                                ? ReadIl2CppInt(compPtr, sidOff) : 0;
+                            if (stuffId > 0)
+                                ModificationStore.RecordRaw($"dragone:{stuffId}:{fieldName}", value);
+                        }
+                        catch { }
                         return "ok";
                     }
                 }
