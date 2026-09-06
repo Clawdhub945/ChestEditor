@@ -53,4 +53,29 @@ internal static class GameContext
         catch { }
         return null;
     }
+
+    /// <summary>Game.get_main_scene()（反编译确认：tech_helper/facility_helper 等管理器都挂在 MainScene 上）</summary>
+    internal static object? GetMainScene()
+    {
+        try
+        {
+            var csharpAsm = AppDomain.CurrentDomain.GetAssemblies()
+                .FirstOrDefault(a => a.GetName().Name == "Assembly-CSharp");
+            if (csharpAsm == null) return null;
+
+            var gameType = csharpAsm.GetTypes().FirstOrDefault(t => t.Name == "Game");
+            if (gameType == null) return null;
+
+            var getMainScene = gameType.GetMethod("get_main_scene", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+            return getMainScene?.Invoke(null, null);
+        }
+        catch { return null; }
+    }
+
+    /// <summary>main_scene.tech_helper：科技解锁的正规入口（UnlockAllTech / UnlockNewTech）</summary>
+    internal static object? GetTechHelper()
+    {
+        var ms = GetMainScene();
+        return ms == null ? null : GetProp(ms, "tech_helper");
+    }
 }

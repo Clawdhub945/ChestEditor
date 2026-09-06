@@ -178,6 +178,21 @@ internal static class TechTreeService
     {
         try
         {
+            // 解锁走游戏自带的 TechHelper.UnlockNewTech（会同步处理设施解锁、通知等全部副作用，
+            // 反编译 TechHelper__UnlockNewTech 确认；直接往 unlock_tech_list 塞 id 会漏掉这些联动）
+            if (unlock)
+            {
+                var helper = GameContext.GetTechHelper();
+                if (helper == null) return "{\"error\":\"tech_helper is null\"}";
+                IntPtr helperPtr = GetIl2CppPtr(helper);
+                IntPtr cls = helperPtr != IntPtr.Zero ? GetClass(helperPtr) : IntPtr.Zero;
+                IntPtr m = cls != IntPtr.Zero ? FindMethodInHierarchy(cls, "UnlockNewTech", 2) : IntPtr.Zero;
+                if (m == IntPtr.Zero) return "{\"error\":\"UnlockNewTech method not found\"}";
+                Invoke(m, helperPtr, techId, false);
+                return "{\"ok\":true,\"action\":\"added\"}";
+            }
+
+            // 锁定：游戏没有对应入口，手动从 unlock_tech_list 移除
             var w = GameContext.GetGame();
             if (w == null) return "{\"error\":\"Game.w is null\"}";
 
@@ -186,25 +201,17 @@ internal static class TechTreeService
 
             var listType = unlockList.GetType();
             var containsMethod = listType.GetMethod("Contains", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            var addMethod = listType.GetMethod("Add", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
             var removeMethod = listType.GetMethod("Remove", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
 
-            if (containsMethod == null || addMethod == null || removeMethod == null)
+            if (containsMethod == null || removeMethod == null)
                 return "{\"error\":\"List methods not found\"}";
 
             bool contains = Convert.ToBoolean(containsMethod.Invoke(unlockList, new object[] { techId }));
-
-            if (unlock && !contains)
-            {
-                addMethod.Invoke(unlockList, new object[] { techId });
-                return "{\"ok\":true,\"action\":\"added\"}";
-            }
-            else if (!unlock && contains)
+            if (contains)
             {
                 removeMethod.Invoke(unlockList, new object[] { techId });
                 return "{\"ok\":true,\"action\":\"removed\"}";
             }
-
             return "{\"ok\":true,\"action\":\"unchanged\"}";
         }
         catch (Exception ex)
@@ -214,53 +221,27 @@ internal static class TechTreeService
     }
 
 
+    /// <summary>
+    /// 调用游戏自带 TechHelper.UnlockAllTech(except_equip)。
+    /// 游戏内该方法会遍历 D.Ins.tech_tree_dic / tech_list_dic 并处理全部解锁副作用
+    /// （新设施列表、通知、事件科技），替代旧的 130 个硬编码 techId 手动塞表。
+    /// </summary>
     internal static string UnlockAllTechs()
     {
         try
         {
-            var w = GameContext.GetGame();
-            if (w == null) return "{\"error\":\"Game.w is null\"}";
+            var helper = GameContext.GetTechHelper();
+            if (helper == null) return "{\"error\":\"tech_helper is null (需先读档进入游戏)\"}";
 
-            var unlockList = GetProp(w, "unlock_tech_list");
-            if (unlockList == null) return "{\"error\":\"unlock_tech_list is null\"}";
+            IntPtr helperPtr = GetIl2CppPtr(helper);
+            if (helperPtr == IntPtr.Zero) return "{\"error\":\"tech_helper pointer invalid\"}";
 
-            var listType = unlockList.GetType();
-            var containsMethod = listType.GetMethod("Contains", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            var addMethod = listType.GetMethod("Add", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            if (containsMethod == null || addMethod == null) return "{\"error\":\"List methods not found\"}";
+            IntPtr cls = GetClass(helperPtr);
+            IntPtr m = FindMethodInHierarchy(cls, "UnlockAllTech", 1);
+            if (m == IntPtr.Zero) return "{\"error\":\"UnlockAllTech method not found\"}";
 
-            // All tech IDs from TECH_TREE data
-            int[] allTechIds = {
-                902022,902035,902024,902034,902023,902037,902038,902084,902036,902160,
-                902017,902020,902018,902109,902019,902021,902012,902039,902116,902013,
-                902005,902004,902007,902156,902113,902154,902155,902153,902130,902131,
-                902010,902011,902157,902158,902159,902147,902003,902099,902140,902065,
-                902066,902144,902061,902152,902075,902104,902122,902135,902136,902137,
-                902138,902139,902002,902091,902014,902015,902102,902063,902064,902009,
-                902161,902008,902112,902114,902016,902106,902134,902141,902032,902033,
-                902060,902120,902150,902059,902151,902111,902082,902083,902125,902146,
-                902126,902124,902077,902117,902078,902080,902110,902149,902081,902025,
-                902090,902143,902074,902115,902142,902133,902068,902069,902070,902071,
-                902072,902073,902052,902053,902057,902127,902055,902056,902128,902108,
-                902103,902129,902092,902097,902123,902098,902100,902094,902093,902095,
-                902049,902050,902051,902026,902027,902028,902029,902030,902031,902040,
-                902041,902042,902043,902044,902045,902046,902047,902048,902132,902096,
-                902101,902105,902118,902119,902148,902085,902086,902087,902088,902089,
-                902162,902145
-            };
-
-            int added = 0;
-            foreach (var techId in allTechIds)
-            {
-                bool contains = Convert.ToBoolean(containsMethod.Invoke(unlockList, new object[] { techId }));
-                if (!contains)
-                {
-                    addMethod.Invoke(unlockList, new object[] { techId });
-                    added++;
-                }
-            }
-
-            return $"{{\"ok\":true,\"added\":{added},\"total\":{allTechIds.Length}}}";
+            Invoke(m, helperPtr, false); // except_equip=false：连装备类科技一起解锁
+            return "{\"ok\":true}";
         }
         catch (Exception ex)
         {

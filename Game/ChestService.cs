@@ -337,211 +337,62 @@ internal static class ChestService
         object? bag = GetProp(facility, "bag");
         if (bag == null) return items;
 
-        // 获取 BagDic 对象
+        // 首选：bag.dic 是 BagDic，反编译确认其直接继承 Dictionary<int,int>，
+        // 直接枚举全部物品（O(物品种类)），替代旧的 620 次 GetStuffCount 反射调用
         object? bagDic = GetProp(bag, "dic");
-
-        // 1. 找到 bag.GetStuffCount(int, Dictionary, Dictionary) 方法
-        MethodInfo? getStuffCountMethod = null;
-        foreach (var m in bag.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+        if (bagDic is Il2CppInterop.Runtime.InteropTypes.Il2CppObjectBase il2cppDic)
         {
-            if (m.Name == "GetStuffCount")
-            {
-                var p = m.GetParameters();
-                if (p.Length == 3 && p[0].ParameterType == typeof(int))
-                {
-                    getStuffCountMethod = m;
-                    break;
-                }
-            }
-        }
-
-        // 2. 从 BagDic 中提取两个 Dictionary<int,int> 参数
-        object? dict1 = null, dict2 = null;
-        if (bagDic != null)
-        {
-            var dicType = bagDic.GetType();
-            var dicFields = new List<object>();
-            // 遍历 BagDic 的所有字段，找到 Dictionary<int,int> 类型的
-            var t = dicType;
-            while (t != null && t != typeof(object))
-            {
-                foreach (var field in t.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
-                {
-                    try
-                    {
-                        var val = field.GetValue(bagDic);
-                        if (val == null) continue;
-                        var valType = val.GetType();
-                        if (valType.IsGenericType)
-                        {
-                            var args = valType.GetGenericArguments();
-                            if (args.Length == 2 && args[0] == typeof(int) && args[1] == typeof(int))
-                            {
-
-                                dicFields.Add(val);
-                            }
-                        }
-                    }
-                    catch { }
-                }
-                t = t.BaseType;
-            }
-
-            if (dicFields.Count >= 2)
-            {
-                dict1 = dicFields[0];
-                dict2 = dicFields[1];
-            }
-            else if (dicFields.Count == 1)
-            {
-                dict1 = dicFields[0];
-            }
-        }
-
-        // 3. 用 GetStuffCount 逐个检查物品，传入实际字典
-        if (getStuffCountMethod != null)
-        {
-            var possibleIds = new List<int>();
-            foreach (var kvp in ItemCatalog.GetAllItems())
-                possibleIds.Add(kvp.Key);
-
-
-
             try
             {
-                foreach (int stuffId in possibleIds)
+                var d = il2cppDic.TryCast<Il2CppSystem.Collections.Generic.Dictionary<int, int>>();
+                if (d != null)
                 {
-                    try
+                    var enumerator = d.GetEnumerator();
+                    while (enumerator.MoveNext())
                     {
-                        var result = getStuffCountMethod.Invoke(bag, new object[] { stuffId, dict1, dict2 });
-                        int count = Convert.ToInt32(result ?? 0);
-                        if (count > 0)
-                            items.Add(new ItemInfo { StuffId = stuffId, Count = count });
+                        var kv = enumerator.Current;
+                        if (kv.Value > 0)
+                            items.Add(new ItemInfo { StuffId = kv.Key, Count = kv.Value });
                     }
-                    catch { }
-                }
-
-                if (items.Count > 0)
-                {
-
                     return items;
                 }
-                else
-                {
-
-                }
             }
-            catch
-            {
-
-            }
+            catch { }
         }
 
-        // 4. 备选：直接遍历 BagDic 的 Dictionary<int,int> 字段
-        if (bagDic != null)
+        // 兜底：bag.GetStuffCount(stuffId, excludeDic1, excludeDic2) 逐个查询可入箱物品
+        //（签名来自反编译 Bag__GetStuffCount；exclude 传 null 即原始数量）
+        try
         {
-
-            var t = bagDic.GetType();
-            while (t != null && t != typeof(object))
+            MethodInfo? getStuffCountMethod = null;
+            foreach (var m in bag.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
             {
-                foreach (var field in t.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
+                if (m.Name == "GetStuffCount")
+                {
+                    var p = m.GetParameters();
+                    if (p.Length == 3 && p[0].ParameterType == typeof(int))
+                    {
+                        getStuffCountMethod = m;
+                        break;
+                    }
+                }
+            }
+            if (getStuffCountMethod != null)
+            {
+                foreach (var kvp in ItemCatalog.GetAllItems())
                 {
                     try
                     {
-                        var val = field.GetValue(bagDic);
-                        if (val == null) continue;
-
-                        var valType = val.GetType();
-                        if (valType.IsGenericType)
-                        {
-                            var args = valType.GetGenericArguments();
-                            if (args.Length == 2 && args[0] == typeof(int) && args[1] == typeof(int))
-                            {
-
-                                var ge = valType.GetMethod("GetEnumerator", BF);
-                                if (ge != null)
-                                {
-                                    var en = ge.Invoke(val, null);
-                                    var mn = en.GetType().GetMethod("MoveNext", BF);
-                                    var cr = en.GetType().GetProperty("Current", BF);
-
-                                    while ((bool)(mn.Invoke(en, null) ?? false))
-                                    {
-                                        var entry = cr.GetValue(en);
-                                        if (entry == null) continue;
-
-                                        int key = GetInt(entry, "Key");
-                                        int v = GetInt(entry, "Value");
-                                        if (v > 0)
-                                            items.Add(new ItemInfo { StuffId = key, Count = v });
-                                    }
-
-                                    if (items.Count > 0)
-                                    {
-
-                                        return items;
-                                    }
-                                }
-                            }
-                        }
+                        var result = getStuffCountMethod.Invoke(bag, new object?[] { kvp.Key, null, null });
+                        int count = Convert.ToInt32(result ?? 0);
+                        if (count > 0)
+                            items.Add(new ItemInfo { StuffId = kvp.Key, Count = count });
                     }
                     catch { }
                 }
-
-                t = t.BaseType;
             }
         }
-
-        // 5. 备选：尝试 bag.GetAllStuff()
-        try
-        {
-            var getAllStuff = bag.GetType().GetMethod("GetAllStuff", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            if (getAllStuff != null)
-            {
-
-                var result = getAllStuff.Invoke(bag, null);
-                if (result != null)
-                {
-                    // 尝试遍历返回的集合
-                    var resultType = result.GetType();
-                    var countProp = resultType.GetProperty("Count", BF);
-                    if (countProp != null)
-                    {
-                        int count = (int)(countProp.GetValue(result) ?? 0);
-
-                        // 遍历每一项
-                        var getItem = resultType.GetMethod("get_Item", BF);
-                        if (getItem != null)
-                        {
-                            for (int i = 0; i < count; i++)
-                            {
-                                try
-                                {
-                                    var entry = getItem.Invoke(result, new object[] { i });
-                                    if (entry == null) continue;
-                                    int key = GetInt(entry, "stuff_id") != 0 ? GetInt(entry, "stuff_id") : GetInt(entry, "Key") != 0 ? GetInt(entry, "Key") : GetInt(entry, "StuffId");
-                                    int val = GetInt(entry, "count") != 0 ? GetInt(entry, "count") : GetInt(entry, "Value") != 0 ? GetInt(entry, "Value") : GetInt(entry, "Count");
-                                    if (key > 0 && val > 0)
-                                        items.Add(new ItemInfo { StuffId = key, Count = val });
-                                }
-                                catch { }
-                            }
-                        }
-                    }
-
-                    if (items.Count > 0)
-                    {
-
-                        return items;
-                    }
-                }
-            }
-        }
-        catch
-        {
-
-        }
-
+        catch { }
 
         return items;
     }
@@ -554,8 +405,9 @@ internal static class ChestService
             object? bag = GetProp(facility, "bag");
             if (bag == null) return;
 
+            // Bag.limit 字段真实存在（反编译 Bag__IsBagFullByCount）；
+            // 0 表示不限量（普通箱子），>0 表示按数量限量（码头/熔炉等）
             maxCap = GetInt(bag, "limit");
-            if (maxCap == 0) maxCap = GetInt(bag, "Limit");
 
             // 计算已用容量
             var items = precomputedItems ?? ReadItemsFromBag(facility);
@@ -601,18 +453,7 @@ internal static class ChestService
     {
         try
         {
-            // 通过 C# 反射获取 Game.get_main_scene()
-            var csharpAsm = AppDomain.CurrentDomain.GetAssemblies()
-                .FirstOrDefault(a => a.GetName().Name == "Assembly-CSharp");
-            if (csharpAsm == null) { Plugin.LogInfo("[Locate] Assembly-CSharp not found"); FallbackLocate(targetX, targetY); return; }
-
-            var gameType = csharpAsm.GetTypes().FirstOrDefault(t => t.Name == "Game");
-            if (gameType == null) { Plugin.LogInfo("[Locate] Game type not found"); FallbackLocate(targetX, targetY); return; }
-
-            var getMainScene = gameType.GetMethod("get_main_scene", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-            if (getMainScene == null) { Plugin.LogInfo("[Locate] get_main_scene not found"); FallbackLocate(targetX, targetY); return; }
-
-            var mainScene = getMainScene.Invoke(null, null);
+            var mainScene = GameContext.GetMainScene();
             if (mainScene == null) { Plugin.LogInfo("[Locate] mainScene is null"); FallbackLocate(targetX, targetY); return; }
 
             // 获取 camera_helper
