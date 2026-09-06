@@ -126,9 +126,9 @@ public static class SaveLoadPatches
             Plugin.LogInfo($"存档加载成功: {__0}");
             CachedTerritory = null; // 清除旧缓存，等待下次 WalkState 重新获取
 
-            // 延迟重应用 NPC 修改（等实体重建完成）
+            // 读档后恢复：延迟一次全场景扫描（NPC+龙实体），龙魂强化每3秒轻量重试
             if (NpcReapplyOnLoad)
-                ChestEditorComponent.Instance?.ScheduleDeferredNpcReapply();
+                ChestEditorComponent.Instance?.SchedulePostLoadRestore();
         }
     }
 

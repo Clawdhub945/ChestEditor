@@ -781,6 +781,28 @@ internal static class DragonService
         catch { }
     }
 
+    /// <summary>
+    /// 游戏侧恢复入口（不依赖网页轮询）：龙魂强化立即恢复。
+    /// 返回 true=完成（无记录或已应用）；false=游戏世界/龙魂列表未就绪，稍后重试。
+    /// </summary>
+    internal static bool TryRestoreSoulModifications()
+    {
+        if (ModificationStore.GetByPrefix("dragon:").Count == 0) return true;
+        var w = GameContext.GetGame();
+        if (w == null) return false;
+        object? soulList = GetProp(w, "dragon_soul_list");
+        if (soulList == null) return false;
+        int count = Convert.ToInt32(soulList.GetType().GetProperty("Count", BF)?.GetValue(soulList) ?? 0);
+        if (count == 0) return false;
+        ApplySoulModifications();
+        return true;
+    }
+
+    /// <summary>
+    /// 游戏侧恢复入口：扫描地图实体并内联应用 dragone: 记录（需要一次场景扫描）。
+    /// </summary>
+    internal static void RestoreEntityModificationsViaScan() => ReadDragonEntities();
+
     private static void ApplySoulModifications()
     {
         try

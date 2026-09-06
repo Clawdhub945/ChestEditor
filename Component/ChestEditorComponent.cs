@@ -15,9 +15,24 @@ public class ChestEditorComponent : MonoBehaviour
     private bool _deferredReapplyPending;
     private float _deferredReapplyAt;
 
+    // 读档后龙魂强化恢复（游戏侧自动，不依赖网页是否打开；每3秒重试直到游戏世界就绪）
+    private bool _dragonSoulRestorePending;
+    private float _dragonSoulRestoreNextTry;
+    private int _dragonRestoreTries;
+    private const int DragonRestoreMaxTries = 40; // 40次x3秒=最多等2分钟
+
     public ChestEditorComponent(IntPtr ptr) : base(ptr)
     {
         Instance = this;
+    }
+
+    /// <summary>读档后调度：12秒后一次全场景扫描（NPC+龙实体），龙魂强化则每3秒轻量重试</summary>
+    internal void SchedulePostLoadRestore()
+    {
+        ScheduleDeferredNpcReapply();
+        _dragonSoulRestorePending = true;
+        _dragonRestoreTries = 0;
+        _dragonSoulRestoreNextTry = Time.time + 3f;
     }
 
     internal void ScheduleDeferredNpcReapply(float delaySeconds = 12f)
@@ -35,15 +50,36 @@ public class ChestEditorComponent : MonoBehaviour
             catch (Exception ex) { Plugin.LogError($"打开浏览器失败: {ex.Message}"); }
         }
 
-        // 读档后延迟重应用（一次全场景扫描；用户在面板里手动扫描也会触发恢复）
+        // 读档后延迟重应用（一次全场景扫描：NPC修改 + 地图龙实体属性）
         if (_deferredReapplyPending && Time.time >= _deferredReapplyAt)
         {
             _deferredReapplyPending = false;
             try
             {
                 ModificationStore.ReapplyModifications();
+                DragonService.RestoreEntityModificationsViaScan();
             }
-            catch (Exception ex) { Plugin.LogError($"[ChestEditor] NPC 修改重应用失败: {ex.Message}"); }
+            catch (Exception ex) { Plugin.LogError($"[ChestEditor] 读档后重应用失败: {ex.Message}"); }
+        }
+
+        // 龙魂强化恢复：轻量（无场景扫描），每3秒重试直到游戏世界就绪
+        if (_dragonSoulRestorePending && Time.time >= _dragonSoulRestoreNextTry)
+        {
+            _dragonRestoreTries++;
+            if (DragonService.TryRestoreSoulModifications())
+            {
+                _dragonSoulRestorePending = false;
+                Plugin.LogInfo("[ChestEditor] 龙魂强化已恢复");
+            }
+            else if (_dragonRestoreTries >= DragonRestoreMaxTries)
+            {
+                _dragonSoulRestorePending = false;
+                Plugin.LogInfo("[ChestEditor] 龙魂强化恢复超时放弃");
+            }
+            else
+            {
+                _dragonSoulRestoreNextTry = Time.time + 3f;
+            }
         }
 
         // 执行 HTTP 线程投递的主线程任务
