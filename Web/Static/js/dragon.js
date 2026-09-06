@@ -143,8 +143,11 @@ async function summonDragonRequest(typeIndex, level, natures) {
     const res = await r.json();
     if (res.result && (res.result.includes('True') || res.result === 'ok')) {
       toast(typeName + ' Lv' + level + ' 召唤成功!');
-      // 立即拉取龙魂列表（数据变化会自动重渲染面板），不等 3 秒轮询
+      // 立即扫描地图实体 + 拉取龙魂列表（不等 3 秒轮询），
+      // 实体先扫、龙魂后拉（龙魂变化触发重渲染时实体数据已是最新）
+      await fetchDragonEntities();
       await fetchDragonSouls();
+      if (dragonView === 'souls') renderDragonSoulsPanel();
     } else {
       toast('召唤结果: ' + (res.result || '未知'), true);
     }
