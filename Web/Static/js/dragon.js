@@ -483,7 +483,7 @@ function renderDragonMaterialsPanel() {
   html += '<div class="plan-section" style="margin-top:12px">';
   html += '<div class="plan-header"><span>永恒神殿</span>';
   html += '<span style="font-size:10px;color:var(--text-muted)">' + (temple && temple.found ? '' : '未找到（领地内需有永恒圣殿）') + '</span></div>';
-  html += '<div class="items">';
+  html += '<div class="items" style="grid-template-columns:repeat(auto-fill,minmax(190px,1fr))">';
   if (temple && temple.found) {
     // 仓库数量 = 该物品在所有其他箱子中的总数（排除神殿自身）
     const wh = {};
