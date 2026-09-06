@@ -537,6 +537,9 @@ body { font-family: 'Inter', sans-serif; background: var(--bg-primary); color: v
   padding: 16px 20px;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  /* 显式按内容定行高：Chrome 对此嵌套 flex 卡片的 auto 行高计算偏低，
+     下一行卡片会盖住上一行的按钮（实测 auto≈100px vs 实际卡片 182px） */
+  grid-auto-rows: max-content;
   gap: 10px;
   align-content: start;
   /* 卡片按自身内容高度排列。默认的 stretch 会让行高被压到 min-height(90px)，
@@ -559,6 +562,13 @@ body { font-family: 'Inter', sans-serif; background: var(--bg-primary); color: v
 
 .content > .plan-section .items {
   min-height: 0;
+}
+
+/* 矮视口：计划库存少占一些，保证主物品网格至少能看到一整行卡片 */
+@media (max-height: 760px) {
+  .content > .plan-section {
+    max-height: 34%;
+  }
 }
 
 .item {
