@@ -64,6 +64,30 @@ Web/                     HTTP 层
 - 字段翻译：`field_translations.json` 已作为嵌入资源打进 DLL，无需再手动拷贝到插件目录
   （插件目录存在同名文件时优先使用，便于运行时调整）。
 
+## 数据来源（游戏源码/反编译验证）
+
+以下结论均已对照开发者源码（C:\AI\yuanma）与 IDA 反编译向量库核实：
+
+- `Bag.dic`（BagDic）直接继承 `Dictionary<int,int>`，读背包=直接枚举；`Bag.limit` 字段真实存在（0=不限量）
+- `Bag.AddStuff(id,count,notify)` / `RemoveStuff(id,count,notify)` / `GetStuffCount(id,dic1,dic2)` 为官方增删查入口
+- `main_scene.tech_helper` 提供 `UnlockAllTech(except_equip)` 与 `UnlockNewTech(tech_id, notify)`，
+  科技解锁全部走这两个正规入口（含设施联动/通知副作用）
+- `Npc : Soldier`：`_npc_type`、`npc_id`、`move_agent.SetSpeed`、`UpdateAgentMoveSpeed`、
+  `Soldier.UpdateHpProgressBarTotal`、`Npc.LeaveMapAndDestroy(reason)` 均与源码一致
+- `W.dragon_soul_list` 为 `List<DragonSoul>`；DragonSoul 字段为小写 `head/claw/shield/cloud/potentiality/nature_list`
+
+## 数据表再生成（游戏更新后）
+
+游戏官方配置位于 `C:\AI\yuanma\json_data\`（游戏导出），以下文件由此生成：
+
+| 本项目文件 | 来源 | 说明 |
+|---|---|---|
+| `Core/ItemCatalog.cs` | stuff.json + stuff2.json | 1840 条物品名+官方 stuff_type；可入箱=type∈{3,4,6} |
+| `Web/Static/data/npc_types.json` | career.json | npc_type → npc_type_name_zh-CN（78 条） |
+| `Web/Static/data/tech_tree.json` | tech_tree.json | 已确认与官方 152 条一致（含手工注释 t 字段，故未自动再生成） |
+| `Game/DragonService.cs` 内表 | dragon_nature.json / dragon_upgrade.json | 已人工核对一致；如版本更新可再生成 |
+
+
 ## 构建与部署
 
 1. `dotnet build`（需游戏本体的 BepInEx interop DLL，路径见 csproj 的 `$(GameDir)`）
