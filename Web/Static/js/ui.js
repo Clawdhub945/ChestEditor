@@ -45,13 +45,18 @@ function htmlDataCard(stuffId, name, rowsHtml) {
   return h;
 }
 
-// 单行字段：label + 数值输入框 + 设（红色按钮）
-function htmlFieldRow(label, inputId, value, onclick, opts) {
+// 单行字段：label + 数值输入框 + 按钮组（buttons: [{label, onclick}] 或单个 onclick 字符串=单"设"按钮）
+function htmlFieldRow(label, inputId, value, buttons, opts) {
   opts = opts || {};
+  const btns = Array.isArray(buttons) ? buttons : [{label:'设', onclick:buttons}];
+  const btnStyle = opts.compact
+    ? 'padding:2px 5px;font-size:10px;'
+    : 'padding:4px 12px;font-size:11px;font-weight:500;';
   let h = '<div style="width:100%;box-sizing:border-box;display:flex;align-items:center;justify-content:center;gap:4px;margin-bottom:4px">';
   h += '<span style="font-size:10px;color:var(--text-muted);flex:0 0 auto;' + (opts.labelWidth ? 'width:' + opts.labelWidth + ';' : '') + 'text-align:' + (opts.labelAlign || 'right') + '">' + label + '</span>';
   h += '<input type="number" id="' + inputId + '" value="' + value + '" min="0"' + (opts.max ? ' max="' + opts.max + '"' : '') + ' style="flex:1;min-width:0;font-size:11px;padding:2px 4px;background:var(--bg-input);border:1px solid var(--border);border-radius:3px;color:var(--text-primary);text-align:center;outline:none" onfocus="this.select()">';
-  h += '<button class="btn-rm" onclick="' + onclick + '" style="padding:4px 12px;font-size:11px;font-weight:500;border:none;border-radius:var(--radius-sm);flex:0 0 auto">设</button>';
+  for (const b of btns)
+    h += '<button class="btn-rm" onclick="' + b.onclick + '" style="' + btnStyle + 'border:none;border-radius:var(--radius-sm);flex:0 0 auto">' + b.label + '</button>';
   h += '</div>';
   return h;
 }

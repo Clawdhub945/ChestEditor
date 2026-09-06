@@ -91,44 +91,44 @@ function renderContent() {
   html += '<span class="ch-cap">' + cap + '</span>';
   html += '<button class="btn-locate" onclick="locateChest(' + selectedChest + ')">定位</button>';
   html += '<button class="btn-add" onclick="openAddModal(' + selectedChest + ')">+ 添加物品</button>';
+  if (c.planStock != null)
+    html += '<button class="btn-add-plan" style="margin-left:8px" onclick="openPlanModal(' + selectedChest + ')">+ 添加计划</button>';
   html += '</div>';
   html += '<div class="content-search"><input id="searchItem" placeholder="搜索物品..." value="' + esc(searchQuery) + '" oninput="searchQuery=this.value;renderContent()"></div>';
 
-  if (c.items.length === 0) {
+  // 合并物品与计划库存（部分容器带计划库存功能：c.planStock != null）
+  const hasPlan = c.planStock != null;
+  const planMap = {};
+  if (hasPlan) for (const ps of c.planStock) planMap[ps.stuffId] = ps;
+  const ids = [];
+  const seen = {};
+  for (const it of c.items) if (!seen[it.stuffId]) { seen[it.stuffId] = 1; ids.push(it.stuffId); }
+  if (hasPlan) for (const ps of c.planStock) if (!seen[ps.stuffId]) { seen[ps.stuffId] = 1; ids.push(ps.stuffId); }
+
+  if (ids.length === 0) {
     html += '<div class="empty-state"><div class="icon">&#128230;</div><div class="title">箱子为空</div><div class="desc">点击上方按钮添加物品</div></div>';
   } else {
     html += '<div class="items">';
-    for (const it of c.items) {
-      if (q && !it.name.toLowerCase().includes(q)) continue;
-      html += htmlItemCard(it.stuffId, it.name, it.count, {
-        inputId: 'cnt_' + it.stuffId,
-        buttons: [
-          {label:'设置', onclick:'setBagItem(' + selectedChest + ',' + it.stuffId + ')'},
-          {label:'清空', onclick:'doRemove(' + selectedChest + ',' + it.stuffId + ',' + it.count + ')'}
-        ]
-      });
+    for (const sid of ids) {
+      const bagIt = c.items.find(x => x.stuffId === sid);
+      const planIt = planMap[sid];
+      const name = (bagIt || planIt || {name:'ID:' + sid}).name;
+      if (q && !name.toLowerCase().includes(q)) continue;
+      const bagCount = bagIt ? bagIt.count : 0;
+      // 库存行：设=写入输入值，删=清空该物品
+      let rows = htmlFieldRow('库存', 'cnt_' + sid, bagCount, [
+        {label:'设', onclick:'setBagItem(' + selectedChest + ',' + sid + ')'},
+        {label:'删', onclick:'doRemove(' + selectedChest + ',' + sid + ',' + bagCount + ')'}
+      ], {compact:true});
+      // 计划库存行（仅带计划功能的容器显示）
+      if (hasPlan)
+        rows += htmlFieldRow('计划', 'plan_' + sid, planMap[sid] ? planMap[sid].count : 0, [
+          {label:'设', onclick:'setPlanItem(' + selectedChest + ',' + sid + ')'},
+          {label:'删', onclick:'doRemovePlan(' + selectedChest + ',' + sid + ')'}
+        ], {compact:true, labelWidth:'30px', labelAlign:'left'});
+      html += htmlDataCard(sid, name, rows);
     }
     html += '</div>';
-  }
-
-  // 计划库存区域
-  if (c.planStock && c.planStock.length > 0) {
-    html += '<div class="plan-section">';
-    html += '<div class="plan-header"><span>计划库存</span>';
-    html += '<button class="btn-add-plan" onclick="openPlanModal(' + selectedChest + ')">+ 添加</button></div>';
-    html += '<div class="items">';
-    for (const ps of c.planStock) {
-      html += htmlItemCard(ps.stuffId, ps.name, ps.count, {
-        cardCls: 'plan-item',
-        inputCls: 'plan-input',
-        inputId: 'plan_' + ps.stuffId,
-        buttons: [
-          {label:'设置', onclick:'setPlanItem(' + selectedChest + ',' + ps.stuffId + ')'},
-          {label:'删除', onclick:'doRemovePlan(' + selectedChest + ',' + ps.stuffId + ')'}
-        ]
-      });
-    }
-    html += '</div></div>';
   }
 
   el.innerHTML = html;
