@@ -286,8 +286,22 @@ body { font-family: 'Inter', sans-serif; background: var(--bg-primary); color: v
   min-width: 80px;
 }
 
+/* 隐藏 number 输入框的原生上下箭头：数字大时会盖住数值；
+   键盘上下键仍可微调，物品卡片另配外置 −/+ 按钮 */
+input[type='number'] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+input[type='number']::-webkit-outer-spin-button,
+input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
 .count-input {
-  width: 60px;
+  width: 100%;
+  min-width: 0;
+  flex: 1;
   padding: 3px 6px;
   border-radius: 4px;
   border: 1px solid var(--border);
@@ -295,6 +309,26 @@ body { font-family: 'Inter', sans-serif; background: var(--bg-primary); color: v
   color: var(--text-primary);
   font-size: 12px;
   text-align: center;
+}
+
+/* 外置步进按钮（物品卡片数量行） */
+.cnt-step {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 23px;
+  padding: 0;
+  background: var(--bg-input);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.cnt-step:hover {
+  border-color: var(--accent);
+  color: var(--text-primary);
 }
 
 .count-input:focus {

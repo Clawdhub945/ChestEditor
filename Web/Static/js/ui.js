@@ -26,7 +26,15 @@ function htmlMenuItem(iconHtml, name, countHtml, onclick, active, iconStyle) {
   return h;
 }
 
-// 物品卡片（图标 + 名称 + ID + 数量输入 + 按钮组）
+// 数量输入步进（外置 −/+ 按钮，原生箭头已全局隐藏）
+function stepCount(btn, delta) {
+  const input = btn.parentElement.querySelector('input');
+  if (!input) return;
+  const v = Math.max(0, (parseInt(input.value) || 0) + delta);
+  input.value = v;
+}
+
+// 物品卡片（图标 + 名称 + ID + 数量步进 + 按钮组）
 // 容器物品 / 计划库存 / 龙素材 各列表共用
 // opts: { inputId, inputCls, cardCls, buttons: [{label, onclick}] }
 function htmlItemCard(stuffId, name, count, opts) {
@@ -35,7 +43,9 @@ function htmlItemCard(stuffId, name, count, opts) {
   h += '<div class="iname" title="' + esc(name) + '">' + esc(name) + '</div>';
   h += '<div class="iid">ID:' + stuffId + '</div>';
   h += '<div class="icount">';
+  h += '<button class="cnt-step" onclick="stepCount(this,-1)">−</button>';
   h += '<input type="number" class="count-input' + (opts.inputCls ? ' ' + opts.inputCls : '') + '" value="' + count + '" min="0" id="' + opts.inputId + '">';
+  h += '<button class="cnt-step" onclick="stepCount(this,1)">+</button>';
   h += '</div>';
   h += '<div class="btns">';
   for (const b of opts.buttons)
