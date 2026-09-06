@@ -100,17 +100,13 @@ function renderContent() {
     html += '<div class="items">';
     for (const it of c.items) {
       if (q && !it.name.toLowerCase().includes(q)) continue;
-      html += '<div class="item">';
-      html += '<img src="/icon/' + it.stuffId + '" onerror="hideImg(this)">';
-      html += '<div class="iname" title="' + esc(it.name) + '">' + esc(it.name) + '</div>';
-      html += '<div class="iid">ID:' + it.stuffId + '</div>';
-      html += '<div class="icount">';
-      html += '<input type="number" class="count-input" value="' + it.count + '" min="0" id="cnt_' + it.stuffId + '">';
-      html += '</div>';
-      html += '<div class="btns">';
-      html += '<button class="btn-rm" onclick="setBagItem(' + selectedChest + ',' + it.stuffId + ')">设置</button>';
-      html += '<button class="btn-rm" onclick="doRemove(' + selectedChest + ',' + it.stuffId + ',' + it.count + ')">清空</button>';
-      html += '</div></div>';
+      html += htmlItemCard(it.stuffId, it.name, it.count, {
+        inputId: 'cnt_' + it.stuffId,
+        buttons: [
+          {label:'设置', onclick:'setBagItem(' + selectedChest + ',' + it.stuffId + ')'},
+          {label:'清空', onclick:'doRemove(' + selectedChest + ',' + it.stuffId + ',' + it.count + ')'}
+        ]
+      });
     }
     html += '</div>';
   }
@@ -122,17 +118,15 @@ function renderContent() {
     html += '<button class="btn-add-plan" onclick="openPlanModal(' + selectedChest + ')">+ 添加</button></div>';
     html += '<div class="items">';
     for (const ps of c.planStock) {
-      html += '<div class="item plan-item">';
-      html += '<img src="/icon/' + ps.stuffId + '" onerror="hideImg(this)">';
-      html += '<div class="iname" title="' + esc(ps.name) + '">' + esc(ps.name) + '</div>';
-      html += '<div class="iid">ID:' + ps.stuffId + '</div>';
-      html += '<div class="icount">';
-      html += '<input type="number" class="count-input plan-input" value="' + ps.count + '" min="0" id="plan_' + ps.stuffId + '">';
-      html += '</div>';
-      html += '<div class="btns">';
-      html += '<button class="btn-rm" onclick="setPlanItem(' + selectedChest + ',' + ps.stuffId + ')">设置</button>';
-      html += '<button class="btn-rm" onclick="doRemovePlan(' + selectedChest + ',' + ps.stuffId + ')">删除</button>';
-      html += '</div></div>';
+      html += htmlItemCard(ps.stuffId, ps.name, ps.count, {
+        cardCls: 'plan-item',
+        inputCls: 'plan-input',
+        inputId: 'plan_' + ps.stuffId,
+        buttons: [
+          {label:'设置', onclick:'setPlanItem(' + selectedChest + ',' + ps.stuffId + ')'},
+          {label:'删除', onclick:'doRemovePlan(' + selectedChest + ',' + ps.stuffId + ')'}
+        ]
+      });
     }
     html += '</div></div>';
   }
@@ -218,28 +212,39 @@ async function doRemove(ci, sid, cnt) {
 }
 
 
-function openAddModal(ci) {
-  addChestIndex = ci;
-  document.getElementById('addTitle').textContent = '向 [' + chests[ci].name + '] 添加物品';
-  document.getElementById('addCount').value = 1;
-  document.getElementById('addSearch').value = '';
-  document.getElementById('addModal').classList.add('show');
-  renderAddList();
+// ===== 添加物品 / 计划库存 通用 Modal =====
+// 两套 Modal 结构完全相同，只有 DOM id 前缀与应用动作不同
+const ITEM_MODALS = {
+  add:  {modalId:'addModal',  titleId:'addTitle',  countId:'addCount',  searchId:'addSearch',  listId:'addList',
+         titlePrefix:'向 [{name}] 添加物品', applyFn:'doAdd',  nFn:'addN'},
+  plan: {modalId:'planModal', titleId:'planTitle', countId:'planCount', searchId:'planSearch', listId:'planList',
+         titlePrefix:'向 [{name}] 添加计划库存', applyFn:'doAddPlan', nFn:'planN'}
+};
+
+let _modalChestIndex = -1;
+
+function openItemModal(kind, ci) {
+  const cfg = ITEM_MODALS[kind];
+  _modalChestIndex = ci;
+  document.getElementById(cfg.titleId).textContent = cfg.titlePrefix.replace('{name}', chests[ci].name);
+  document.getElementById(cfg.countId).value = 1;
+  document.getElementById(cfg.searchId).value = '';
+  document.getElementById(cfg.modalId).classList.add('show');
+  renderModalList(kind);
 }
 
-
-function closeAddModal() {
-  document.getElementById('addModal').classList.remove('show');
+function closeItemModal(kind) {
+  document.getElementById(ITEM_MODALS[kind].modalId).classList.remove('show');
 }
 
-
-function renderAddList() {
-  const q = document.getElementById('addSearch').value.toLowerCase();
-  const el = document.getElementById('addList');
+function renderModalList(kind) {
+  const cfg = ITEM_MODALS[kind];
+  const q = document.getElementById(cfg.searchId).value.toLowerCase();
+  const el = document.getElementById(cfg.listId);
   let html = '';
   for (const it of items) {
     if (q && !it.name.toLowerCase().includes(q)) continue;
-    html += '<div class="modal-item" onclick="doAdd(' + it.stuffId + ')">';
+    html += '<div class="modal-item" onclick="' + cfg.applyFn + '(' + it.stuffId + ')">';
     html += '<img src="/icon/' + it.stuffId + '" onerror="hideImg(this)">';
     html += '<span class="mi-name">' + esc(it.name) + '</span>';
     html += '<span class="mi-id">ID:' + it.stuffId + '</span>';
@@ -248,90 +253,40 @@ function renderAddList() {
   el.innerHTML = html;
 }
 
+function modalSetN(kind, n) {
+  document.getElementById(ITEM_MODALS[kind].countId).value = n;
+}
+
+// ===== 旧入口（index.html 静态 DOM 引用的函数名，保持兼容） =====
+function openAddModal(ci) { openItemModal('add', ci); }
+function closeAddModal() { closeItemModal('add'); }
+function renderAddList() { renderModalList('add'); }
+function addN(n) { modalSetN('add', n); }
+
+function openPlanModal(ci) { openItemModal('plan', ci); }
+function closePlanModal() { closeItemModal('plan'); }
+function renderPlanList() { renderModalList('plan'); }
+function planN(n) { modalSetN('plan', n); }
 
 async function doAdd(sid) {
-  const cnt = parseInt(document.getElementById('addCount').value) || 1;
+  const cnt = parseInt(document.getElementById(ITEM_MODALS.add.countId).value) || 1;
   try {
-    const r = await fetch('/api/chest/' + addChestIndex + '/add', {
+    const r = await fetch('/api/chest/' + _modalChestIndex + '/add', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify({stuffId:sid, count:cnt})
     });
     const d = await r.json();
     if (d.error) { toast(d.error, true); return; }
-    chests[addChestIndex] = d;
+    chests[_modalChestIndex] = d;
     renderSidebar();
     renderContent();
     toast('添加成功');
   } catch(e) { toast('操作失败', true); }
 }
 
-
-function addN(n) {
-  document.getElementById('addCount').value = n;
-}
-
-// ===== 计划库存操作 =====
-
-async function adjPlan(ci, sid, cnt) {
-  try {
-    const r = await fetch('/api/chest/' + ci + '/plan', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({stuffId:sid, count:cnt})
-    });
-    await r.json();
-    await fetchChests();
-    renderSidebar();
-    renderContent();
-    toast(cnt <= 0 ? '已删除' : '已更新');
-  } catch(e) { toast('操作失败', true); }
-}
-
-
-async function doRemovePlan(ci, sid) {
-  await adjPlan(ci, sid, 0);
-}
-
-
-function openPlanModal(ci) {
-  addChestIndex = ci;
-  document.getElementById('planTitle').textContent = '向 [' + chests[ci].name + '] 添加计划库存';
-  document.getElementById('planCount').value = 1;
-  document.getElementById('planSearch').value = '';
-  document.getElementById('planModal').classList.add('show');
-  renderPlanList();
-}
-
-
-function closePlanModal() {
-  document.getElementById('planModal').classList.remove('show');
-}
-
-
-function renderPlanList() {
-  const q = document.getElementById('planSearch').value.toLowerCase();
-  const el = document.getElementById('planList');
-  let html = '';
-  for (const it of items) {
-    if (q && !it.name.toLowerCase().includes(q)) continue;
-    html += '<div class="modal-item" onclick="doAddPlan(' + it.stuffId + ')">';
-    html += '<img src="/icon/' + it.stuffId + '" onerror="hideImg(this)">';
-    html += '<span class="mi-name">' + esc(it.name) + '</span>';
-    html += '<span class="mi-id">ID:' + it.stuffId + '</span>';
-    html += '</div>';
-  }
-  el.innerHTML = html;
-}
-
-
 async function doAddPlan(sid) {
-  const cnt = parseInt(document.getElementById('planCount').value) || 1;
-  await adjPlan(addChestIndex, sid, cnt);
-  closePlanModal();
-}
-
-
-function planN(n) {
-  document.getElementById('planCount').value = n;
+  const cnt = parseInt(document.getElementById(ITEM_MODALS.plan.countId).value) || 1;
+  await adjPlan(_modalChestIndex, sid, cnt);
+  closeItemModal('plan');
 }

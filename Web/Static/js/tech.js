@@ -254,20 +254,32 @@ function addTech(unlock) {
 }
 
 
+// 刷新科技树数据并保持滚动与搜索状态（解锁/锁定/切换单个 共用）
+async function refreshTechTreePreservingState() {
+  const container = document.getElementById('techTreeContainer');
+  const scrollTop = container ? container.scrollTop : 0;
+  const searchInput = document.getElementById('techSearch');
+  const searchVal = searchInput ? searchInput.value : '';
+  try {
+    const r = await fetch('/api/techtree?t=' + Date.now());
+    techTreeData = await r.json();
+    renderTechTreePanel();
+  } catch(e) {}
+  const c2 = document.getElementById('techTreeContainer');
+  if (c2) c2.scrollTop = scrollTop;
+  const s2 = document.getElementById('techSearch');
+  if (s2 && searchVal) { s2.value = searchVal; filterTechList(); }
+}
+
+
 async function unlockAllTechs() {
   if (!confirm('确定要一键点亮全部科技吗？')) return;
   try {
     const r = await fetch('/api/techtree/unlockall', {method:'POST'});
     const d = await r.json();
     if (d.error) { toast(d.error, true); return; }
-    toast('已点亮 ' + d.added + ' 个科技（共 ' + d.total + ' 个）');
-    const container = document.getElementById('techTreeContainer');
-    const scrollTop = container ? container.scrollTop : 0;
-    const r2 = await fetch('/api/techtree?t=' + Date.now());
-    techTreeData = await r2.json();
-    renderTechTreePanel();
-    const c2 = document.getElementById('techTreeContainer');
-    if (c2) c2.scrollTop = scrollTop;
+    toast('已点亮全部科技');
+    await refreshTechTreePreservingState();
   } catch(e) { toast('操作失败', true); }
 }
 
@@ -287,13 +299,7 @@ async function lockAllTechs() {
       if (d.action === 'removed') removed++;
     }
     toast('已锁定 ' + removed + ' 个科技');
-    const container = document.getElementById('techTreeContainer');
-    const scrollTop = container ? container.scrollTop : 0;
-    const r2 = await fetch('/api/techtree?t=' + Date.now());
-    techTreeData = await r2.json();
-    renderTechTreePanel();
-    const c2 = document.getElementById('techTreeContainer');
-    if (c2) c2.scrollTop = scrollTop;
+    await refreshTechTreePreservingState();
   } catch(e) { toast('操作失败', true); }
 }
 
@@ -310,19 +316,7 @@ async function toggleTech(techId, unlock) {
     const d = await r.json();
     if (d.error) { toast(d.error, true); return; }
     toast('操作成功: ' + (d.action || 'ok'));
-    const container = document.getElementById('techTreeContainer');
-    const scrollTop = container ? container.scrollTop : 0;
-    const searchInput = document.getElementById('techSearch');
-    const searchVal = searchInput ? searchInput.value : '';
-    try {
-      const r2 = await fetch('/api/techtree?t=' + Date.now());
-      techTreeData = await r2.json();
-      renderTechTreePanel();
-    } catch(e2) {}
-    const container2 = document.getElementById('techTreeContainer');
-    if (container2) container2.scrollTop = scrollTop;
-    const searchInput2 = document.getElementById('techSearch');
-    if (searchInput2 && searchVal) { searchInput2.value = searchVal; filterTechList(); }
+    await refreshTechTreePreservingState();
   } catch(e) { toast('操作失败', true); }
 }
 

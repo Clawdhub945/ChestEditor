@@ -1,130 +1,105 @@
-// ui — 由 HtmlUI 单体拆分（原 app.js）
+// ui — 通用 UI 构造器 + 侧栏 + 工具函数
+// ===== 通用 HTML 片段（消除各面板的复制粘贴模板） =====
+
+// 侧栏分类块：标题 + 展开箭头 + 可选计数 + 内容
+function htmlCategory(open, toggleFn, title, countHtml, itemsHtml) {
+  let h = '<div class="category">';
+  h += '<div class="category-header" onclick="' + toggleFn + '()">';
+  h += '<span class="arrow' + (open ? ' open' : '') + '">&#9654;</span>';
+  h += '<span>' + title + '</span>';
+  if (countHtml !== undefined && countHtml !== null && countHtml !== '')
+    h += '<span style="margin-left:auto;font-size:11px;color:var(--text-muted)">' + countHtml + '</span>';
+  h += '</div>';
+  h += '<div class="category-items' + (open ? ' open' : '') + '">' + itemsHtml + '</div></div>';
+  return h;
+}
+
+// 侧栏条目（图标 + 名称 + 计数）
+const MENU_ICON_FLEX = 'font-size:16px;display:flex;align-items:center;justify-content:center';
+function htmlMenuItem(iconHtml, name, countHtml, onclick, active, iconStyle) {
+  let h = '<div class="chest-item' + (active ? ' active' : '') + '" onclick="' + onclick + '">';
+  h += '<div class="ci-icon"' + (iconStyle ? ' style="' + iconStyle + '"' : '') + '>' + iconHtml + '</div>';
+  h += '<div class="ci-info">';
+  h += '<div class="ci-name">' + name + '</div>';
+  h += '<div class="ci-count">' + countHtml + '</div>';
+  h += '</div></div>';
+  return h;
+}
+
+// 物品卡片（图标 + 名称 + ID + 数量输入 + 按钮组）
+// 容器物品 / 计划库存 / 龙素材 各列表共用
+// opts: { inputId, inputCls, cardCls, buttons: [{label, onclick}] }
+function htmlItemCard(stuffId, name, count, opts) {
+  let h = '<div class="item' + (opts.cardCls ? ' ' + opts.cardCls : '') + '">';
+  h += '<img src="/icon/' + stuffId + '" onerror="hideImg(this)">';
+  h += '<div class="iname" title="' + esc(name) + '">' + esc(name) + '</div>';
+  h += '<div class="iid">ID:' + stuffId + '</div>';
+  h += '<div class="icount">';
+  h += '<input type="number" class="count-input' + (opts.inputCls ? ' ' + opts.inputCls : '') + '" value="' + count + '" min="0" id="' + opts.inputId + '">';
+  h += '</div>';
+  h += '<div class="btns">';
+  for (const b of opts.buttons)
+    h += '<button class="btn-rm" onclick="' + b.onclick + '">' + b.label + '</button>';
+  h += '</div></div>';
+  return h;
+}
+
 function renderSidebar() {
   const q = document.getElementById('searchChest').value.toLowerCase();
   const el = document.getElementById('chestList');
   let html = '';
 
   // 容器分类
-  html += '<div class="category">';
-  html += '<div class="category-header" onclick="toggleCategory()">';
-  html += '<span class="arrow' + (categoryOpen ? ' open' : '') + '">&#9654;</span>';
-  html += '<span>容器</span>';
-  html += '<span style="margin-left:auto;font-size:11px;color:var(--text-muted)">' + chests.length + '</span>';
-  html += '</div>';
-  html += '<div class="category-items' + (categoryOpen ? ' open' : '') + '">';
-  html += '<div class="filter-section">';
-  html += '<div class="filter-title"><span>筛选设施</span>';
-  html += '<span class="filter-actions"><a onclick="setAllFilters(true)">全选</a><a onclick="setAllFilters(false)">清空</a></span></div>';
-  html += '<div class="filter-grid">';
-  for (let fi = 0; fi < filters.length; fi++) {
-    const f = filters[fi];
-    html += '<span class="filter-tag' + (f.enabled ? ' on' : '') + '" onclick="toggleFilter(' + f.stuffId + ')">' + esc(f.name) + '</span>';
-  }
-  html += '</div></div>';
+  let chestItems = '<div class="filter-section">';
+  chestItems += '<div class="filter-title"><span>筛选设施</span>';
+  chestItems += '<span class="filter-actions"><a onclick="setAllFilters(true)">全选</a><a onclick="setAllFilters(false)">清空</a></span></div>';
+  chestItems += '<div class="filter-grid">';
+  for (const f of filters)
+    chestItems += '<span class="filter-tag' + (f.enabled ? ' on' : '') + '" onclick="toggleFilter(' + f.stuffId + ')">' + esc(f.name) + '</span>';
+  chestItems += '</div></div>';
 
   if (chests.length === 0) {
-    html += '<div style="padding:20px;text-align:center;color:var(--text-muted)">暂无箱子</div>';
+    chestItems += '<div style="padding:20px;text-align:center;color:var(--text-muted)">暂无箱子</div>';
   } else {
     for (let i = 0; i < chests.length; i++) {
       const c = chests[i];
       if (q && !c.name.toLowerCase().includes(q)) continue;
       const cap = c.maxCap > 0 ? c.usedCap + '/' + c.maxCap : c.items.length + '';
-      const isActive = selectedChest === i;
-      html += '<div class="chest-item' + (isActive ? ' active' : '') + '" onclick="selectChest(' + i + ')">';
-      html += '<div class="ci-icon"><img src="/icon/' + c.stuffId + '" onerror="this.remove()"></div>';
-      html += '<div class="ci-info">';
-      html += '<div class="ci-name">' + esc(c.name) + '</div>';
-      html += '<div class="ci-count">' + cap + ' 物品</div>';
-      html += '</div></div>';
+      chestItems += htmlMenuItem('<img src="/icon/' + c.stuffId + '" onerror="this.remove()">',
+        esc(c.name), cap + ' 物品', 'selectChest(' + i + ')', selectedChest === i);
     }
   }
-
-  html += '</div></div>';
+  html += htmlCategory(categoryOpen, 'toggleCategory', '容器', chests.length, chestItems);
 
   // 驯龙总分类
-  html += '<div class="category">';
-  html += '<div class="category-header" onclick="toggleDragonMain()">';
-  html += '<span class="arrow' + (dragonMainOpen ? ' open' : '') + '">&#9654;</span>';
-  html += '<span>驯龙</span>';
-  html += '</div>';
-  html += '<div class="category-items' + (dragonMainOpen ? ' open' : '') + '">';
-
-  // 地图龙
   const activeSouls = dragonSouls.filter(s => s.is_active);
   const idleSouls = dragonSouls.filter(s => !s.is_active);
-  html += '<div class="chest-item' + (dragonView === 'souls' ? ' active' : '') + '" onclick="selectDragonView(\'souls\')">';
-  html += '<div class="ci-icon" style="font-size:20px;display:flex;align-items:center;justify-content:center">&#x1F409;</div>';
-  html += '<div class="ci-info">';
-  html += '<div class="ci-name">地图龙</div>';
-  html += '<div class="ci-count">' + activeSouls.length + ' 条</div>';
-  html += '</div></div>';
-
-  // 龙素材
-  html += '<div class="chest-item' + (dragonView === 'materials' ? ' active' : '') + '" onclick="selectDragonView(\'materials\')">';
-  html += '<div class="ci-icon" style="font-size:16px;display:flex;align-items:center;justify-content:center">&#x1F48A;</div>';
-  html += '<div class="ci-info">';
-  html += '<div class="ci-name">龙素材</div>';
-  html += '<div class="ci-count">' + dragonItems.length + ' 种</div>';
-  html += '</div></div>';
-
-  // 召唤龙
+  let dragonHtml = '';
+  dragonHtml += htmlMenuItem('&#x1F409;', '地图龙', activeSouls.length + ' 条',
+    "selectDragonView('souls')", dragonView === 'souls', 'font-size:20px;' + MENU_ICON_FLEX);
+  dragonHtml += htmlMenuItem('&#x1F48A;', '龙素材', dragonItems.length + ' 种',
+    "selectDragonView('materials')", dragonView === 'materials', MENU_ICON_FLEX);
   const summonCount = dragonTypes.length + idleSouls.length;
-  html += '<div class="chest-item' + (dragonView === 'summon' ? ' active' : '') + '" onclick="selectDragonView(\'summon\')">';
-  html += '<div class="ci-icon" style="font-size:16px;display:flex;align-items:center;justify-content:center">&#x2728;</div>';
-  html += '<div class="ci-info">';
-  html += '<div class="ci-name">召唤龙</div>';
-  html += '<div class="ci-count">' + summonCount + '</div>';
-  html += '</div></div>';
+  dragonHtml += htmlMenuItem('&#x2728;', '召唤龙', summonCount,
+    "selectDragonView('summon')", dragonView === 'summon', MENU_ICON_FLEX);
+  html += htmlCategory(dragonMainOpen, 'toggleDragonMain', '驯龙', null, dragonHtml);
 
-  html += '</div></div>';
+  // NPC 分类
+  const npcItem = htmlMenuItem('&#x1F464;', '我方 NPC',
+    (npcListData.length > 0 ? npcListData.length + ' 个' : '点击扫描'),
+    'openNpcPanel()', npcPanelOpen, 'font-size:20px;' + MENU_ICON_FLEX);
+  html += htmlCategory(npcPanelOpen, 'toggleNpcPanel', 'NPC', npcListData.length, npcItem);
 
-  // NPC 分类（与容器同级）
-  html += '<div class="category">';
-  html += '<div class="category-header" onclick="toggleNpcPanel()">';
-  html += '<span class="arrow' + (npcPanelOpen ? ' open' : '') + '">&#9654;</span>';
-  html += '<span>NPC</span>';
-  html += '<span style="margin-left:auto;font-size:11px;color:var(--text-muted)">' + npcListData.length + '</span>';
-  html += '</div>';
-  html += '<div class="category-items' + (npcPanelOpen ? ' open' : '') + '">';
-  html += '<div class="chest-item' + (npcPanelOpen ? ' active' : '') + '" onclick="openNpcPanel()">';
-  html += '<div class="ci-icon" style="font-size:20px;display:flex;align-items:center;justify-content:center">&#x1F464;</div>';
-  html += '<div class="ci-info">';
-  html += '<div class="ci-name">我方 NPC</div>';
-  html += '<div class="ci-count">' + (npcListData.length > 0 ? npcListData.length + ' 个' : '点击扫描') + '</div>';
-  html += '</div></div></div></div>';
-
-  // 怪物总分类
-  html += '<div class="category">';
-  html += '<div class="category-header" onclick="toggleNpcMain()">';
-  html += '<span class="arrow' + (npcMainOpen ? ' open' : '') + '">&#9654;</span>';
-  html += '<span>实体扫描</span>';
-  html += '</div>';
-  html += '<div class="category-items' + (npcMainOpen ? ' open' : '') + '">';
-
-  // 修改
-  html += '<div class="chest-item' + (npcView === 'editor' ? ' active' : '') + '" onclick="selectNpcView(\'editor\')">';
-  html += '<div class="ci-icon" style="font-size:20px;display:flex;align-items:center;justify-content:center">&#x270F;</div>';
-  html += '<div class="ci-info">';
-  html += '<div class="ci-name">修改</div>';
-  html += '<div class="ci-count">' + (entityEditorData.length > 0 ? entityEditorData.length + ' 个实体' : '0 个') + '</div>';
-  html += '</div></div>';
-
-  html += '</div></div>';
+  // 实体扫描分类
+  const editorItem = htmlMenuItem('&#x270F;', '修改',
+    (entityEditorData.length > 0 ? entityEditorData.length + ' 个实体' : '0 个'),
+    "selectNpcView('editor')", npcView === 'editor', 'font-size:20px;' + MENU_ICON_FLEX);
+  html += htmlCategory(npcMainOpen, 'toggleNpcMain', '实体扫描', null, editorItem);
 
   // 科技树
-  html += '<div class="category">';
-  html += '<div class="category-header" onclick="toggleTechTree()">';
-  html += '<span class="arrow' + (techTreeOpen ? ' open' : '') + '">&#9654;</span>';
-  html += '<span>科技树</span>';
-  html += '</div>';
-  html += '<div class="category-items' + (techTreeOpen ? ' open' : '') + '">';
-  html += '<div class="chest-item' + (techTreeOpen ? ' active' : '') + '" onclick="openTechTree()">';
-  html += '<div class="ci-icon" style="font-size:20px;display:flex;align-items:center;justify-content:center">&#x1F333;</div>';
-  html += '<div class="ci-info">';
-  html += '<div class="ci-name">查看科技树</div>';
-  html += '<div class="ci-count">点击查看/修改</div>';
-  html += '</div></div>';
-  html += '</div></div>';
+  const techItem = htmlMenuItem('&#x1F333;', '查看科技树', '点击查看/修改',
+    'openTechTree()', techTreeOpen, 'font-size:20px;' + MENU_ICON_FLEX);
+  html += htmlCategory(techTreeOpen, 'toggleTechTree', '科技树', null, techItem);
 
   el.innerHTML = html;
   renderDragonItems();

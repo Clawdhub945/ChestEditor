@@ -1,4 +1,4 @@
-// npc — 由 HtmlUI 单体拆分（原 app.js）
+// npc — 我方 NPC 面板：列表渲染 + 字段表格 + 字段修改
 function renderNpcPanel() {
   const el = document.getElementById('content');
   let html = '';
@@ -46,14 +46,13 @@ function renderNpcPanel() {
       }
       return sub;
     }
-    var kingdomColors = {1:'#27ae60',97:'#7f8c8d',98:'#c0392b',99:'#e74c3c',88:'#e74c3c',89:'#2980b9'};
-    var kingdomNames = {1:'我方',97:'蛮族',98:'强盗',99:'怪物',88:'红蚂蚁',89:'蓝蚂蚁'};
     var groups = [];
     for (var gi = 0; gi < sortedKingdoms.length; gi++) {
       var kid = sortedKingdoms[gi];
       var items = byKingdom[kid];
-      var kName = kingdomNames[kid] || ('王国' + kid);
-      var kColor = kingdomColors[kid] || '#7f8c8d';
+      var kInfo = getKingdomInfo(kid);
+      var kName = (kInfo && kInfo.name) || ('王国' + kid);
+      var kColor = (kInfo && kInfo.bg) || '#7f8c8d';
       var sub = classifyMineByType(items);
       var subDefs;
       if (kid === 1) {
@@ -81,31 +80,7 @@ function renderNpcPanel() {
     }
     html += '<div style="flex:1;overflow-y:auto;min-height:0">';
     for (const g of groups) {
-      // 阵营大组
-      html += '<details style="margin-bottom:8px">';
-      html += '<summary style="cursor:pointer;padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-weight:600;font-size:13px;display:flex;align-items:center;gap:8px">';
-      html += '<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:' + g.color + ';color:#fff">' + g.icon + ' ' + g.label + '</span>';
-      html += '<span style="margin-left:auto;font-size:12px;color:var(--text-muted);font-weight:400">' + g.items.length + ' 个</span>';
-      html += '</summary>';
-      if (g.subs && g.subs.length > 0) {
-        html += '<div style="padding:4px 0 4px 8px">';
-        for (const sg of g.subs) {
-          if (sg.items.length === 0) continue;
-          // 职业子分组
-          html += '<details style="margin-bottom:6px">';
-          html += '<summary style="cursor:pointer;padding:6px 10px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-weight:500;font-size:12px;display:flex;align-items:center;gap:6px">';
-          html += '<span style="font-size:10px;padding:1px 5px;border-radius:8px;background:' + sg.color + ';color:#fff">' + sg.icon + ' ' + sg.label + '</span>';
-          html += '<span style="margin-left:auto;font-size:11px;color:var(--text-muted);font-weight:400">' + sg.items.length + ' 个</span>';
-          html += '</summary>';
-          html += '<div style="padding:4px 0">';
-          for (const npc of sg.items) {
-            html += '<div style="margin-bottom:6px">' + renderNpcCard(npc) + '</div>';
-          }
-          html += '</div></details>';
-        }
-        html += '</div>';
-      }
-      html += '</details>';
+      html += htmlDetailsGroup(g.label, g.color, g.icon, g.items.length + ' 个', renderNpcSubGroups(g.subs));
     }
     html += '</div>';
   }
@@ -116,6 +91,33 @@ function renderNpcPanel() {
   for (const npc of npcListData) {
     refreshNpcCheckedDisplay(npc.ptrHash || 0);
   }
+}
+
+// 折叠分组（details + 徽章 + 计数）——NPC 阵营/职业与实体编辑器共用
+function htmlDetailsGroup(label, color, icon, countHtml, contentHtml, extraStyle) {
+  let h = '<details style="margin-bottom:8px">';
+  h += '<summary style="cursor:pointer;padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-weight:600;font-size:13px;display:flex;align-items:center;gap:8px' + (extraStyle ? ';' + extraStyle : '') + '">';
+  h += '<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:' + color + ';color:#fff">' + icon + ' ' + label + '</span>';
+  h += '<span style="margin-left:auto;font-size:12px;color:var(--text-muted);font-weight:400">' + countHtml + '</span>';
+  h += '</summary>';
+  h += contentHtml;
+  h += '</details>';
+  return h;
+}
+
+function renderNpcSubGroups(subs) {
+  if (!subs || subs.length === 0) return '';
+  let h = '<div style="padding:4px 0 4px 8px">';
+  for (const sg of subs) {
+    if (sg.items.length === 0) continue;
+    let cards = '<div style="padding:4px 0">';
+    for (const npc of sg.items)
+      cards += '<div style="margin-bottom:6px">' + renderNpcCard(npc) + '</div>';
+    cards += '</div>';
+    h += htmlDetailsGroup(sg.label, sg.color, sg.icon, sg.items.length + ' 个', cards, 'padding:6px 10px;font-weight:500;font-size:12px;display:flex;align-items:center;gap:6px');
+  }
+  h += '</div>';
+  return h;
 }
 
 
@@ -172,6 +174,56 @@ function saveCheckedFields(ptrHash, arr) {
   localStorage.setItem('npc_checked_' + ptrHash, JSON.stringify(arr));
 }
 
+// ===== 字段表格通用构造（"所有字段"表与"勾选字段"表共用） =====
+
+const NPC_TD = 'border-bottom:1px solid var(--border)';
+
+function npcTableHeader(ptrHash, withCheckbox) {
+  let h = '<table class="npc-fields-table" style="width:100%;border-collapse:collapse;font-size:12px">';
+  h += '<thead><tr style="border-bottom:1px solid var(--border)">';
+  if (withCheckbox)
+    h += '<th style="width:30px;padding:4px 6px;text-align:center"><input type="checkbox" id="npc-checkall-' + ptrHash + '" onchange="toggleAllNpcCheckboxes(' + ptrHash + ',this.checked)" /></th>';
+  h += '<th style="padding:4px 8px;text-align:left;min-width:120px">字段</th>';
+  h += '<th style="padding:4px 8px;text-align:left;min-width:80px">翻译</th>';
+  h += '<th style="padding:4px 8px;text-align:right;min-width:80px">数值</th>';
+  h += '<th style="width:50px;padding:4px 6px;text-align:center">操作</th>';
+  h += '</tr></thead><tbody>';
+  return h;
+}
+
+// 数值字段行（输入框 + OK 按钮）
+// opts: { inpId, checkbox(bool,缺省不显示), rowCls, dataKey }
+function npcNumRowHtml(ptrHash, key, isFloat, displayVal, trans, opts) {
+  const inpId = opts.inpId;
+  let h = '<tr' + (opts.rowCls ? ' class="' + opts.rowCls + '"' : '') + (opts.dataKey ? ' data-key="' + opts.dataKey + '"' : '') + '>';
+  if (opts.checkbox !== undefined)
+    h += '<td style="text-align:center;padding:3px 6px;' + NPC_TD + '"><input type="checkbox" class="npc-field-cb" data-ptr="' + ptrHash + '" data-key="' + esc(key) + '" ' + (opts.checkbox ? 'checked' : '') + ' onchange="onNpcCheckChange(this)" /></td>';
+  h += '<td style="padding:3px 8px;' + NPC_TD + ';color:var(--text-primary)">' + esc(key) + '</td>';
+  h += '<td style="padding:3px 8px;' + NPC_TD + ';color:var(--text-muted)">' + esc(trans) + '</td>';
+  h += '<td style="padding:3px 6px;' + NPC_TD + ';text-align:right">';
+  h += '<input id="' + inpId + '" type="number" step="' + (isFloat ? '0.1' : '1') + '" value="' + displayVal + '" ';
+  h += 'style="width:80px;background:transparent;border:1px solid var(--border);border-radius:3px;color:var(--text-primary);font-size:12px;text-align:right;padding:2px 4px;outline:none" onfocus="this.select()" />';
+  h += '</td>';
+  h += '<td style="text-align:center;padding:3px 6px;' + NPC_TD + '">';
+  h += '<button onclick="setNpcField(' + ptrHash + ',\'' + esc(key) + '\',document.getElementById(\'' + inpId + '\').value,' + (isFloat ? 'true' : 'false') + ')" style="padding:2px 8px;background:var(--accent);color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:11px">OK</button>';
+  h += '</td></tr>';
+  return h;
+}
+
+// 字符串字段行（只读展示，无操作列内容）
+// opts: { checkbox(bool,缺省不显示), rowCls, dataKey }
+function npcStrRowHtml(key, val, trans, opts) {
+  let h = '<tr' + (opts.rowCls ? ' class="' + opts.rowCls + '"' : '') + (opts.dataKey ? ' data-key="' + opts.dataKey + '"' : '') + '>';
+  if (opts.checkbox !== undefined)
+    h += '<td style="text-align:center;padding:3px 6px;' + NPC_TD + '"><input type="checkbox" class="npc-field-cb" data-ptr="' + (opts.ptrHash || 0) + '" data-key="' + esc(key) + '" ' + (opts.checkbox ? 'checked' : '') + ' onchange="onNpcCheckChange(this)" /></td>';
+  h += '<td style="padding:3px 8px;' + NPC_TD + ';color:var(--text-primary)">' + esc(key) + '</td>';
+  h += '<td style="padding:3px 8px;' + NPC_TD + ';color:var(--text-muted)">' + esc(trans) + '</td>';
+  h += '<td style="padding:3px 8px;' + NPC_TD + ';color:var(--text-muted);text-align:right">' + esc(String(val || '')) + '</td>';
+  h += '<td style="padding:3px 6px;' + NPC_TD + '"></td>';
+  h += '</tr>';
+  return h;
+}
+
 
 async function loadNpcFields(details, ptrHash) {
   if (!details.open) return;
@@ -194,7 +246,6 @@ async function loadNpcFields(details, ptrHash) {
     const checked = new Set(getCheckedFields(ptrHash));
     const numKeys = allKeys.filter(k => !fields[k].isString);
     const strKeys = allKeys.filter(k => fields[k].isString);
-    const totalCount = numKeys.length + strKeys.length;
 
     let h = '';
     // 搜索框
@@ -207,53 +258,29 @@ async function loadNpcFields(details, ptrHash) {
     h += '<a href="javascript:void(0)" onclick="toggleAllNpcCheckboxes(' + ptrHash + ',true)" style="color:var(--accent)">全选</a>';
     h += '<a href="javascript:void(0)" onclick="toggleAllNpcCheckboxes(' + ptrHash + ',false)" style="color:var(--text-muted)">取消全选</a>';
     h += '</div>';
-    // 表格
-    h += '<table class="npc-fields-table" style="width:100%;border-collapse:collapse;font-size:12px">';
-    h += '<thead><tr style="border-bottom:1px solid var(--border)">';
-    h += '<th style="width:30px;padding:4px 6px;text-align:center"><input type="checkbox" id="npc-checkall-' + ptrHash + '" onchange="toggleAllNpcCheckboxes(' + ptrHash + ',this.checked)" /></th>';
-    h += '<th style="padding:4px 8px;text-align:left;min-width:120px">字段</th>';
-    h += '<th style="padding:4px 8px;text-align:left;min-width:80px">翻译</th>';
-    h += '<th style="padding:4px 8px;text-align:right;min-width:80px">数值</th>';
-    h += '<th style="width:50px;padding:4px 6px;text-align:center">操作</th>';
-    h += '</tr></thead><tbody>';
+    h += npcTableHeader(ptrHash, true);
 
-    // 数值字段
     for (const key of numKeys) {
       const f = fields[key];
-      const isFloat = f.isFloat;
-      const displayVal = (typeof f.value === 'number') ? (isFloat ? f.value.toFixed(2) : f.value) : (f.value || 0);
-      const trans = translations[key] || '';
-      const isChecked = checked.has(key);
-      const inpId = 'npc_inp_' + ptrHash + '_' + key;
-      h += '<tr class="npc-field-row" data-key="' + esc(key).toLowerCase() + '">';
-      h += '<td style="text-align:center;padding:3px 6px;border-bottom:1px solid var(--border)"><input type="checkbox" class="npc-field-cb" data-ptr="' + ptrHash + '" data-key="' + esc(key) + '" ' + (isChecked ? 'checked' : '') + ' onchange="onNpcCheckChange(this)" /></td>';
-      h += '<td style="padding:3px 8px;border-bottom:1px solid var(--border);color:var(--text-primary)">' + esc(key) + '</td>';
-      h += '<td style="padding:3px 8px;border-bottom:1px solid var(--border);color:var(--text-muted)">' + esc(trans) + '</td>';
-      h += '<td style="padding:3px 6px;border-bottom:1px solid var(--border);text-align:right">';
-      h += '<input id="' + inpId + '" type="number" step="' + (isFloat ? '0.1' : '1') + '" value="' + displayVal + '" ';
-      h += 'style="width:80px;background:transparent;border:1px solid var(--border);border-radius:3px;color:var(--text-primary);font-size:12px;text-align:right;padding:2px 4px;outline:none" onfocus="this.select()" />';
-      h += '</td>';
-      h += '<td style="text-align:center;padding:3px 6px;border-bottom:1px solid var(--border)">';
-      h += '<button onclick="setNpcField(' + ptrHash + ',\'' + esc(key) + '\',document.getElementById(\'' + inpId + '\').value,' + (isFloat ? 'true' : 'false') + ')" style="padding:2px 8px;background:var(--accent);color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:11px">OK</button>';
-      h += '</td></tr>';
+      const displayVal = (typeof f.value === 'number') ? (f.isFloat ? f.value.toFixed(2) : f.value) : (f.value || 0);
+      h += npcNumRowHtml(ptrHash, key, f.isFloat, displayVal, translations[key], {
+        inpId: 'npc_inp_' + ptrHash + '_' + key,
+        checkbox: checked.has(key),
+        rowCls: 'npc-field-row',
+        dataKey: esc(key).toLowerCase()
+      });
     }
-    // 字符串字段
     for (const key of strKeys) {
-      const f = fields[key];
-      const trans = translations[key] || '';
-      const isChecked = checked.has(key);
-      h += '<tr class="npc-field-row" data-key="' + esc(key).toLowerCase() + '">';
-      h += '<td style="text-align:center;padding:3px 6px;border-bottom:1px solid var(--border)"><input type="checkbox" class="npc-field-cb" data-ptr="' + ptrHash + '" data-key="' + esc(key) + '" ' + (isChecked ? 'checked' : '') + ' onchange="onNpcCheckChange(this)" /></td>';
-      h += '<td style="padding:3px 8px;border-bottom:1px solid var(--border);color:var(--text-primary)">' + esc(key) + '</td>';
-      h += '<td style="padding:3px 8px;border-bottom:1px solid var(--border);color:var(--text-muted)">' + esc(trans) + '</td>';
-      h += '<td style="padding:3px 8px;border-bottom:1px solid var(--border);color:var(--text-muted);text-align:right">' + esc(String(f.value || '')) + '</td>';
-      h += '<td style="padding:3px 6px;border-bottom:1px solid var(--border)"></td>';
-      h += '</tr>';
+      h += npcStrRowHtml(key, fields[key].value, translations[key], {
+        ptrHash: ptrHash,
+        checkbox: checked.has(key),
+        rowCls: 'npc-field-row',
+        dataKey: esc(key).toLowerCase()
+      });
     }
     h += '</tbody></table>';
 
     container.innerHTML = h;
-    // 更新 check-all 状态
     updateCheckAllState(ptrHash);
   } catch(e) {
     container.innerHTML = '<span style="color:var(--danger)">加载失败: ' + esc(String(e)) + '</span>';
@@ -284,7 +311,6 @@ function onNpcCheckChange(cb) {
   }
   saveCheckedFields(ptrHash, arr);
   updateCheckAllState(ptrHash);
-  // 更新卡片上的勾选字段显示
   refreshNpcCheckedDisplay(ptrHash);
 }
 
@@ -330,69 +356,23 @@ function refreshNpcCheckedDisplay(ptrHash) {
   const cache = _npcFieldCache[ptrHash];
   const fields = cache ? cache.fields : null;
   const trans = cache ? cache.translations : {};
-  let h = '<table style="width:100%;border-collapse:collapse;font-size:12px">';
-  h += '<thead><tr style="border-bottom:1px solid var(--border)">';
-  h += '<th style="padding:3px 8px;text-align:left;min-width:100px">字段</th>';
-  h += '<th style="padding:3px 8px;text-align:left;min-width:60px">翻译</th>';
-  h += '<th style="padding:3px 8px;text-align:right;min-width:70px">数值</th>';
-  h += '<th style="width:50px;padding:3px 6px;text-align:center">操作</th>';
-  h += '</tr></thead><tbody>';
+  let h = npcTableHeader(ptrHash, false);
   for (const key of checked) {
     const f = fields ? fields[key] : null;
     const isFloat = f && f.isFloat;
     const val = f ? f.value : 0;
     const displayVal = (typeof val === 'number') ? (isFloat ? val.toFixed(2) : val) : (val || 0);
-    const translation = trans[key] || '';
-    const inpId = 'npc_chkd_' + ptrHash + '_' + key;
-    h += '<tr>';
-    h += '<td style="padding:3px 8px;border-bottom:1px solid var(--border);color:var(--text-primary)">' + esc(key) + '</td>';
-    h += '<td style="padding:3px 8px;border-bottom:1px solid var(--border);color:var(--text-muted)">' + esc(translation) + '</td>';
-    h += '<td style="padding:3px 6px;border-bottom:1px solid var(--border);text-align:right">';
-    h += '<input id="' + inpId + '" type="number" step="' + (isFloat ? '0.1' : '1') + '" value="' + displayVal + '" ';
-    h += 'style="width:80px;background:transparent;border:1px solid var(--border);border-radius:3px;color:var(--text-primary);font-size:12px;text-align:right;padding:2px 4px;outline:none" onfocus="this.select()" />';
-    h += '</td>';
-    h += '<td style="text-align:center;padding:3px 6px;border-bottom:1px solid var(--border)">';
-    h += '<button onclick="setNpcCheckedField(' + ptrHash + ',\'' + esc(key) + '\',document.getElementById(\'' + inpId + '\').value,' + (isFloat ? 'true' : 'false') + ')" style="padding:2px 8px;background:var(--accent);color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:11px">OK</button>';
-    h += '</td></tr>';
+    h += npcNumRowHtml(ptrHash, key, isFloat, displayVal, trans[key] || '', {
+      inpId: 'npc_chkd_' + ptrHash + '_' + key
+    });
   }
   h += '</tbody></table>';
   el.innerHTML = h;
 }
 
 
-async function setNpcCheckedField(ptrHash, field, value, isFloat) {
-  const v = isFloat ? parseFloat(value) : parseInt(value);
-  if (isNaN(v)) return;
-  try {
-    const r = await fetch('/api/npc/set', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ptrHash, field, value: v})
-    });
-    const data = await r.json();
-    if (data.error) { toast('设置失败: ' + data.error, true); return; }
-    // 更新缓存
-    if (_npcFieldCache[ptrHash] && _npcFieldCache[ptrHash].fields[field]) {
-      _npcFieldCache[ptrHash].fields[field].value = v;
-    }
-    // 同步到所有字段表格的输入框
-    var allInput = document.getElementById('npc_inp_' + ptrHash + '_' + field);
-    if (allInput) allInput.value = isFloat ? v.toFixed(2) : v;
-    // 更新本地数据
-    for (const npc of npcListData) {
-      if (npc.ptrHash === ptrHash) {
-        if (field === 'speed') npc.speed = v;
-        else if (field === 'hp') npc.hp = v;
-        else if (field === 'hp_total') npc.hpTotal = v;
-        if (npc.fields && npc.fields[field]) npc.fields[field].value = v;
-        break;
-      }
-    }
-    toast(field + ' = ' + v);
-  } catch(e) { toast('设置失败', true); }
-}
-
-
+// 修改 NPC 字段（"所有字段"表与"勾选字段"表的 OK 按钮共用；
+// 成功后同步两张表的输入框）
 async function setNpcField(ptrHash, field, value, isFloat) {
   const v = isFloat ? parseFloat(value) : parseInt(value);
   if (isNaN(v)) return;
@@ -408,9 +388,11 @@ async function setNpcField(ptrHash, field, value, isFloat) {
     if (_npcFieldCache[ptrHash] && _npcFieldCache[ptrHash].fields[field]) {
       _npcFieldCache[ptrHash].fields[field].value = v;
     }
-    // 同步到勾选表格的输入框
-    var chkdInput = document.getElementById('npc_chkd_' + ptrHash + '_' + field);
-    if (chkdInput) chkdInput.value = isFloat ? v.toFixed(2) : v;
+    // 同步到两张表格的输入框
+    for (const prefix of ['npc_inp_', 'npc_chkd_']) {
+      const input = document.getElementById(prefix + ptrHash + '_' + field);
+      if (input) input.value = isFloat ? v.toFixed(2) : v;
+    }
     // 更新本地数据
     for (const npc of npcListData) {
       if (npc.ptrHash === ptrHash) {

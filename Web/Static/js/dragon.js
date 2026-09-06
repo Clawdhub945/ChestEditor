@@ -1,4 +1,72 @@
-// dragon — 由 HtmlUI 单体拆分（原 app.js）
+// dragon — 龙系统面板：素材背包、龙魂强化、召唤、龙实体属性
+// ===== 共用片段 =====
+
+// 龙图标（typeIdx 无效时回退为龙 emoji）
+function dragonIconHtml(typeIdx, boxSize, imgSize) {
+  const inner = (typeIdx >= 0)
+    ? '<img src="/api/dragon/icon/' + typeIdx + '" style="width:' + imgSize + 'px;height:' + imgSize + 'px;object-fit:contain" onerror="hideImg(this)">'
+    : '<span style="font-size:' + Math.round(imgSize * 0.55) + 'px">&#x1F409;</span>';
+  return '<div style="width:' + boxSize + 'px;height:' + boxSize + 'px;border-radius:4px;background:var(--bg-input);display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0">' + inner + '</div>';
+}
+
+// 等级下拉（召唤 UI 三处共用）
+function summonLevelSelectHtml(id, style) {
+  let h = '<select id="' + id + '" style="' + style + '">';
+  for (let lv = 1; lv <= 10; lv++) h += '<option value="' + lv + '">' + lv + '级</option>';
+  return h + '</select>';
+}
+
+// 龙魂天性标签（列表/面板/待命三处共用）
+function natureTagsHtml(natures, containerStyle) {
+  if (!natures || natures.length === 0) return '';
+  let h = '<div style="display:flex;flex-wrap:wrap;gap:3px;' + containerStyle + '">';
+  for (const nid of natures) {
+    const n = dragonNatures.find(x => x.id === nid);
+    h += '<span style="font-size:9px;padding:1px 4px;border-radius:3px;background:rgba(100,180,255,0.15);color:#8cf">' + (n ? n.name : '#' + nid) + '</span>';
+  }
+  return h + '</div>';
+}
+
+// 龙魂强化编辑器（侧栏列表 / 地图龙面板 / 待命列表 三处共用）
+// 后端字段为小写 head/claw/shield/cloud/potentiality（经 /api/dragon/souls 实测确认）
+const SOUL_PARTS_GRID = [
+  {key:'head', label:'龙头', max:50}, {key:'claw', label:'龙爪', max:50},
+  {key:'shield', label:'龙甲', max:50}, {key:'cloud', label:'龙魂', max:50},
+  {key:'potentiality', label:'潜力', max:50},
+];
+const SOUL_PARTS_COMPACT = [
+  {key:'head', label:'头', max:50}, {key:'claw', label:'爪', max:50},
+  {key:'shield', label:'甲', max:50}, {key:'cloud', label:'魂', max:50},
+  {key:'potentiality', label:'潜力'},
+];
+
+function soulPartsEditorHtml(soul, soulIdx, idPrefix, parts, useGrid) {
+  const get = (k) => soul[k] ?? soul[k.toLowerCase()] ?? 0;
+  let h = '';
+  if (useGrid) h += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(80px,1fr));gap:4px;width:100%">';
+  else h += '<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;margin-left:36px;align-items:center">';
+  for (const p of parts) {
+    const v = get(p.key);
+    const maxAttr = p.max ? ' max="' + p.max + '"' : '';
+    if (useGrid) {
+      h += '<div style="background:var(--bg-input);border:1px solid var(--border);border-radius:4px;padding:4px 6px;display:flex;flex-direction:column;align-items:center;gap:2px">';
+      h += '<span style="font-size:9px;color:var(--text-muted)">' + p.label + '</span>';
+      h += '<div style="display:flex;align-items:center;gap:2px">';
+      h += '<input type="number" id="' + idPrefix + soulIdx + '_' + p.key + '" value="' + v + '" min="0"' + maxAttr + ' style="width:36px;font-size:10px;padding:1px 2px;background:var(--bg-secondary);color:var(--text);border:1px solid var(--border);border-radius:3px;text-align:center">';
+      h += '<button class="btn-adj" onclick="setSoulProp(' + soulIdx + ',\'' + p.key + '\')" style="font-size:9px;padding:1px 4px;width:auto;height:auto">设</button>';
+      h += '</div></div>';
+    } else {
+      h += '<span style="font-size:10px;color:var(--text-muted)">' + p.label + ':</span>';
+      h += '<input type="number" id="' + idPrefix + soulIdx + '_' + p.key + '" value="' + v + '" min="0"' + maxAttr + ' style="width:36px;font-size:10px;padding:1px 2px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:3px">';
+      h += '<button class="btn-adj" onclick="setSoulProp(' + soulIdx + ',\'' + p.key + '\')" style="font-size:9px;padding:1px 4px;width:auto;height:auto">设</button>';
+    }
+  }
+  h += '</div>';
+  return h;
+}
+
+// ===== 侧栏：龙素材 + 召唤快捷栏 =====
+
 function renderDragonItems() {
   const el = document.getElementById('dragonItems');
   if (!el) return;
@@ -45,26 +113,22 @@ function renderDragonSummon() {
     html += '<option value="' + i + '">' + esc(dragonTypes[i].cn) + '</option>';
   }
   html += '</select>';
-  html += '<select id="dragonLevelSelect" style="width:50px;font-size:11px;padding:2px 4px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:4px">';
-  for (let lv = 1; lv <= 10; lv++) {
-    html += '<option value="' + lv + '">' + lv + '级</option>';
-  }
-  html += '</select>';
+  html += summonLevelSelectHtml('dragonLevelSelect', 'width:50px;font-size:11px;padding:2px 4px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:4px');
   html += '<button class="btn-adj" onclick="doSummonDragon()" style="font-size:11px;padding:3px 8px;background:#2a4a2a;color:#6f6">召唤</button>';
   html += '</div>';
   el.innerHTML = html;
 }
 
-
-async function doSummonDragon() {
-  const typeIdx = parseInt(document.getElementById('dragonTypeSelect').value);
-  const level = parseInt(document.getElementById('dragonLevelSelect').value);
-  const typeName = dragonTypes[typeIdx] ? dragonTypes[typeIdx].cn : '';
+// 召唤请求（快捷栏与召唤面板共用）
+async function summonDragonRequest(typeIndex, level, natures) {
+  const typeName = dragonTypes[typeIndex] ? dragonTypes[typeIndex].cn : '';
   try {
+    const body = {typeIndex:typeIndex, level:level};
+    if (natures && natures.length > 0) body.natures = natures;
     const r = await fetch('/api/dragon/summon', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({typeIndex:typeIdx, level:level})
+      body: JSON.stringify(body)
     });
     const res = await r.json();
     if (res.result && (res.result.includes('True') || res.result === 'ok')) {
@@ -75,6 +139,22 @@ async function doSummonDragon() {
   } catch(e) { toast('召唤失败', true); }
 }
 
+
+async function doSummonDragon() {
+  const typeIdx = parseInt(document.getElementById('dragonTypeSelect').value);
+  const level = parseInt(document.getElementById('dragonLevelSelect').value);
+  return summonDragonRequest(typeIdx, level);
+}
+
+
+async function doSummonDragonAt(typeIdx) {
+  const level = parseInt(document.getElementById('summonLv_' + typeIdx).value);
+  const natures = _summonNatures['t' + typeIdx] || [];
+  return summonDragonRequest(typeIdx, level, natures);
+}
+
+
+// ===== 侧栏：龙魂列表 =====
 
 function renderDragonSoulsList() {
   const el = document.getElementById('dragonSoulsList');
@@ -95,44 +175,13 @@ function renderDragonSoulsList() {
     const typeIdx = findDragonTypeIndex(stuffId);
     html += '<div style="padding:6px 0;border-bottom:1px solid var(--border)">';
     html += '<div style="display:flex;align-items:center;gap:8px">';
-    html += '<div style="width:32px;height:32px;border-radius:4px;background:var(--bg-input);display:flex;align-items:center;justify-content:center;overflow:hidden">';
-    if (typeIdx >= 0) html += '<img src="/api/dragon/icon/' + typeIdx + '" style="width:28px;height:28px;object-fit:contain" onerror="hideImg(this)">';
-    else html += '<span style="font-size:14px">&#x1F409;</span>';
-    html += '</div>';
+    html += dragonIconHtml(typeIdx, 32, 28);
     html += '<div style="flex:1;min-width:0">';
     html += '<div style="font-size:12px;font-weight:500">' + esc(typeName || ('龙魂#' + (i+1))) + '</div>';
     html += '<div style="font-size:10px;color:' + activeColor + '">' + active + '</div>';
     html += '</div></div>';
-    // 强化编辑
-    const parts = [
-      {key:'Head', label:'头', enhanceRange:[1001,1050]},
-      {key:'Claw', label:'爪', enhanceRange:[3001,3050]},
-      {key:'Shield', label:'甲', enhanceRange:[2001,2050]},
-      {key:'Cloud', label:'魂', enhanceRange:[4001,4050]},
-    ];
-    html += '<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;margin-left:36px;align-items:center">';
-    for (const p of parts) {
-      const v = s[p.key] ?? s[p.key.toLowerCase()] ?? 0;
-      html += '<span style="font-size:10px;color:var(--text-muted)">' + p.label + ':</span>';
-      html += '<input type="number" id="soul_' + i + '_' + p.key + '" value="' + v + '" min="0" max="50" style="width:36px;font-size:10px;padding:1px 2px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:3px">';
-      html += '<button class="btn-adj" onclick="setSoulProp(' + i + ',\'' + p.key + '\',' + i + ')" style="font-size:9px;padding:1px 4px;width:auto;height:auto">设</button>';
-    }
-    // potentiality
-    const pot = s.Potentiality ?? s.potentiality ?? 0;
-    html += '<span style="font-size:10px;color:var(--text-muted)">潜力:</span>';
-    html += '<input type="number" id="soul_' + i + '_Potentiality" value="' + pot + '" min="0" style="width:36px;font-size:10px;padding:1px 2px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:3px">';
-    html += '<button class="btn-adj" onclick="setSoulProp(' + i + ',\'Potentiality\',' + i + ')" style="font-size:9px;padding:1px 4px;width:auto;height:auto">设</button>';
-    html += '</div>';
-    // nature
-    const natures = s.NatureList || s.nature_list;
-    if (natures && natures.length > 0) {
-      html += '<div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:3px;margin-left:36px">';
-      for (const nid of natures) {
-        const n = dragonNatures.find(x => x.id === nid);
-        html += '<span style="font-size:9px;padding:1px 4px;border-radius:3px;background:rgba(100,180,255,0.15);color:#8cf">' + (n ? n.name : '#' + nid) + '</span>';
-      }
-      html += '</div>';
-    }
+    html += soulPartsEditorHtml(s, i, 'soul_', SOUL_PARTS_COMPACT, false);
+    html += natureTagsHtml(s.NatureList || s.nature_list, 'margin-top:3px;margin-left:36px');
     html += '</div>';
   }
   el.innerHTML = html;
@@ -195,6 +244,8 @@ function findDragonTypeName(stuffId) {
 }
 
 
+// ===== 侧栏：召唤列表（按类型 + 天性选择） =====
+
 function renderDragonSummonList() {
   const el = document.getElementById('dragonSummonList');
   if (!el || dragonTypes.length === 0) return;
@@ -208,11 +259,7 @@ function renderDragonSummonList() {
     html += '<div style="font-size:12px;font-weight:500">' + esc(dt.cn) + '</div>';
     html += '<div style="font-size:10px;color:var(--text-muted)">' + esc(dt.name) + ' (ID:' + dt.baseId + '~' + (dt.baseId+9) + ')</div>';
     html += '</div>';
-    html += '<select id="summonLv_' + i + '" style="width:48px;font-size:11px;padding:2px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:4px">';
-    for (let lv = 1; lv <= 10; lv++) {
-      html += '<option value="' + lv + '">' + lv + '级</option>';
-    }
-    html += '</select>';
+    html += summonLevelSelectHtml('summonLv_' + i, 'width:48px;font-size:11px;padding:2px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:4px');
     html += '<button class="btn-adj" onclick="doSummonDragonAt(' + i + ')" style="font-size:11px;padding:3px 8px;background:#2a4a2a;color:#6f6;width:auto;height:auto">召唤</button>';
     html += '</div>';
     // nature 选择标签
@@ -248,26 +295,6 @@ function toggleSummonNature(typeIdx, natureId, el) {
 }
 
 
-async function doSummonDragonAt(typeIdx) {
-  const level = parseInt(document.getElementById('summonLv_' + typeIdx).value);
-  const typeName = dragonTypes[typeIdx] ? dragonTypes[typeIdx].cn : '';
-  const natures = _summonNatures['t' + typeIdx] || [];
-  try {
-    const r = await fetch('/api/dragon/summon', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({typeIndex:typeIdx, level:level, natures:natures})
-    });
-    const res = await r.json();
-    if (res.result && (res.result.includes('True') || res.result === 'ok')) {
-      toast(typeName + ' Lv' + level + ' 召唤成功!');
-    } else {
-      toast('召唤结果: ' + (res.result || '未知'), true);
-    }
-  } catch(e) { toast('召唤失败', true); }
-}
-
-
 function selectDragonView(view) {
   selectedChest = -1;
   dragonView = (dragonView === view) ? '' : view;
@@ -276,6 +303,8 @@ function selectDragonView(view) {
   renderContent();
 }
 
+
+// ===== 主内容区：地图龙面板 =====
 
 function renderDragonSoulsPanel() {
   const el = document.getElementById('dragonViewContent');
@@ -301,43 +330,14 @@ function renderDragonSoulsPanel() {
 
     html += '<div class="item" style="flex-direction:column;align-items:flex-start;gap:4px">';
     html += '<div style="display:flex;align-items:center;gap:8px;width:100%">';
-    html += '<div style="width:48px;height:48px;border-radius:4px;background:var(--bg-input);display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0">';
-    if (typeIdx >= 0) html += '<img src="/api/dragon/icon/' + typeIdx + '" style="width:44px;height:44px;object-fit:contain" onerror="hideImg(this)">';
-    else html += '<span style="font-size:24px">&#x1F409;</span>';
-    html += '</div>';
+    html += dragonIconHtml(typeIdx, 48, 44);
     html += '<div style="flex:1;min-width:0">';
     html += '<div class="iname">' + esc(typeName || ('龙魂#' + (i+1))) + '</div>';
     html += '<div style="font-size:10px;color:' + activeColor + '">' + active + '</div>';
     html += '</div></div>';
 
-    // 强化编辑
-    const parts = [
-      {key:'head', label:'龙头'}, {key:'claw', label:'龙爪'},
-      {key:'shield', label:'龙甲'}, {key:'cloud', label:'龙魂'},
-      {key:'potentiality', label:'潜力'},
-    ];
-    html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(80px,1fr));gap:4px;width:100%">';
-    for (const p of parts) {
-      const v = s[p.key] ?? 0;
-      html += '<div style="background:var(--bg-input);border:1px solid var(--border);border-radius:4px;padding:4px 6px;display:flex;flex-direction:column;align-items:center;gap:2px">';
-      html += '<span style="font-size:9px;color:var(--text-muted)">' + p.label + '</span>';
-      html += '<div style="display:flex;align-items:center;gap:2px">';
-      html += '<input type="number" id="soul_' + i + '_' + p.key + '" value="' + v + '" min="0" max="50" style="width:36px;font-size:10px;padding:1px 2px;background:var(--bg-secondary);color:var(--text);border:1px solid var(--border);border-radius:3px;text-align:center">';
-      html += '<button class="btn-adj" onclick="setSoulProp(' + i + ',\'' + p.key + '\')" style="font-size:9px;padding:1px 4px;width:auto;height:auto">设</button>';
-      html += '</div></div>';
-    }
-    html += '</div>';
-
-    // nature
-    const natures = s.nature_list;
-    if (natures && natures.length > 0) {
-      html += '<div style="display:flex;flex-wrap:wrap;gap:3px;width:100%">';
-      for (const nid of natures) {
-        const n = dragonNatures.find(x => x.id === nid);
-        html += '<span style="font-size:9px;padding:1px 4px;border-radius:3px;background:rgba(100,180,255,0.15);color:#8cf">' + (n ? n.name : '#' + nid) + '</span>';
-      }
-      html += '</div>';
-    }
+    html += soulPartsEditorHtml(s, i, 'soul_', SOUL_PARTS_GRID, true);
+    html += natureTagsHtml(s.nature_list, 'width:100%');
 
     // 战斗属性（匹配实体）
     let ents = [];
@@ -377,6 +377,8 @@ function renderDragonSoulsPanel() {
 }
 
 
+// ===== 主内容区：龙素材面板 =====
+
 function renderDragonMaterialsPanel() {
   const el = document.getElementById('dragonViewContent');
   if (!el) return;
@@ -385,22 +387,18 @@ function renderDragonMaterialsPanel() {
   html += '<div class="plan-header"><span>龙素材 (' + dragonItems.length + ')</span></div>';
   html += '<div class="items">';
   for (const it of dragonItems) {
-    html += '<div class="item">';
-    html += '<img src="/icon/' + it.stuffId + '" onerror="hideImg(this)">';
-    html += '<div class="iname" title="' + esc(it.name) + '">' + esc(it.name) + '</div>';
-    html += '<div class="iid">ID:' + it.stuffId + '</div>';
-    html += '<div class="icount">';
-    html += '<input type="number" class="count-input" value="' + it.count + '" min="0" id="dragon_' + it.stuffId + '">';
-    html += '</div>';
-    html += '<div class="btns">';
-    html += '<button class="btn-rm" onclick="setDragonItem(' + it.stuffId + ')">设置</button>';
-    html += '</div></div>';
+    html += htmlItemCard(it.stuffId, it.name, it.count, {
+      inputId: 'dragon_' + it.stuffId,
+      buttons: [{label:'设置', onclick:'setDragonItem(' + it.stuffId + ')'}]
+    });
   }
   if (dragonItems.length === 0) html += '<div style="padding:20px;text-align:center;color:var(--text-muted)">暂无龙素材</div>';
   html += '</div></div>';
   el.innerHTML = html;
 }
 
+
+// ===== 主内容区：召唤面板 =====
 
 function renderDragonSummonPanel() {
   const el = document.getElementById('dragonViewContent');
@@ -417,20 +415,14 @@ function renderDragonSummonPanel() {
     html += '<div class="item" style="flex-direction:column;align-items:stretch;gap:6px;padding:10px">';
     // 第一行: 图标 + 名字 + ID
     html += '<div style="display:flex;align-items:center;gap:6px">';
-    html += '<div style="width:40px;height:40px;border-radius:4px;background:var(--bg-input);display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0">';
-    html += '<img src="/api/dragon/icon/' + i + '" style="width:36px;height:36px;object-fit:contain" onerror="hideImg(this)">';
-    html += '</div>';
+    html += dragonIconHtml(i, 40, 36);
     html += '<div style="flex:1;min-width:0">';
     html += '<div class="iname" style="font-size:11px">' + esc(dt.cn) + '</div>';
     html += '<div style="font-size:9px;color:var(--text-muted)">' + esc(dt.name) + ' ID:' + dt.baseId + '</div>';
     html += '</div></div>';
     // 第二行: 等级 + 召唤按钮
     html += '<div style="display:flex;align-items:center;gap:6px">';
-    html += '<select id="summonLv_' + i + '" style="flex:1;font-size:10px;padding:3px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:3px">';
-    for (let lv = 1; lv <= 10; lv++) {
-      html += '<option value="' + lv + '">' + lv + '级</option>';
-    }
-    html += '</select>';
+    html += summonLevelSelectHtml('summonLv_' + i, 'flex:1;font-size:10px;padding:3px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:3px');
     html += '<button class="btn-adj" onclick="doSummonDragonAt(' + i + ')" style="font-size:10px;padding:4px 10px;background:#2a4a2a;color:#6f6;width:auto;height:auto;white-space:nowrap">召唤</button>';
     html += '</div>';
     // nature 选择
@@ -457,41 +449,13 @@ function renderDragonSummonPanel() {
       const typeIdx = findDragonTypeIndex(stuffId);
       html += '<div class="item" style="flex-direction:column;align-items:stretch;gap:6px;padding:10px">';
       html += '<div style="display:flex;align-items:center;gap:6px">';
-      html += '<div style="width:40px;height:40px;border-radius:4px;background:var(--bg-input);display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0">';
-      if (typeIdx >= 0) html += '<img src="/api/dragon/icon/' + typeIdx + '" style="width:36px;height:36px;object-fit:contain" onerror="hideImg(this)">';
-      else html += '<span style="font-size:20px">&#x1F409;</span>';
-      html += '</div>';
+      html += dragonIconHtml(typeIdx, 40, 36);
       html += '<div style="flex:1;min-width:0;overflow:hidden">';
       html += '<div class="iname" style="font-size:11px">' + esc(typeName || ('龙魂#' + (si+1))) + '</div>';
       html += '<div style="font-size:9px;color:var(--text-muted)">待命</div>';
       html += '</div></div>';
-      // 属性
-      const parts = [
-        {key:'head', label:'龙头'}, {key:'claw', label:'龙爪'},
-        {key:'shield', label:'龙甲'}, {key:'cloud', label:'龙魂'},
-        {key:'potentiality', label:'潜力'},
-      ];
-      html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(80px,1fr));gap:4px;width:100%">';
-      for (const p of parts) {
-        const v = s[p.key] ?? 0;
-        html += '<div style="background:var(--bg-input);border:1px solid var(--border);border-radius:4px;padding:4px 6px;display:flex;flex-direction:column;align-items:center;gap:2px">';
-        html += '<span style="font-size:9px;color:var(--text-muted)">' + p.label + '</span>';
-        html += '<div style="display:flex;align-items:center;gap:2px">';
-        html += '<input type="number" id="idle_soul_' + si + '_' + p.key + '" value="' + v + '" min="0" max="50" style="width:36px;font-size:10px;padding:1px 2px;background:var(--bg-secondary);color:var(--text);border:1px solid var(--border);border-radius:3px;text-align:center">';
-        html += '<button class="btn-adj" onclick="setSoulProp(' + si + ',\'' + p.key + '\')" style="font-size:9px;padding:1px 4px;width:auto;height:auto">设</button>';
-        html += '</div></div>';
-      }
-      html += '</div>';
-      // nature
-      const natures = s.nature_list;
-      if (natures && natures.length > 0) {
-        html += '<div style="display:flex;flex-wrap:wrap;gap:3px;width:100%">';
-        for (const nid of natures) {
-          const n = dragonNatures.find(x => x.id === nid);
-          html += '<span style="font-size:9px;padding:1px 4px;border-radius:3px;background:rgba(100,180,255,0.15);color:#8cf">' + (n ? n.name : '#' + nid) + '</span>';
-        }
-        html += '</div>';
-      }
+      html += soulPartsEditorHtml(s, si, 'idle_soul_', SOUL_PARTS_GRID, true);
+      html += natureTagsHtml(s.nature_list, 'width:100%');
       html += '</div>';
     }
     html += '</div></div>';
@@ -525,5 +489,3 @@ async function refreshDragonEntities() {
   // 数据已更新，下次交互时自动生效
   toast('龙属性已刷新 (' + dragonEntities.length + '条)');
 }
-
-// 设置物品数量（先删除全部再添加指定数量）
