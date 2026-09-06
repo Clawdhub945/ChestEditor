@@ -44,6 +44,7 @@ function selectChest(i) {
   selectedChest = i;
   dragonView = '';
   npcView = '';
+  npcfixView = '';
   showDragonSouls = false;
   renderSidebar();
   renderContent();
@@ -75,6 +76,10 @@ function renderContent() {
     renderEntityEditorPanel();
     return;
   }
+
+  // NPC修改 视图
+  if (npcfixView === 'box1') { renderNpcfixBox1(); return; }
+  if (npcfixView === 'box2') { renderNpcfixBox2(); return; }
 
   if (selectedChest < 0 || selectedChest >= chests.length) {
     el.innerHTML = '<div class="empty-state"><div class="icon">&#128230;</div><div class="title">选择一个箱子</div><div class="desc">从左侧列表中选择箱子查看物品</div></div>';

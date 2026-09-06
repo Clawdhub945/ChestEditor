@@ -135,6 +135,17 @@ function renderSidebar() {
     "selectNpcView('editor')", npcView === 'editor', 'font-size:20px;' + MENU_ICON_FLEX);
   html += htmlCategory(npcMainOpen, 'toggleNpcMain', '实体扫描', null, editorItem);
 
+  // NPC修改 分类（盒子1 小人数值修改 / 盒子2 战斗单位 / 盒子3-5 预留）
+  let npcfixHtml = '';
+  npcfixHtml += htmlMenuItem('&#x1F9F0;', '盒子1 小人数值修改', '我方NPC',
+    "selectNpcfixView('box1')", npcfixView === 'box1', 'font-size:16px;' + MENU_ICON_FLEX);
+  npcfixHtml += htmlMenuItem('&#x2694;', '盒子2 战斗单位', '敌我阵营',
+    "selectNpcfixView('box2')", npcfixView === 'box2', 'font-size:20px;' + MENU_ICON_FLEX);
+  npcfixHtml += htmlMenuItem('&#x1F3D7;', '盒子3 建筑物', '敬请期待', '', false, 'font-size:16px;' + MENU_ICON_FLEX);
+  npcfixHtml += htmlMenuItem('&#x1F43E;', '盒子4 动物', '敬请期待', '', false, 'font-size:20px;' + MENU_ICON_FLEX);
+  npcfixHtml += htmlMenuItem('&#x1F4E6;', '盒子5 掉落物', '敬请期待', '', false, 'font-size:16px;' + MENU_ICON_FLEX);
+  html += htmlCategory(npcfixOpen, 'toggleNpcfix', 'NPC修改', null, npcfixHtml);
+
   // 科技树
   const techItem = htmlMenuItem('&#x1F333;', '查看科技树', '点击查看/修改',
     'openTechTree()', techTreeOpen, 'font-size:20px;' + MENU_ICON_FLEX);

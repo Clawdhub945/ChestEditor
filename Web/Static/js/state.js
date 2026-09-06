@@ -26,6 +26,9 @@ let filters = [];
 
 
 
+let npcfixOpen = false;  // NPC修改 分类展开
+let npcfixView = '';     // 'box1' 小人数值修改 | 'box2' 战斗单位
+
 let templeItems = null; // 永恒神殿数据 {found, items:[{stuffId,name,count}]}
 
 // 外置数据表（/static/data/*.json，init 时加载）

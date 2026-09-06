@@ -1,4 +1,25 @@
 // npc — 我方 NPC 面板：列表渲染 + 字段表格 + 字段修改
+
+// 我方NPC按职业分类（NPC面板与"NPC修改"盒子1共用）
+function classifyNpcByType(items) {
+  var sub = {soldiers:[],workers:[],children:[],prisoners:[],nobles:[],lords:[],misc:[],outsiders:[],laborers:[],others:[]};
+  for (var si = 0; si < items.length; si++) {
+    var npc = items[si];
+    var t = npc.npcType !== undefined && npc.npcType !== null ? npc.npcType : -9999;
+    if (t===1001) sub.soldiers.push(npc);
+    else if ((t>=-3&&t<=-1)||(t>=9001&&t<=9199)) sub.children.push(npc);
+    else if (t===25) sub.prisoners.push(npc);
+    else if ((t>=1&&t<=22)||t===24||(t>=26&&t<=29)||(t>=31&&t<=49)||t===9301||t===9302||t===9303||t===9304||t===9306||t===9308||t===9309) sub.workers.push(npc);
+    else if (t===61) sub.nobles.push(npc);
+    else if (t===70) sub.lords.push(npc);
+    else if (t===23||t===30) sub.misc.push(npc);
+    else if (t>=-15&&t<=-5) sub.outsiders.push(npc);
+    else if (t===0||(t>=9201&&t<=9299)) sub.laborers.push(npc);
+    else sub.others.push(npc);
+  }
+  return sub;
+}
+
 function renderNpcPanel() {
   const el = document.getElementById('content');
   let html = '';
@@ -28,24 +49,6 @@ function renderNpcPanel() {
     var sortedKingdoms = kingdomOrder.filter(function(k) { return allKingdoms.indexOf(k) >= 0; })
       .concat(allKingdoms.filter(function(k) { return kingdomOrder.indexOf(k) < 0; }).sort(function(a,b){return a-b;}));
 
-    function classifyMineByType(items) {
-      var sub = {soldiers:[],workers:[],children:[],prisoners:[],nobles:[],lords:[],misc:[],outsiders:[],laborers:[],others:[]};
-      for (var si = 0; si < items.length; si++) {
-        var npc = items[si];
-        var t = npc.npcType !== undefined && npc.npcType !== null ? npc.npcType : -9999;
-        if (t===1001) sub.soldiers.push(npc);
-        else if ((t>=-3&&t<=-1)||(t>=9001&&t<=9199)) sub.children.push(npc);
-        else if (t===25) sub.prisoners.push(npc);
-        else if ((t>=1&&t<=22)||t===24||(t>=26&&t<=29)||(t>=31&&t<=49)||t===9301||t===9302||t===9303||t===9304||t===9306||t===9308||t===9309) sub.workers.push(npc);
-        else if (t===61) sub.nobles.push(npc);
-        else if (t===70) sub.lords.push(npc);
-        else if (t===23||t===30) sub.misc.push(npc);
-        else if (t>=-15&&t<=-5) sub.outsiders.push(npc);
-        else if (t===0||(t>=9201&&t<=9299)) sub.laborers.push(npc);
-        else sub.others.push(npc);
-      }
-      return sub;
-    }
     var groups = [];
     for (var gi = 0; gi < sortedKingdoms.length; gi++) {
       var kid = sortedKingdoms[gi];
@@ -53,7 +56,7 @@ function renderNpcPanel() {
       var kInfo = getKingdomInfo(kid);
       var kName = (kInfo && kInfo.name) || ('王国' + kid);
       var kColor = (kInfo && kInfo.bg) || '#7f8c8d';
-      var sub = classifyMineByType(items);
+      var sub = classifyNpcByType(items);
       var subDefs;
       if (kid === 1) {
         subDefs = [
@@ -412,6 +415,7 @@ function selectNpcView(view) {
   selectedChest = -1;
   dragonView = '';
   npcView = (npcView === view) ? '' : view;
+  npcfixView = '';
   renderSidebar();
   renderContent();
 }

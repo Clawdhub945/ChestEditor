@@ -349,6 +349,7 @@ function selectDragonView(view) {
   selectedChest = -1;
   dragonView = (dragonView === view) ? '' : view;
   showDragonSouls = (dragonView === 'souls');
+  npcfixView = '';
   renderSidebar();
   renderContent();
   if (dragonView === 'materials') fetchTemple();

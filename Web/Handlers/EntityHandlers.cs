@@ -46,6 +46,27 @@ internal static class EntityHandlers
             });
         });
 
+        // 批量销毁（一次主线程任务循环执行；一键清除使用）
+        Router.Add("POST", "/api/editor/destroy/batch", ctx =>
+        {
+            var arr = ctx.Json?["ptrHashes"] as System.Text.Json.Nodes.JsonArray;
+            if (arr == null || arr.Count == 0) throw new HttpError(400, "missing ptrHashes");
+            var hashes = new List<int>();
+            foreach (var n in arr)
+                if (n != null) hashes.Add(n.GetValue<int>());
+            return MainThread.Run(() =>
+            {
+                int ok = 0, fail = 0;
+                foreach (var ph in hashes)
+                {
+                    var result = EntityDestroyer.DestroyEntity(ph);
+                    if (result == "ok") ok++; else fail++;
+                }
+                Plugin.LogInfo($"[EntityDestroyer] 批量销毁完成: {ok} 成功 / {fail} 失败");
+                return $"{{\"ok\":true,\"destroyed\":{ok},\"failed\":{fail}}}";
+            }, 120000);
+        });
+
         Router.Add("POST", "/api/editor/locate", ctx =>
         {
             int ptrHash = ctx.JsonInt("ptrHash");
