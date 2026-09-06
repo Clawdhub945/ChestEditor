@@ -592,7 +592,7 @@ internal static class ChestService
         try
         {
             var facility = FindTempleFacility();
-            if (facility == null) return "{\"found\":false,\"items\":[]}";
+            if (facility == null) return "{\"found\":false,\"items\":[],\"plan\":[]}";
             var items = ReadItemsFromBag(facility);
             var sb = new System.Text.StringBuilder();
             sb.Append("{\"found\":true,\"items\":[");
@@ -603,8 +603,35 @@ internal static class ChestService
                 first = false;
                 sb.Append($"{{\"stuffId\":{it.StuffId},\"name\":\"{Escape(ItemCatalog.GetName(it.StuffId))}\",\"count\":{it.Count}}}");
             }
+            // 计划库存（永恒圣殿自带的功能）
+            sb.Append("],\"plan\":[");
+            var plan = ReadStuffPlanDic(facility);
+            bool f2 = true;
+            if (plan != null)
+            {
+                foreach (var kv in plan)
+                {
+                    if (!f2) sb.Append(',');
+                    f2 = false;
+                    sb.Append($"{{\"stuffId\":{kv.Key},\"count\":{kv.Value}}}");
+                }
+            }
             sb.Append("]}");
             return sb.ToString();
+        }
+        catch (Exception ex) { return $"{{\"error\":\"{Escape(ex.Message)}\"}}"; }
+    }
+
+    /// <summary>设置永恒神殿的计划库存数量（0 = 删除该计划）</summary>
+    internal static string SetTemplePlan(int stuffId, int count)
+    {
+        try
+        {
+            var facility = FindTempleFacility();
+            if (facility == null) return "{\"error\":\"temple not found\"}";
+            SetStuffPlanValue(facility, stuffId, count);
+            Plugin.LogInfo($"[Temple] 设置计划库存 {ItemCatalog.GetName(stuffId)}({stuffId}) = {count}");
+            return GetTempleJson();
         }
         catch (Exception ex) { return $"{{\"error\":\"{Escape(ex.Message)}\"}}"; }
     }

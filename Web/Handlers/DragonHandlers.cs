@@ -22,6 +22,14 @@ internal static class DragonHandlers
             return MainThread.Run(() => ChestService.SetTempleItem(stuffId, count));
         });
 
+        Router.Add("POST", "/api/temple/plan", ctx =>
+        {
+            int stuffId = ctx.JsonInt("stuffId");
+            int count = ctx.JsonInt("count");
+            if (stuffId <= 0) throw new HttpError(400, "invalid stuffId");
+            return MainThread.Run(() => ChestService.SetTemplePlan(stuffId, count));
+        });
+
         Router.Add("POST", "/api/dragon/set", ctx =>
         {
             int stuffId = ctx.JsonInt("stuffId");

@@ -97,6 +97,23 @@ async function fetchTemple() {
   } catch(e) {}
 }
 
+async function setTemplePlan(stuffId) {
+  const input = document.getElementById('templeplan_' + stuffId);
+  const count = parseInt(input && input.value) || 0;
+  try {
+    const r = await fetch('/api/temple/plan', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({stuffId, count})
+    });
+    const d = await r.json();
+    if (d.error) { toast(d.error, true); return; }
+    templeItems = d;
+    renderDragonMaterialsPanel();
+    toast('计划库存已设置');
+  } catch(e) { toast('设置失败', true); }
+}
+
 async function setTempleItem(stuffId) {
   const input = document.getElementById('temple_' + stuffId);
   const count = parseInt(input && input.value) || 0;
