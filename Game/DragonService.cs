@@ -1034,6 +1034,8 @@ internal static class DragonService
         {
             var allGOs = UnityEngine.Resources.FindObjectsOfTypeAll<UnityEngine.GameObject>();
             int found = 0;
+            bool guidMatched = false;
+            string? unknownField = null;
             foreach (var go in allGOs)
             {
                 try
@@ -1052,6 +1054,8 @@ internal static class DragonService
                         try { compClass = Il2CppApi.GetClass(compPtr); } catch { }
                         if (compClass == IntPtr.Zero) continue;
 
+                        // 与 ReadDragonEntities 一致：只认带 hp_total 的战斗组件补齐字段偏移，
+                        // 避免非战斗组件污染缓存
                         if (!_dragonFieldOffsets.ContainsKey("hp_total"))
                         {
                             var tmpFields = new List<(string, int)>();
@@ -1068,16 +1072,21 @@ internal static class DragonService
                                 try { cls = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(cls); } catch { break; }
                                 d++;
                             }
-                            foreach (var (n, o) in tmpFields) { if (o > 0 && !_dragonFieldOffsets.ContainsKey(n)) _dragonFieldOffsets[n] = o; }
+                            if (tmpFields.Any(x => x.Item1 == "hp_total"))
+                                foreach (var (n, o) in tmpFields) { if (o > 0 && !_dragonFieldOffsets.ContainsKey(n)) _dragonFieldOffsets[n] = o; }
                         }
 
-                        if (!_dragonFieldOffsets.TryGetValue(fieldName, out int offset))
-                            return $"unknown field: {fieldName}";
-
-                        int curGuid = 0;
-                        if (_dragonFieldOffsets.TryGetValue("guid", out int guidOff))
-                            curGuid = ReadIl2CppInt(compPtr, guidOff);
+                        if (!_dragonFieldOffsets.TryGetValue("guid", out int guidOff)) continue;
+                        int curGuid = ReadIl2CppInt(compPtr, guidOff);
                         if (curGuid != guid) continue;
+
+                        guidMatched = true;
+                        if (!_dragonFieldOffsets.TryGetValue(fieldName, out int offset))
+                        {
+                            // 该战斗组件没有此字段：记录并继续找同 GO 的其他组件（勿提前放弃）
+                            unknownField = fieldName;
+                            continue;
+                        }
 
                         unsafe
                         {
@@ -1101,7 +1110,7 @@ internal static class DragonService
                 }
                 catch { }
             }
-            return "dragon not found";
+            return unknownField != null ? $"unknown field: {unknownField}" : (guidMatched ? $"unknown field: {fieldName}" : "dragon not found");
         }
         catch (Exception ex) { return ex.Message; }
     }
