@@ -31,6 +31,7 @@ async function init() {
     await fetchChests();
     await fetchDragonItems();
     await fetchDragonSouls();
+    if (dragonView === 'materials') await fetchTemple();
     if (!dragonView) renderSidebar();
   }, 3000);
 }

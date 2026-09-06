@@ -10,6 +10,18 @@ internal static class DragonHandlers
         Router.Add("GET", "/api/dragon", _ =>
             MainThread.Run(() => DragonService.GetBagJson()));
 
+        // 永恒神殿（驯龙→龙素材面板）
+        Router.Add("GET", "/api/temple", _ =>
+            MainThread.Run(() => ChestService.GetTempleJson()));
+
+        Router.Add("POST", "/api/temple/set", ctx =>
+        {
+            int stuffId = ctx.JsonInt("stuffId");
+            int count = ctx.JsonInt("count");
+            if (stuffId <= 0) throw new HttpError(400, "invalid stuffId");
+            return MainThread.Run(() => ChestService.SetTempleItem(stuffId, count));
+        });
+
         Router.Add("POST", "/api/dragon/set", ctx =>
         {
             int stuffId = ctx.JsonInt("stuffId");

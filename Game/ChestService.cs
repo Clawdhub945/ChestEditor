@@ -553,6 +553,93 @@ internal static class ChestService
     }
 
 
+    // ====== 永恒神殿（驯龙→龙素材面板） ======
+    // 永恒圣殿两类：108012 国王的永恒圣殿 / 111005 永恒圣殿；名字含"永恒"兜底
+
+    private static readonly int[] TempleStuffIds = { 108012, 111005 };
+
+    internal static object? FindTempleFacility()
+    {
+        try
+        {
+            var territory = SaveLoadPatches.CachedTerritory;
+            if (territory == null) return null;
+            var facilityDic = GetProp(territory, "facility_dic");
+            if (facilityDic == null) return null;
+            var values = GetProp(facilityDic, "Values");
+            if (values == null) return null;
+            var getEnum = values.GetType().GetMethod("GetEnumerator", BF);
+            if (getEnum == null) return null;
+            var enumerator = getEnum.Invoke(values, null);
+            var moveNext = enumerator.GetType().GetMethod("MoveNext", BF);
+            var current = enumerator.GetType().GetProperty("Current", BF);
+            while ((bool)(moveNext.Invoke(enumerator, null) ?? false))
+            {
+                var facility = current.GetValue(enumerator);
+                if (facility == null) continue;
+                int stuffId = GetInt(facility, "stuff_id");
+                if (TempleStuffIds.Contains(stuffId)) return facility;
+                var nm = GetProp(facility, "stuff_name_with_id_index")?.ToString() ?? "";
+                if (nm.Contains("永恒")) return facility;
+            }
+        }
+        catch { }
+        return null;
+    }
+
+    internal static string GetTempleJson()
+    {
+        try
+        {
+            var facility = FindTempleFacility();
+            if (facility == null) return "{\"found\":false,\"items\":[]}";
+            var items = ReadItemsFromBag(facility);
+            var sb = new System.Text.StringBuilder();
+            sb.Append("{\"found\":true,\"items\":[");
+            bool first = true;
+            foreach (var it in items)
+            {
+                if (!first) sb.Append(',');
+                first = false;
+                sb.Append($"{{\"stuffId\":{it.StuffId},\"name\":\"{Escape(ItemCatalog.GetName(it.StuffId))}\",\"count\":{it.Count}}}");
+            }
+            sb.Append("]}");
+            return sb.ToString();
+        }
+        catch (Exception ex) { return $"{{\"error\":\"{Escape(ex.Message)}\"}}"; }
+    }
+
+    /// <summary>设置永恒神殿内某物品数量（清空原有数量后写入目标值）</summary>
+    internal static string SetTempleItem(int stuffId, int count)
+    {
+        try
+        {
+            var facility = FindTempleFacility();
+            if (facility == null) return "{\"error\":\"temple not found\"}";
+            object? bag = GetProp(facility, "bag");
+            if (bag == null) return "{\"error\":\"bag is null\"}";
+
+            CacheBagMethods(bag);
+            var current = ReadItemsFromBag(facility).FirstOrDefault(x => x.StuffId == stuffId);
+            if (current.Count > 0 && _removeStuffMethod != null)
+                _removeStuffMethod.Invoke(bag, new object[] { stuffId, current.Count, false });
+
+            if (count > 0)
+            {
+                if (_addStuffNoNotifyMethod != null)
+                    _addStuffNoNotifyMethod.Invoke(bag, new object[] { stuffId, count });
+                else if (_addStuffMethod != null)
+                    _addStuffMethod.Invoke(bag, new object[] { stuffId, count, false });
+                else
+                    return "{\"error\":\"AddStuff not found\"}";
+            }
+
+            Plugin.LogInfo($"[Temple] 设置 {ItemCatalog.GetName(stuffId)}({stuffId}) = {count}");
+            return GetTempleJson();
+        }
+        catch (Exception ex) { return $"{{\"error\":\"{Escape(ex.Message)}\"}}"; }
+    }
+
     internal static string GetFiltersJson()
     {
         var sb = new StringBuilder();

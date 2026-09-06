@@ -351,6 +351,7 @@ function selectDragonView(view) {
   showDragonSouls = (dragonView === 'souls');
   renderSidebar();
   renderContent();
+  if (dragonView === 'materials') fetchTemple();
 }
 
 
@@ -474,6 +475,36 @@ function renderDragonMaterialsPanel() {
     });
   }
   if (dragonItems.length === 0) html += '<div style="padding:20px;text-align:center;color:var(--text-muted)">暂无龙素材</div>';
+  html += '</div></div>';
+
+  // ===== 永恒神殿 =====
+  const TEMPLE_IDS = [602003, 612003, 612002, 612001, 603002, 603003, 603004]; // 生命果实/绿/蓝/红宝石/秘银锭/精金锭/山铜锭
+  const temple = templeItems;
+  html += '<div class="plan-section" style="margin-top:12px">';
+  html += '<div class="plan-header"><span>永恒神殿</span>';
+  html += '<span style="font-size:10px;color:var(--text-muted)">' + (temple && temple.found ? '' : '未找到（领地内需有永恒圣殿）') + '</span></div>';
+  html += '<div class="items">';
+  if (temple && temple.found) {
+    // 仓库数量 = 该物品在所有其他箱子中的总数（排除神殿自身）
+    const wh = {};
+    for (const c of chests) {
+      if (!c.items) continue;
+      if (c.stuffId === 108012 || c.stuffId === 111005 || (c.name && c.name.includes('永恒'))) continue;
+      for (const it of c.items) wh[it.stuffId] = (wh[it.stuffId] || 0) + it.count;
+    }
+    const byId = {};
+    for (const it of temple.items) byId[it.stuffId] = it;
+    for (const sid of TEMPLE_IDS) {
+      const it = byId[sid];
+      const name = (it && it.name) || (items.find(x => x.stuffId === sid) || {}).name || ('ID:' + sid);
+      const count = it ? it.count : 0;
+      html += htmlItemCard(sid, name, count, {
+        inputId: 'temple_' + sid,
+        extraHtml: '<div class="iid" style="color:var(--accent-light)">仓库数量: ' + (wh[sid] || 0) + '</div>',
+        buttons: [{label:'设置', onclick:'setTempleItem(' + sid + ')'}]
+      });
+    }
+  }
   html += '</div></div>';
   el.innerHTML = html;
 }

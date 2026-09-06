@@ -47,6 +47,7 @@ function htmlItemCard(stuffId, name, count, opts) {
   h += '<input type="number" class="count-input' + (opts.inputCls ? ' ' + opts.inputCls : '') + '" value="' + count + '" min="0" id="' + opts.inputId + '">';
   h += '<button class="cnt-step" onclick="stepCount(this,1)">+</button>';
   h += '</div>';
+  if (opts.extraHtml) h += opts.extraHtml;
   h += '<div class="btns">';
   for (const b of opts.buttons)
     h += '<button class="btn-rm" onclick="' + b.onclick + '">' + b.label + '</button>';

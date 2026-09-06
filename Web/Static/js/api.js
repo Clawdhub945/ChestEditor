@@ -86,6 +86,34 @@ async function fetchDragonSouls() {
 }
 
 
+async function fetchTemple() {
+  try {
+    const r = await fetch('/api/temple?t=' + Date.now());
+    const data = await r.json();
+    if (!data || typeof data.found !== 'boolean') return; // 404/错误响应不覆盖
+    const changed = JSON.stringify(data) !== JSON.stringify(templeItems);
+    templeItems = data;
+    if (changed && dragonView === 'materials') renderDragonMaterialsPanel();
+  } catch(e) {}
+}
+
+async function setTempleItem(stuffId) {
+  const input = document.getElementById('temple_' + stuffId);
+  const count = parseInt(input && input.value) || 0;
+  try {
+    const r = await fetch('/api/temple/set', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({stuffId, count})
+    });
+    const d = await r.json();
+    if (d.error) { toast(d.error, true); return; }
+    templeItems = d;
+    renderDragonMaterialsPanel();
+    toast('已设置');
+  } catch(e) { toast('设置失败', true); }
+}
+
 async function fetchDragonEntities() {
   try {
     const r = await fetch('/api/dragon/entities');

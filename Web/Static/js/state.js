@@ -26,6 +26,8 @@ let filters = [];
 
 
 
+let templeItems = null; // 永恒神殿数据 {found, items:[{stuffId,name,count}]}
+
 // 外置数据表（/static/data/*.json，init 时加载）
 var NPC_TYPES = {};
 var TECH_TREE = [];
