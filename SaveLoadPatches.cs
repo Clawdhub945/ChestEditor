@@ -111,6 +111,13 @@ public static class SaveLoadPatches
 
     // ========== 补丁回调 ==========
 
+    /// <summary>
+    /// NPC 修改读档重放开关。
+    /// 重放需要全场景扫描（Resources.FindObjectsOfTypeAll）×5次，大存档进游戏会卡 5 次，
+    /// 暂时关闭；改为 false 期间：NPC 字段修改仍可实时编辑，但读档后不会自动重放。
+    /// </summary>
+    public static bool NpcReapplyOnLoad = false;
+
     public static void OnDoLoadPostfix(string __0, bool __result)
     {
         if (__result)
@@ -119,7 +126,8 @@ public static class SaveLoadPatches
             CachedTerritory = null; // 清除旧缓存，等待下次 WalkState 重新获取
 
             // 延迟重应用 NPC 修改（等实体重建完成）
-            ChestEditorComponent.Instance?.ScheduleNpcReapply();
+            if (NpcReapplyOnLoad)
+                ChestEditorComponent.Instance?.ScheduleNpcReapply();
         }
     }
 
