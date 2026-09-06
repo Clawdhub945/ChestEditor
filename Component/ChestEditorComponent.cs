@@ -4,29 +4,27 @@ using UnityEngine;
 namespace ChestEditor;
 
 /// <summary>
-/// IL2CPP 注入的 MonoBehaviour：快捷键、读档后重应用调度、主线程任务泵。
+/// IL2CPP 注入的 MonoBehaviour：快捷键、读档后延迟重应用调度、主线程任务泵。
 /// 游戏数据操作全部在 Game/ 下的服务类中，由 MainThread 调度到这里执行。
 /// </summary>
 public class ChestEditorComponent : MonoBehaviour
 {
     internal static ChestEditorComponent? Instance;
 
-    // 读档后延迟重应用 NPC 修改（多次，防止被游戏覆盖）
-    private int _reapplyCountdown;
-    private int _reapplyRemaining;
-    private bool _reapplyPending;
+    // 读档后延迟重应用 NPC 修改（只做一次，等场景完全加载，替代旧的 5 次重扫）
+    private bool _deferredReapplyPending;
+    private float _deferredReapplyAt;
 
     public ChestEditorComponent(IntPtr ptr) : base(ptr)
     {
         Instance = this;
     }
 
-    internal void ScheduleNpcReapply()
+    internal void ScheduleDeferredNpcReapply(float delaySeconds = 12f)
     {
-        _reapplyCountdown = 60;
-        _reapplyRemaining = 5; // 重应用5次，确保不被游戏覆盖
-        _reapplyPending = true;
-        Plugin.LogInfo("[ChestEditor] 已调度 NPC 修改重应用 x5...");
+        _deferredReapplyPending = true;
+        _deferredReapplyAt = Time.time + delaySeconds;
+        Plugin.LogInfo($"[ChestEditor] 已调度 NPC 修改延迟重应用（{delaySeconds:0}秒后一次）");
     }
 
     private void Update()
@@ -37,23 +35,15 @@ public class ChestEditorComponent : MonoBehaviour
             catch (Exception ex) { Plugin.LogError($"打开浏览器失败: {ex.Message}"); }
         }
 
-        // 读档后延迟重应用 NPC 修改（多次）
-        if (_reapplyPending)
+        // 读档后延迟重应用（一次全场景扫描；用户在面板里手动扫描也会触发恢复）
+        if (_deferredReapplyPending && Time.time >= _deferredReapplyAt)
         {
-            _reapplyCountdown--;
-            if (_reapplyCountdown <= 0)
+            _deferredReapplyPending = false;
+            try
             {
-                try
-                {
-                    ModificationStore.ReapplyModifications();
-                }
-                catch (Exception ex) { Plugin.LogError($"[ChestEditor] NPC 修改重应用失败: {ex.Message}"); }
-                _reapplyRemaining--;
-                if (_reapplyRemaining <= 0)
-                    _reapplyPending = false;
-                else
-                    _reapplyCountdown = 120; // 下一次等120帧
+                ModificationStore.ReapplyModifications();
             }
+            catch (Exception ex) { Plugin.LogError($"[ChestEditor] NPC 修改重应用失败: {ex.Message}"); }
         }
 
         // 执行 HTTP 线程投递的主线程任务

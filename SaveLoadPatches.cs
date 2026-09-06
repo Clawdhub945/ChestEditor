@@ -113,10 +113,11 @@ public static class SaveLoadPatches
 
     /// <summary>
     /// NPC 修改读档重放开关。
-    /// 重放需要全场景扫描（Resources.FindObjectsOfTypeAll）×5次，大存档进游戏会卡 5 次，
-    /// 暂时关闭；改为 false 期间：NPC 字段修改仍可实时编辑，但读档后不会自动重放。
+    /// 旧实现：60帧后每120帧重扫全场景共5次 → 大存档读档后卡5次。
+    /// 现实现：延迟12秒只做一次全场景扫描（等场景加载完），加上
+    /// NPC面板/实体编辑器手动扫描时也会顺带恢复（懒扫描）。
     /// </summary>
-    public static bool NpcReapplyOnLoad = false;
+    public static bool NpcReapplyOnLoad = true;
 
     public static void OnDoLoadPostfix(string __0, bool __result)
     {
@@ -127,7 +128,7 @@ public static class SaveLoadPatches
 
             // 延迟重应用 NPC 修改（等实体重建完成）
             if (NpcReapplyOnLoad)
-                ChestEditorComponent.Instance?.ScheduleNpcReapply();
+                ChestEditorComponent.Instance?.ScheduleDeferredNpcReapply();
         }
     }
 

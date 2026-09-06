@@ -19,6 +19,9 @@ internal static class EntityScan
 {
     private static readonly List<EditorEntity> _entities = new();
 
+    // ptrHash -> 实体索引（ScanAll 时重建；OnPostUpdate 每帧查询用，替代 O(n) 线性查找）
+    private static readonly Dictionary<int, EditorEntity> _byPtrHash = new();
+
 
     // NPC 类名关键词
     private static readonly string[] NpcClassKeywords = { "Npc" };
@@ -74,6 +77,7 @@ internal static class EntityScan
     /// </summary>
     internal static void ScanAll()
     {
+        _byPtrHash.Clear();
         try { _entities.Clear(); } catch (Exception ex) { Plugin.LogError($"[EntityEditor] Clear error: {ex.Message}"); return; }
         Il2CppApi.ClearClassFieldCache();
         try
@@ -261,6 +265,7 @@ internal static class EntityScan
                             entity.HometownKingdomId = entity.TerritoryKingdomId;
 
                         _entities.Add(entity);
+                        _byPtrHash[entity.PtrHash] = entity;
                         found++;
                         break; // 每个 GO 只取第一个匹配组件
                     }
@@ -461,22 +466,13 @@ internal static class EntityScan
 
 
     internal static EditorEntity? FindEntityByPtr(IntPtr ptr)
-    {
-        int hash = ptr.GetHashCode();
-        foreach (var e in _entities)
-            if (e.PtrHash == hash) return e;
-        return null;
-    }
+        => _byPtrHash.TryGetValue(ptr.GetHashCode(), out var e) ? e : null;
 
 
     internal static List<EditorEntity> Entities => _entities;
 
     /// <summary>按 ptrHash 查找已扫描实体</summary>
     internal static EditorEntity? FindByPtrHash(int ptrHash)
-    {
-        foreach (var e in _entities)
-            if (e.PtrHash == ptrHash) return e;
-        return null;
-    }
+        => _byPtrHash.TryGetValue(ptrHash, out var e) ? e : null;
 
 }
