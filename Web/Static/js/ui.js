@@ -51,7 +51,7 @@ function htmlFieldRow(label, inputId, value, onclick, opts) {
   let h = '<div style="width:100%;box-sizing:border-box;display:flex;align-items:center;justify-content:center;gap:4px;margin-bottom:4px">';
   h += '<span style="font-size:10px;color:var(--text-muted);flex:0 0 auto;' + (opts.labelWidth ? 'width:' + opts.labelWidth + ';' : '') + 'text-align:' + (opts.labelAlign || 'right') + '">' + label + '</span>';
   h += '<input type="number" id="' + inputId + '" value="' + value + '" min="0"' + (opts.max ? ' max="' + opts.max + '"' : '') + ' style="flex:1;min-width:0;font-size:11px;padding:2px 4px;background:var(--bg-input);border:1px solid var(--border);border-radius:3px;color:var(--text-primary);text-align:center;outline:none" onfocus="this.select()">';
-  h += '<button class="btn-rm" onclick="' + onclick + '" style="padding:2px 8px;font-size:11px;flex:0 0 auto">设</button>';
+  h += '<button class="btn-rm" onclick="' + onclick + '" style="padding:4px 12px;font-size:11px;font-weight:500;border:none;border-radius:var(--radius-sm);flex:0 0 auto">设</button>';
   h += '</div>';
   return h;
 }
