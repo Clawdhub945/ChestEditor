@@ -95,6 +95,7 @@ internal static class Router
                 if (result is RawResponse raw)
                 {
                     resp.StatusCode = 200;
+                    HttpUtil.ApplyNoCache(resp);
                     resp.ContentType = raw.ContentType;
                     resp.ContentLength64 = raw.Body.Length;
                     resp.OutputStream.Write(raw.Body, 0, raw.Body.Length);

@@ -122,9 +122,19 @@ internal sealed class RequestCtx
 /// <summary>HTTP 响应/嵌入资源的通用写出工具</summary>
 internal static class HttpUtil
 {
+    /// <summary>
+    /// 禁止浏览器启发式缓存：前端 css/js 更新随 DLL 发布，URL 不变，
+    /// 不加此头时浏览器会用旧缓存的样式/脚本导致"改了没生效"
+    /// </summary>
+    internal static void ApplyNoCache(HttpListenerResponse resp)
+    {
+        try { resp.Headers["Cache-Control"] = "no-cache"; } catch { }
+    }
+
     internal static void SendJson(HttpListenerResponse resp, string json, int status = 200)
     {
         resp.StatusCode = status;
+        ApplyNoCache(resp);
         resp.ContentType = "application/json; charset=utf-8";
         var buf = Encoding.UTF8.GetBytes(json);
         resp.ContentLength64 = buf.Length;
@@ -133,6 +143,8 @@ internal static class HttpUtil
 
     internal static void SendHtml(HttpListenerResponse resp, string html)
     {
+        resp.StatusCode = 200;
+        ApplyNoCache(resp);
         resp.ContentType = "text/html; charset=utf-8";
         var buf = Encoding.UTF8.GetBytes(html);
         resp.ContentLength64 = buf.Length;
@@ -143,6 +155,7 @@ internal static class HttpUtil
     {
         if (bytes == null) { resp.StatusCode = 404; return; }
         resp.StatusCode = 200;
+        ApplyNoCache(resp);
         resp.ContentType = "image/png";
         resp.ContentLength64 = bytes.Length;
         resp.OutputStream.Write(bytes, 0, bytes.Length);
@@ -152,6 +165,7 @@ internal static class HttpUtil
     {
         if (bytes == null) { resp.StatusCode = 404; return; }
         resp.StatusCode = 200;
+        ApplyNoCache(resp);
         resp.ContentType = "text/css; charset=utf-8";
         resp.ContentLength64 = bytes.Length;
         resp.OutputStream.Write(bytes, 0, bytes.Length);
@@ -161,6 +175,7 @@ internal static class HttpUtil
     {
         if (bytes == null) { resp.StatusCode = 404; return; }
         resp.StatusCode = 200;
+        ApplyNoCache(resp);
         resp.ContentType = "application/javascript; charset=utf-8";
         resp.ContentLength64 = bytes.Length;
         resp.OutputStream.Write(bytes, 0, bytes.Length);
