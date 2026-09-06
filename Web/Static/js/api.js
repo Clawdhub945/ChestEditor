@@ -67,10 +67,21 @@ async function fetchEntityEditorData() {
 }
 
 
+let _lastSoulsSig = null;
+
 async function fetchDragonSouls() {
   try {
-    const r = await fetch('/api/dragon/souls');
-    dragonSouls = await r.json();
+    const r = await fetch('/api/dragon/souls?t=' + Date.now());
+    const data = await r.json();
+    // 数据变化检测：召唤/移除龙后自动重渲染，无变化时不打断正在输入的值
+    const sig = JSON.stringify(data);
+    const changed = sig !== _lastSoulsSig;
+    _lastSoulsSig = sig;
+    dragonSouls = data;
+    if (changed) {
+      renderSidebar();
+      if (dragonView === 'souls') renderDragonSoulsPanel();
+    }
   } catch(e) {}
 }
 

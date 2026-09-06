@@ -143,6 +143,8 @@ async function summonDragonRequest(typeIndex, level, natures) {
     const res = await r.json();
     if (res.result && (res.result.includes('True') || res.result === 'ok')) {
       toast(typeName + ' Lv' + level + ' 召唤成功!');
+      // 立即拉取龙魂列表（数据变化会自动重渲染面板），不等 3 秒轮询
+      await fetchDragonSouls();
     } else {
       toast('召唤结果: ' + (res.result || '未知'), true);
     }
@@ -556,7 +558,7 @@ async function setDE(guid, field) {
 
 async function refreshDragonEntities() {
   await fetchDragonEntities();
-  // 不重新渲染，避免覆盖用户正在输入的值和滚动位置
-  // 数据已更新，下次交互时自动生效
+  await fetchDragonSouls(); // 新召唤的龙：数据变化会自动重渲染
+  renderDragonSoulsPanel(); // 无新龙时也重渲染一次，更新 HP 血条/属性显示
   toast('龙属性已刷新 (' + dragonEntities.length + '条)');
 }
