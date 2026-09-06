@@ -692,7 +692,7 @@ input[type='number']::-webkit-inner-spin-button {
    头部图标名字 / 中部双列(强化|战斗属性)单行字段 / 底部天性通栏 */
 .dragon-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+  grid-template-columns: repeat(auto-fill, 350px);
   gap: 10px;
   align-items: start;
 }

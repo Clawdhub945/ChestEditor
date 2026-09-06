@@ -27,7 +27,17 @@ function natureTagsHtml(natures, containerStyle) {
   return h + '</div>';
 }
 
-// 龙魂强化编辑器（侧栏列表 / 地图龙面板 / 待命列表 三处共用）
+// 强化等级上限（超过自动跳回）
+const SOUL_PART_MAX = 50;
+
+function clampSoulInput(input) {
+  let v = parseInt(input.value);
+  if (isNaN(v) || v < 0) v = 0;
+  if (v > SOUL_PART_MAX) v = SOUL_PART_MAX;
+  input.value = v;
+}
+
+// 龙魂强化编辑器（侧栏列表 / 待命列表 共用）
 // 后端字段为小写 head/claw/shield/cloud/potentiality（经 /api/dragon/souls 实测确认）
 const SOUL_PARTS_GRID = [
   {key:'head', label:'龙头', max:50}, {key:'claw', label:'龙爪', max:50},
@@ -52,12 +62,12 @@ function soulPartsEditorHtml(soul, soulIdx, idPrefix, parts, useGrid) {
       h += '<div style="background:var(--bg-input);border:1px solid var(--border);border-radius:4px;padding:4px 6px;display:flex;flex-direction:column;align-items:center;gap:2px">';
       h += '<span style="font-size:9px;color:var(--text-muted)">' + p.label + '</span>';
       h += '<div style="display:flex;align-items:center;gap:2px">';
-      h += '<input type="number" id="' + idPrefix + soulIdx + '_' + p.key + '" value="' + v + '" min="0"' + maxAttr + ' style="width:36px;font-size:10px;padding:1px 2px;background:var(--bg-secondary);color:var(--text);border:1px solid var(--border);border-radius:3px;text-align:center">';
+      h += '<input type="number" id="' + idPrefix + soulIdx + '_' + p.key + '" value="' + v + '" min="0"' + maxAttr + ' onchange="clampSoulInput(this)" style="width:36px;font-size:10px;padding:1px 2px;background:var(--bg-secondary);color:var(--text);border:1px solid var(--border);border-radius:3px;text-align:center">';
       h += '<button class="btn-adj" onclick="setSoulProp(' + soulIdx + ',\'' + p.key + '\')" style="font-size:9px;padding:1px 4px;width:auto;height:auto">设</button>';
       h += '</div></div>';
     } else {
       h += '<span style="font-size:10px;color:var(--text-muted)">' + p.label + ':</span>';
-      h += '<input type="number" id="' + idPrefix + soulIdx + '_' + p.key + '" value="' + v + '" min="0"' + maxAttr + ' style="width:36px;font-size:10px;padding:1px 2px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:3px">';
+      h += '<input type="number" id="' + idPrefix + soulIdx + '_' + p.key + '" value="' + v + '" min="0"' + maxAttr + ' onchange="clampSoulInput(this)" style="width:36px;font-size:10px;padding:1px 2px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:3px">';
       h += '<button class="btn-adj" onclick="setSoulProp(' + soulIdx + ',\'' + p.key + '\')" style="font-size:9px;padding:1px 4px;width:auto;height:auto">设</button>';
     }
   }
@@ -191,6 +201,11 @@ function renderDragonSoulsList() {
 async function setSoulProp(idx, prop) {
   const input = document.getElementById('soul_' + idx + '_' + prop);
   const val = parseInt(input.value) || 0;
+  await postSoulProp(idx, prop, val, true);
+}
+
+// 提交单个强化值；refresh=true 时成功后刷新数据与界面（批量设置时只在最后一次刷新）
+async function postSoulProp(idx, prop, val, refresh) {
   try {
     const r = await fetch('/api/dragon/soul/set', {
       method: 'POST',
@@ -199,12 +214,37 @@ async function setSoulProp(idx, prop) {
     });
     const res = await r.json();
     if (res.ok) {
-      toast(prop + ' 已设置为 ' + val);
-      fetchDragonSouls().then(() => { renderSidebar(); if (showDragonSouls) renderContent(); });
-    } else {
-      toast(res.error || '设置失败', true);
+      if (refresh) {
+        toast(prop + ' 已设置为 ' + val);
+        fetchDragonSouls().then(() => { renderSidebar(); if (showDragonSouls) renderContent(); });
+      }
+      return true;
     }
-  } catch(e) { toast('操作失败', true); }
+    toast(res.error || '设置失败', true);
+    return false;
+  } catch(e) { toast('操作失败', true); return false; }
+}
+
+// 一键设置五项强化（上限 SOUL_PART_MAX）
+async function setAllSoulParts(idx) {
+  const vInput = document.getElementById('soulall_' + idx);
+  const val = Math.max(0, Math.min(SOUL_PART_MAX, parseInt(vInput.value) || 0));
+  vInput.value = val;
+  const keys = SOUL_PARTS_GRID.map(p => p.key);
+  for (const k of keys) {
+    const input = document.getElementById('soul_' + idx + '_' + k);
+    if (input) input.value = val;
+  }
+  let ok = 0;
+  for (const k of keys) {
+    if (await postSoulProp(idx, k, val, false)) ok++;
+  }
+  if (ok === keys.length) {
+    toast('五项强化已全部设为 ' + val);
+    fetchDragonSouls().then(() => { renderSidebar(); if (showDragonSouls) renderContent(); });
+  } else {
+    toast('部分设置失败 (' + ok + '/' + keys.length + ')', true);
+  }
 }
 
 
@@ -346,13 +386,18 @@ function renderDragonSoulsPanel() {
     head += '<div style="font-size:10px;color:' + activeColor + '">' + active + '</div>';
     head += '</div></div>';
 
-    // 左列：强化（单行字段）
+    // 左列：强化（单行字段）+ 一键设置
     let left = '';
+    left += '<div style="display:flex;align-items:center;gap:4px;margin-bottom:2px">';
+    left += '<span style="font-size:10px;color:var(--text-muted);flex:1">强化(≤' + SOUL_PART_MAX + ')</span>';
+    left += '<input type="number" id="soulall_' + i + '" value="' + SOUL_PART_MAX + '" min="0" max="' + SOUL_PART_MAX + '" onchange="clampSoulInput(this)" style="width:44px;font-size:10px;padding:1px 4px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:3px;text-align:center">';
+    left += '<button class="btn-adj" onclick="setAllSoulParts(' + i + ')" style="font-size:9px;padding:1px 5px;width:auto;height:auto">一键设置</button>';
+    left += '</div>';
     const get = (k) => s[k] ?? s[k.toLowerCase()] ?? 0;
     for (const p of SOUL_PARTS_GRID) {
       const v = get(p.key);
       const inpId = 'soul_' + i + '_' + p.key;
-      const inp = '<input type="number" id="' + inpId + '" value="' + v + '" min="0"' + (p.max ? ' max="' + p.max + '"' : '') + ' style="flex:1;min-width:0;font-size:10px;padding:1px 4px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:3px;text-align:center">';
+      const inp = '<input type="number" id="' + inpId + '" value="' + v + '" min="0"' + (p.max ? ' max="' + p.max + '"' : '') + ' onchange="clampSoulInput(this)" style="flex:1;min-width:0;font-size:10px;padding:1px 4px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:3px;text-align:center">';
       const btn = '<button class="btn-adj" onclick="setSoulProp(' + i + ',\'' + p.key + '\')" style="font-size:9px;padding:1px 5px;width:auto;height:auto;flex-shrink:0">设</button>';
       left += dragonFieldRowHtml('<span style="width:30px">' + p.label + '</span>', inp + btn);
     }
