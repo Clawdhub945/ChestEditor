@@ -34,6 +34,28 @@ function stepCount(btn, delta) {
   input.value = v;
 }
 
+// 数据卡片（图标 + 名称 + ID + 自定义行），永恒神殿等纯数值编辑场景使用
+function htmlDataCard(stuffId, name, rowsHtml) {
+  let h = '<div class="item">';
+  h += '<img src="/icon/' + stuffId + '" onerror="hideImg(this)">';
+  h += '<div class="iname" title="' + esc(name) + '">' + esc(name) + '</div>';
+  h += '<div class="iid">ID:' + stuffId + '</div>';
+  h += rowsHtml;
+  h += '</div>';
+  return h;
+}
+
+// 单行字段：label + 数值输入框 + 设（红色按钮）
+function htmlFieldRow(label, inputId, value, onclick, opts) {
+  opts = opts || {};
+  let h = '<div style="display:flex;align-items:center;justify-content:center;gap:4px;margin-bottom:4px">';
+  h += '<span style="font-size:10px;color:var(--text-muted);flex:0 0 auto;' + (opts.labelWidth ? 'width:' + opts.labelWidth + ';' : '') + 'text-align:' + (opts.labelAlign || 'right') + '">' + label + '</span>';
+  h += '<input type="number" id="' + inputId + '" value="' + value + '" min="0"' + (opts.max ? ' max="' + opts.max + '"' : '') + ' style="flex:1;min-width:0;font-size:11px;padding:2px 4px;background:var(--bg-input);border:1px solid var(--border);border-radius:3px;color:var(--text-primary);text-align:center;outline:none" onfocus="this.select()">';
+  h += '<button class="btn-rm" onclick="' + onclick + '" style="padding:2px 8px;font-size:11px;flex:0 0 auto">设</button>';
+  h += '</div>';
+  return h;
+}
+
 // 物品卡片（图标 + 名称 + ID + 数量步进 + 按钮组）
 // 容器物品 / 计划库存 / 龙素材 各列表共用
 // opts: { inputId, inputCls, cardCls, buttons: [{label, onclick}] }

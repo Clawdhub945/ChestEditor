@@ -501,18 +501,10 @@ function renderDragonMaterialsPanel() {
       const name = (it && it.name) || (items.find(x => x.stuffId === sid) || {}).name || ('ID:' + sid);
       const count = it ? it.count : 0;
       const planCnt = planMap[sid] || 0;
-      // 第二行：计划库存（可设置，0=删除计划）
-      const extra = '<div class="iid" style="display:flex;align-items:center;justify-content:center;gap:4px;color:var(--accent-light)">' +
-        '<span>计划库存:</span>' +
-        '<input type="number" id="templeplan_' + sid + '" value="' + planCnt + '" min="0" ' +
-        'style="width:56px;background:var(--bg-input);border:1px solid var(--border);border-radius:3px;color:var(--text-primary);font-size:11px;text-align:center;padding:1px 3px;outline:none" onfocus="this.select()">' +
-        '<button class="btn-adj" onclick="setTemplePlan(' + sid + ')" style="font-size:9px;padding:1px 5px;width:auto;height:auto">设</button>' +
-        '</div>';
-      html += htmlItemCard(sid, name, count, {
-        inputId: 'temple_' + sid,
-        extraHtml: extra,
-        buttons: [{label:'设置', onclick:'setTempleItem(' + sid + ')'}]
-      });
+      // 两行字段：库存（实际数量）| 计划库存（0=删除计划）
+      let rows = htmlFieldRow('库存', 'temple_' + sid, count, 'setTempleItem(' + sid + ')');
+      rows += htmlFieldRow('计划库存', 'templeplan_' + sid, planCnt, 'setTemplePlan(' + sid + ')', {labelWidth:'58px', labelAlign:'left'});
+      html += htmlDataCard(sid, name, rows);
     }
   }
   html += '</div></div>';
