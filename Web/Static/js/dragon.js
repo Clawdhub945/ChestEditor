@@ -433,12 +433,14 @@ function renderDragonSoulsPanel() {
     }
 
     html += '<div class="dragon-card">';
-    html += head;
-    html += '<div style="display:flex;gap:10px;align-items:stretch">';
-    html += '<div style="flex:1 1 50%;min-width:0;display:flex;flex-direction:column;gap:3px">' + left + '</div>';
-    html += '<div style="flex:1 1 50%;min-width:0;border-left:1px solid var(--border);padding-left:10px;display:flex;flex-direction:column;gap:3px">' + right + '</div>';
+    // 头部分区框：图标 + 名字 + 状态
+    html += '<div class="dragon-sec">' + head + '</div>';
+    // 中部双列分区框：强化 | 战斗属性（等高拉伸）
+    html += '<div style="display:flex;gap:8px;align-items:stretch;flex:1">';
+    html += '<div class="dragon-sec" style="flex:1 1 50%;min-width:0;display:flex;flex-direction:column;gap:3px">' + left + '</div>';
+    html += '<div class="dragon-sec" style="flex:1 1 50%;min-width:0;display:flex;flex-direction:column;gap:3px">' + right + '</div>';
     html += '</div>';
-    html += natureTagsHtml(s.nature_list, 'margin-top:6px;width:100%');
+    html += natureTagsHtml(s.nature_list, 'margin-top:2px;width:100%');
     html += '</div>';
   }
   html += '</div></div>';
