@@ -688,6 +688,24 @@ input[type='number']::-webkit-inner-spin-button {
   background: var(--danger);
 }
 
+/* 地图龙面板：宽卡片、左右两栏（左=龙魂信息 右=实体战斗属性） */
+.dragon-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+  gap: 10px;
+  align-items: start;
+}
+
+.dragon-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
 .empty-state {
   display: flex;
   flex-direction: column;
