@@ -305,7 +305,16 @@ function selectDragonView(view) {
 
 
 // ===== 主内容区：地图龙面板 =====
-// 卡片为左右两栏：左侧=龙魂信息(图标/强化/天性)，右侧=地图实体战斗属性(HP/攻速等)
+// 卡片结构（约330px宽）：头部=图标+名字；中部双列=强化(左)|战斗属性(右)单行字段；底部=天性通栏
+
+// 单行字段：label + 输入框 + 设（强化与战斗属性共用）
+function dragonFieldRowHtml(label, inputHtml) {
+  let h = '<div style="display:flex;align-items:center;gap:4px">';
+  h += '<span style="font-size:10px;color:var(--text-muted);flex:0 0 auto">' + label + '</span>';
+  h += inputHtml;
+  h += '</div>';
+  return h;
+}
 
 function renderDragonSoulsPanel() {
   const el = document.getElementById('dragonViewContent');
@@ -329,55 +338,62 @@ function renderDragonSoulsPanel() {
     const active = s.is_active ? '已召唤' : '待命';
     const activeColor = s.is_active ? '#4caf50' : '#888';
 
-    // 左栏：龙魂信息
-    let left = '';
-    left += '<div style="display:flex;align-items:center;gap:8px">';
-    left += dragonIconHtml(typeIdx, 44, 40);
-    left += '<div style="flex:1;min-width:0">';
-    left += '<div class="iname" style="font-size:13px">' + esc(typeName || ('龙魂#' + (i+1))) + '</div>';
-    left += '<div style="font-size:10px;color:' + activeColor + '">' + active + '</div>';
-    left += '</div></div>';
-    left += soulPartsEditorHtml(s, i, 'soul_', SOUL_PARTS_GRID, true);
-    left += natureTagsHtml(s.nature_list, 'width:100%');
+    // 头部：图标 + 名字 + 状态
+    let head = '<div style="display:flex;align-items:center;gap:8px">';
+    head += dragonIconHtml(typeIdx, 40, 36);
+    head += '<div style="flex:1;min-width:0">';
+    head += '<div class="iname" style="font-size:13px">' + esc(typeName || ('龙魂#' + (i+1))) + '</div>';
+    head += '<div style="font-size:10px;color:' + activeColor + '">' + active + '</div>';
+    head += '</div></div>';
 
-    // 右栏：匹配的地图实体战斗属性
+    // 左列：强化（单行字段）
+    let left = '';
+    const get = (k) => s[k] ?? s[k.toLowerCase()] ?? 0;
+    for (const p of SOUL_PARTS_GRID) {
+      const v = get(p.key);
+      const inpId = 'soul_' + i + '_' + p.key;
+      const inp = '<input type="number" id="' + inpId + '" value="' + v + '" min="0"' + (p.max ? ' max="' + p.max + '"' : '') + ' style="flex:1;min-width:0;font-size:10px;padding:1px 4px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:3px;text-align:center">';
+      const btn = '<button class="btn-adj" onclick="setSoulProp(' + i + ',\'' + p.key + '\')" style="font-size:9px;padding:1px 5px;width:auto;height:auto;flex-shrink:0">设</button>';
+      left += dragonFieldRowHtml('<span style="width:30px">' + p.label + '</span>', inp + btn);
+    }
+
+    // 右列：匹配实体的战斗属性（单行字段）+ 顶部细血条
     let right = '';
     let ents = [];
     try { ents = Array.isArray(dragonEntities) ? dragonEntities.filter(e => Number(e.stuff_id) === Number(stuffId) && Number(e.guid) > 0) : []; } catch(ex) {}
     if (ents.length === 0) {
-      right += '<div style="color:var(--text-muted);font-size:11px;padding:8px 4px">未找到地图实体<br>点右上"刷新属性"扫描</div>';
+      right += '<div style="color:var(--text-muted);font-size:11px;padding:6px 2px">未找到地图实体<br>点右上"刷新属性"扫描</div>';
     }
     for (const e of ents) {
       const hp = e.hp || 0;
       const hpTotal = e.hp_total || 0;
       const hpPct = hpTotal > 0 ? Math.round(hp / hpTotal * 100) : 0;
-      right += '<div style="background:var(--bg-input);border:1px solid var(--border);border-radius:4px;padding:6px;margin-bottom:6px">';
-      right += '<div style="display:flex;justify-content:space-between;font-size:9px;color:var(--text-muted);margin-bottom:3px"><span>HP (GUID:' + e.guid + ')</span><span>' + Math.round(hp) + ' / ' + Math.round(hpTotal) + ' (' + hpPct + '%)</span></div>';
-      right += '<div style="background:var(--bg-secondary);border-radius:3px;height:6px;overflow:hidden;margin-bottom:6px">';
+      right += '<div style="margin-bottom:4px">';
+      right += '<div style="display:flex;justify-content:space-between;font-size:9px;color:var(--text-muted);margin-bottom:2px"><span>HP ' + Math.round(hp) + '/' + Math.round(hpTotal) + '</span><span>' + hpPct + '%</span></div>';
+      right += '<div style="background:var(--bg-secondary);border-radius:3px;height:5px;overflow:hidden">';
       right += '<div style="background:' + (hpPct > 50 ? '#4caf50' : hpPct > 20 ? '#ff9800' : '#f44336') + ';height:100%;width:' + hpPct + '%"></div>';
-      right += '</div>';
+      right += '</div></div>';
       const efields = [
         {key:'hp', label:'当前HP', step:1}, {key:'hp_total', label:'HP上限', step:1},
         {key:'atk_max', label:'物攻', step:1}, {key:'magic_atk_max', label:'魔攻', step:1},
         {key:'speed', label:'速度', step:0.01}, {key:'power', label:'力量', step:1},
       ];
-      right += '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:4px">';
       for (const f of efields) {
         const v = (e[f.key] || 0);
         const disp = f.step < 1 ? v.toFixed(2) : Math.round(v);
-        right += '<div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:4px;padding:4px 6px;display:flex;flex-direction:column;align-items:center;gap:2px">';
-        right += '<span style="font-size:9px;color:var(--text-muted)">' + f.label + '</span>';
-        right += '<div style="display:flex;align-items:center;gap:2px;width:100%">';
-        right += '<input type="number" id="de_' + e.guid + '_' + f.key + '" value="' + disp + '" step="' + f.step + '" style="flex:1;min-width:0;font-size:10px;padding:1px 2px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:3px;text-align:center">';
-        right += '<button class="btn-adj" onclick="setDE(' + e.guid + ',\'' + f.key + '\')" style="font-size:9px;padding:1px 4px;width:auto;height:auto;flex-shrink:0">设</button>';
-        right += '</div></div>';
+        const inp = '<input type="number" id="de_' + e.guid + '_' + f.key + '" value="' + disp + '" step="' + f.step + '" style="flex:1;min-width:0;font-size:10px;padding:1px 4px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:3px;text-align:center">';
+        const btn = '<button class="btn-adj" onclick="setDE(' + e.guid + ',\'' + f.key + '\')" style="font-size:9px;padding:1px 5px;width:auto;height:auto;flex-shrink:0">设</button>';
+        right += dragonFieldRowHtml('<span style="width:38px">' + f.label + '</span>', inp + btn);
       }
-      right += '</div></div>';
     }
 
     html += '<div class="dragon-card">';
-    html += '<div style="flex:1 1 46%;min-width:0;display:flex;flex-direction:column;gap:6px">' + left + '</div>';
-    html += '<div style="flex:1 1 54%;min-width:0;border-left:1px solid var(--border);padding-left:10px;display:flex;flex-direction:column;gap:4px">' + right + '</div>';
+    html += head;
+    html += '<div style="display:flex;gap:10px;align-items:stretch">';
+    html += '<div style="flex:1 1 50%;min-width:0;display:flex;flex-direction:column;gap:3px">' + left + '</div>';
+    html += '<div style="flex:1 1 50%;min-width:0;border-left:1px solid var(--border);padding-left:10px;display:flex;flex-direction:column;gap:3px">' + right + '</div>';
+    html += '</div>';
+    html += natureTagsHtml(s.nature_list, 'margin-top:6px;width:100%');
     html += '</div>';
   }
   html += '</div></div>';

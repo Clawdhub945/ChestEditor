@@ -688,10 +688,11 @@ input[type='number']::-webkit-inner-spin-button {
   background: var(--danger);
 }
 
-/* 地图龙面板：宽卡片、左右两栏（左=龙魂信息 右=实体战斗属性） */
+/* 地图龙面板：约330px宽（原物品卡片2倍多），上下结构：
+   头部图标名字 / 中部双列(强化|战斗属性)单行字段 / 底部天性通栏 */
 .dragon-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
   gap: 10px;
   align-items: start;
 }
@@ -702,8 +703,8 @@ input[type='number']::-webkit-inner-spin-button {
   border-radius: var(--radius);
   padding: 10px;
   display: flex;
-  gap: 10px;
-  align-items: flex-start;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .empty-state {
