@@ -539,6 +539,26 @@ body { font-family: 'Inter', sans-serif; background: var(--bg-primary); color: v
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   gap: 10px;
   align-content: start;
+  /* 卡片按自身内容高度排列。默认的 stretch 会让行高被压到 min-height(90px)，
+     导致"设置/清空"按钮溢出卡片边框（窄分辨率下必现） */
+  align-items: start;
+}
+
+/* 主物品网格：下方计划库存很大时仍保持可用高度 */
+.content > .items {
+  min-height: 140px;
+}
+
+/* 计划库存作为次级区域：内部滚动，不挤压上方物品网格 */
+.content > .plan-section {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 45%;
+}
+
+.content > .plan-section .items {
+  min-height: 0;
 }
 
 .item {
@@ -553,7 +573,7 @@ body { font-family: 'Inter', sans-serif; background: var(--bg-primary); color: v
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
 }
 
 .item:hover {
