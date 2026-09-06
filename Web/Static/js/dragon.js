@@ -377,7 +377,7 @@ function renderDragonSoulsPanel() {
   }
   let html = '';
   html += '<div class="plan-section" style="margin-top:12px">';
-  html += '<div class="plan-header"><span>地图龙 (' + activeSouls.length + ')</span>';
+  html += '<div class="plan-header"><span>地图实体龙 (' + activeSouls.length + ')</span>';
   html += '<button class="btn-adj" onclick="refreshDragonEntities()" style="font-size:11px;padding:3px 8px;width:auto;height:auto;margin-left:auto">刷新属性</button></div>';
   html += '<div class="dragon-grid">';
   for (let i = 0; i < dragonSouls.length; i++) {
@@ -522,7 +522,7 @@ function renderDragonSummonPanel() {
 
   // 召唤新龙
   html += '<div class="plan-section">';
-  html += '<div class="plan-header"><span>召唤新龙 (' + dragonTypes.length + ')</span></div>';
+  html += '<div class="plan-header"><span>召唤新龙魂</span></div>';
   html += '<div class="items">';
   for (let i = 0; i < dragonTypes.length; i++) {
     const dt = dragonTypes[i];
@@ -553,7 +553,7 @@ function renderDragonSummonPanel() {
   // 待命龙魂
   if (idleSouls.length > 0) {
     html += '<div class="plan-section">';
-    html += '<div class="plan-header"><span>待命龙魂 (' + idleSouls.length + ')</span></div>';
+    html += '<div class="plan-header"><span>待命龙魂(' + idleSouls.length + ')备注：需要在游戏内永恒神殿查看</span></div>';
     html += '<div class="items">';
     for (let si = 0; si < dragonSouls.length; si++) {
       const s = dragonSouls[si];

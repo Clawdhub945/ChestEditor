@@ -108,12 +108,13 @@ function renderSidebar() {
   const activeSouls = dragonSouls.filter(s => s.is_active);
   const idleSouls = dragonSouls.filter(s => !s.is_active);
   let dragonHtml = '';
-  dragonHtml += htmlMenuItem('&#x1F409;', '地图龙', activeSouls.length + ' 条',
+  dragonHtml += htmlMenuItem('&#x1F409;', '地图实体龙', activeSouls.length + ' 条',
     "selectDragonView('souls')", dragonView === 'souls', 'font-size:20px;' + MENU_ICON_FLEX);
   dragonHtml += htmlMenuItem('&#x1F48A;', '龙素材', dragonItems.length + ' 种',
     "selectDragonView('materials')", dragonView === 'materials', MENU_ICON_FLEX);
-  const summonCount = dragonTypes.length + idleSouls.length;
-  dragonHtml += htmlMenuItem('&#x2728;', '召唤龙', summonCount,
+  // 只统计待命龙魂数量（16 个龙类型不并入计数）
+  const summonCount = idleSouls.length;
+  dragonHtml += htmlMenuItem('&#x2728;', '待召唤龙魂', summonCount + '条龙魂',
     "selectDragonView('summon')", dragonView === 'summon', MENU_ICON_FLEX);
   html += htmlCategory(dragonMainOpen, 'toggleDragonMain', '驯龙', null, dragonHtml);
 
