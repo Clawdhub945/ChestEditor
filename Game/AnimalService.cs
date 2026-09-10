@@ -138,25 +138,30 @@ internal static class AnimalService
         // ⚠ 坐标合法性过滤：实测有设施的 transform.position.x = 1.3e9（脏数据/地图外对象），
         //   参考到它就把召唤点带飞。地图坐标量级在 ±1000 内，|x|>5000 的一律不采信。
         var candidates = new List<(float x, float y)>();
+        int total = 0, skipNotMatch = 0, skipInactive = 0, skipCoord = 0, skipZero = 0, skipEx = 0, skipNoGo = 0;
         foreach (var e in EntityScan.Snapshot())
         {
-            if (e.GoRef == null) continue;
+            total++;
+            if (e.GoRef == null) { skipNoGo++; continue; }
             string? cn = e.ClassName;
             bool okSrc = cn == "Animal" || cn == "Npc"
                 || (cn != null && cn.IndexOf("Facility", StringComparison.Ordinal) == 0);
-            if (!okSrc) continue;
+            if (!okSrc) { skipNotMatch++; continue; }
             try
             {
-                if (!e.GoRef.activeInHierarchy) continue;   // 幽灵/池化排除
+                if (!e.GoRef.activeInHierarchy) { skipInactive++; continue; }
                 var p = e.GoRef.transform.position;
-                if (p.x == 0 && p.y == 0) continue;
-                if (Math.Abs(p.x) > 5000f || Math.Abs(p.y) > 5000f) continue;   // 垃圾坐标
+                if (p.x == 0 && p.y == 0) { skipZero++; continue; }
+                if (Math.Abs(p.x) > 5000f || Math.Abs(p.y) > 5000f) { skipCoord++; continue; }
                 candidates.Add((p.x, p.y));
             }
-            catch { }
+            catch { skipEx++; }
         }
+        Plugin.LogInfo($"[AnimalService] 召唤参考扫描: 实体 {total} 个 → 候选 {candidates.Count} 个"
+            + $"（类型不符 {skipNotMatch} / 未激活 {skipInactive} / 坐标超限 {skipCoord} / 零坐标 {skipZero} / 异常 {skipEx} / 无GO {skipNoGo}）");
         if (candidates.Count == 0)
-            throw new InvalidOperationException("地图上没有坐标合法的参考实体（重新扫描后再试）");
+            throw new InvalidOperationException(
+                $"没有坐标合法的参考实体（实体 {total}：类型不符 {skipNotMatch}、未激活 {skipInactive}、坐标超限 {skipCoord}、零坐标 {skipZero}、异常 {skipEx}、无GO {skipNoGo}）——请先重新扫描");
         Plugin.LogInfo($"[AnimalService] 召唤参考候选 {candidates.Count} 个，首个 ({candidates[0].x:F1},{candidates[0].y:F1})");
 
         // 随机挑一个参考建筑，并在其周围 ±2 格落地（不压在建筑正中）
