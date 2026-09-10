@@ -24,25 +24,33 @@ function toggleNpcfix() {
 }
 
 function selectNpcfixView(view) {
+  const wasActive = (npcfixView === view);   // 点击前已展开该视图 => 这次是"收起"
   selectExclusiveView('npcfix', view);
+  // 进入盒子1 时强制重扫我方 NPC：否则 npcListData 非空会直接复用上次缓存，
+  // 表现为"切走再切回不刷新"（与 NPC 面板 openNpcPanel 的无条件扫描保持一致）。
+  // 缓存为空时上面的渲染本身就会扫描，无需重复触发。
+  if (!wasActive && view === 'box1' && npcfixView === 'box1' && npcListData.length > 0)
+    renderNpcfixBox1(true);
 }
 
 // ===== 盒子1 小人数值修改 =====
 
-async function renderNpcfixBox1() {
+async function renderNpcfixBox1(forceScan) {
   const el = document.getElementById('content');
+  // 首次进入（无缓存）或显式刷新时才真正扫描；其余情况复用已扫描数据直接渲染
+  const needScan = forceScan === true || npcListData.length === 0;
   let html = '';
   html += '<div style="padding:20px;height:100%;box-sizing:border-box;display:flex;flex-direction:column;overflow:hidden">';
   html += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-shrink:0">';
   html += '<h2 style="color:var(--accent-light);margin:0;font-size:18px">&#x1F9F0; 小人数值修改</h2>';
   html += '<span style="color:var(--text-muted);font-size:13px">我方NPC · 字段按职业定制</span>';
-  html += '<button onclick="renderNpcfixBox1()" style="padding:6px 16px;background:var(--accent);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;font-size:13px;margin-left:auto">重新扫描</button>';
+  html += '<button onclick="renderNpcfixBox1(true)" style="padding:6px 16px;background:var(--accent);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;font-size:13px;margin-left:auto">重新扫描</button>';
   html += '</div>';
-  html += '<div id="npcfixBox1Body" style="flex:1;overflow-y:auto;min-height:0;color:var(--text-muted)">扫描中...</div>';
+  html += '<div id="npcfixBox1Body" style="flex:1;overflow-y:auto;min-height:0;color:var(--text-muted)">' + (needScan ? '扫描中...' : '') + '</div>';
   html += '</div>';
   el.innerHTML = html;
 
-  if (npcListData.length === 0) {
+  if (needScan) {
     try {
       const r = await fetch('/api/npc/scan', { method: 'POST' });
       npcListData = await r.json();
