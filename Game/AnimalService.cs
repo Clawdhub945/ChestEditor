@@ -55,6 +55,17 @@ internal static class AnimalService
     internal static bool DestroyOne(EntityScan.EditorEntity e, string mode)
     {
         Plugin.LogVerbose($"[AnimalService] DestroyOne({mode}): {e.ClassName} ptrHash={e.PtrHash} ptr={e.Ptr.ToInt64():X} guid={e.Guid}");
+        // ⚠ 防护：GO 未激活的对象（远处幽灵/池化残留）DestroySelf 会访问未创建的渲染组件
+        // → native 崩溃。跳过不删（这类对象建议用"重新读档"让游戏自己清理，或移动到其所在区域后再删）。
+        if (e.GoRef != null)
+        {
+            try
+            {
+                bool active = e.GoRef.activeInHierarchy;
+                if (!active) { Plugin.LogVerbose($"[AnimalService]   GO 未激活（幽灵/池化），跳过"); return false; }
+            }
+            catch (Exception ex) { Plugin.LogVerbose($"[AnimalService]   active 检查异常: {ex.Message}，继续"); }
+        }
         if (e.ClassName == "AnimalDeadBody")
         {
             if (e.Guid <= 0) { Plugin.LogVerbose("[AnimalService]   guid<=0，跳过"); return false; }
@@ -126,12 +137,15 @@ internal static class AnimalService
         // Point 对象用 il2cpp_object_new 构造并直写 x/y 字段（纯数据类，ToVector3 只读 x/y）。
         float refX = 0f, refY = 0f;
         bool hasRef = false;
+        // 两轮：先找我方建筑（必在领地内、不可能是幽灵），找不到再借用动物/NPC
+        for (int pass = 0; pass < 2 && !hasRef; pass++)
         foreach (var e in EntityScan.Snapshot())
         {
             if (e.GoRef == null) continue;
             string? cn = e.ClassName;
-            bool okSrc = cn == "Animal" || cn == "Npc"
-                || (cn != null && cn.IndexOf("Facility", StringComparison.Ordinal) == 0);
+            bool okSrc = pass == 0
+                ? (cn != null && cn.IndexOf("Facility", StringComparison.Ordinal) == 0)
+                : (cn == "Animal" || cn == "Npc");
             if (!okSrc) continue;
             try
             {
