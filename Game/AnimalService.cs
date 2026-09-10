@@ -135,36 +135,37 @@ internal static class AnimalService
         // 且删它们会崩。改为：**借在场实体的世界坐标反推格子**（必然在玩家领地/视野内）：
         //   Point.ToVector3 = (gx+0.5, gy+0.5, 0)（伪 C 证实）→ 逆运算 gx=floor(wx-0.5)。
         // Point 对象用 il2cpp_object_new 构造并直写 x/y 字段（纯数据类，ToVector3 只读 x/y）。
-        float refX = 0f, refY = 0f;
-        bool hasRef = false;
-        // 两轮：先找我方建筑（必在领地内、不可能是幽灵），找不到再借用动物/NPC
-        for (int pass = 0; pass < 2 && !hasRef; pass++)
+        // ⚠ 坐标合法性过滤：实测有设施的 transform.position.x = 1.3e9（脏数据/地图外对象），
+        //   参考到它就把召唤点带飞。地图坐标量级在 ±1000 内，|x|>5000 的一律不采信。
+        var candidates = new List<(float x, float y)>();
         foreach (var e in EntityScan.Snapshot())
         {
             if (e.GoRef == null) continue;
             string? cn = e.ClassName;
-            bool okSrc = pass == 0
-                ? (cn != null && cn.IndexOf("Facility", StringComparison.Ordinal) == 0)
-                : (cn == "Animal" || cn == "Npc");
+            bool okSrc = cn == "Animal" || cn == "Npc"
+                || (cn != null && cn.IndexOf("Facility", StringComparison.Ordinal) == 0);
             if (!okSrc) continue;
             try
             {
                 if (!e.GoRef.activeInHierarchy) continue;   // 幽灵/池化排除
                 var p = e.GoRef.transform.position;
                 if (p.x == 0 && p.y == 0) continue;
-                refX = p.x; refY = p.y; hasRef = true;
-                Plugin.LogVerbose($"[AnimalService] 位置参考: {cn} ({p.x:F1},{p.y:F1})");
-                break;
+                if (Math.Abs(p.x) > 5000f || Math.Abs(p.y) > 5000f) continue;   // 垃圾坐标
+                candidates.Add((p.x, p.y));
             }
             catch { }
         }
-        if (!hasRef)
-            throw new InvalidOperationException("地图上没有可参考位置的实体（重新扫描后再试）");
+        if (candidates.Count == 0)
+            throw new InvalidOperationException("地图上没有坐标合法的参考实体（重新扫描后再试）");
+        Plugin.LogInfo($"[AnimalService] 召唤参考候选 {candidates.Count} 个，首个 ({candidates[0].x:F1},{candidates[0].y:F1})");
 
-        int gx = (int)Math.Floor(refX - 0.5f);
-        int gy = (int)Math.Floor(refY - 0.5f);
+        // 随机挑一个参考建筑，并在其周围 ±2 格落地（不压在建筑正中）
+        var rnd = new System.Random();
+        var (rx, ry) = candidates[rnd.Next(candidates.Count)];
+        int gx = (int)Math.Floor(rx - 0.5f) + rnd.Next(-2, 3);
+        int gy = (int)Math.Floor(ry - 0.5f) + rnd.Next(-2, 3);
         IntPtr pos = NewPoint(gx, gy);
-        Plugin.LogVerbose($"[AnimalService] Spawn {count} 只 stuffId={stuffId} 于格子({gx},{gy})（参考 {refX:F1},{refY:F1}）");
+        Plugin.LogInfo($"[AnimalService] Spawn {count} 只 stuffId={stuffId} 于格子({gx},{gy})（参考 {rx:F1},{ry:F1}）");
 
         for (int i = 0; i < count; i++)
         {
