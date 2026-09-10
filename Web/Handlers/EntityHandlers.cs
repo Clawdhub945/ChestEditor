@@ -67,6 +67,34 @@ internal static class EntityHandlers
             }, 120000);
         });
 
+        // 战斗力批量缩放（×10 / ÷10；一次主线程任务循环执行，界面上的「战斗力×10 / ÷10」用）
+        Router.Add("POST", "/api/editor/scale/batch", ctx =>
+        {
+            var arr = ctx.Json?["ptrHashes"] as System.Text.Json.Nodes.JsonArray;
+            if (arr == null || arr.Count == 0) throw new HttpError(400, "missing ptrHashes");
+            float factor = ctx.JsonFloat("factor");
+            if (factor <= 0) throw new HttpError(400, "invalid factor");
+            var hashes = new List<int>();
+            foreach (var n in arr)
+                if (n != null) hashes.Add(n.GetValue<int>());
+            return MainThread.Run(() =>
+            {
+                int entities = 0, fields = 0;
+                foreach (var ph in hashes)
+                {
+                    int n = EntityScan.ScaleCombatStats(ph, factor);
+                    if (n > 0) { entities++; fields += n; }
+                }
+                Plugin.LogInfo($"[EntityEditor] 战斗力缩放 x{factor}: {entities}/{hashes.Count} 个实体, {fields} 个字段");
+                return JsonBuilder.Object(w =>
+                {
+                    w.WriteBoolean("ok", true);
+                    w.WriteNumber("entities", entities);
+                    w.WriteNumber("fields", fields);
+                });
+            }, 60000);
+        });
+
         Router.Add("POST", "/api/editor/locate", ctx =>
         {
             int ptrHash = ctx.JsonInt("ptrHash");

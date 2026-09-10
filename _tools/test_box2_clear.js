@@ -48,6 +48,8 @@ const ctx = {
   document: { body: mkEl(), getElementById: id => (els[id] = els[id] || mkEl()),
     querySelector: () => null, querySelectorAll: () => [], createElement: mkEl, addEventListener() {} },
   localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+  // 只用于让"空数据时 renderNpcfixBox2 自动扫描"这条路走通（扫描结果就是空）
+  fetch: () => Promise.resolve({ json: () => Promise.resolve([]) }),
   setTimeout, clearTimeout, Date, JSON, Math, Number, String, Object, Array, Promise, Set, Map,
 };
 ctx.window = ctx; ctx.globalThis = ctx;
@@ -81,6 +83,7 @@ function scopeFilter(kind, scope, data) {
     const kid = kidOf(e);
     if (scope === 'all') return true;
     if (scope === 'enemy') return kid !== 1 && kid !== 0;
+    if (scope === 'ours') return kid === 1;
     return kid === Number(scope);
   });
 }
@@ -229,12 +232,55 @@ console.log('\n== 5) renderNpcfixBox2 产出 ==');
   console.log('\n== 7) 舰船落岸船员的二次清除 ==');
   const src = fs.readFileSync(path.join(dir, 'npcfix.js'), 'utf8');
   const clearSrc = src.slice(src.indexOf('async function npcfixClear'));
-  ok(/killedShips/.test(clearSrc), 'npcfixClear 里有"清过船"的判断');
+  ok(/kindName === 'ship' \|\| kindName === 'enemyAll'/.test(clearSrc), 'npcfixClear 里有"清过船"的判断');
   ok(/!before\.has\(e\.ptrHash\)/.test(clearSrc), '靠"动刀前名单"识别新刷出来的士兵');
   ok(/npcfixIsHumanEntity\(e\)/.test(clearSrc), '只是对敌方小人做二次清除（不误伤别的）');
   ok(/before\.has/.test(clearSrc) && /const before = new Set/.test(clearSrc), '动刀前就记住了 before 集合（顺序正确）');
   ok(clearSrc.indexOf('const before = new Set') < clearSrc.indexOf('npcfixKillInChunks(hashes)'),
     'before 快照在第一轮销毁之前');
+
+  // ---------- 8) 战斗力 ×10 / ÷10 按钮 ----------
+  console.log('\n== 8) 战斗力缩放按钮 ==');
+  ok(/npcfixScale\('oursAll:ours',10\)/.test(H), '「我方单位」分区线: 战斗力×10');
+  ok(/npcfixScale\('enemyAll:enemy',0\.1\)/.test(H), '「敌方单位」分区线: 战斗力÷10');
+  ok(/npcfixScale\('ourCombat:1',10\)/.test(H), '我方战斗单位 一级: 战斗力×10');
+  ok(/npcfixScale\('monster:1',10\)/.test(H), '我方-怪物 一级: 战斗力×10');
+  ok(/npcfixScale\('humanoid:enemy',0\.1\)/.test(H), '敌方-小人 一级: 战斗力÷10');
+  ok(/npcfixScale\('monster:enemy',0\.1\)/.test(H), '敌方-怪物 一级: 战斗力÷10');
+  ok(/npcfixScale\('ship:all',0\.1\)/.test(H), '船 · 战舰 一级: 战斗力÷10');
+  ok(/npcfixScale\('ship:1',10\)/.test(H), '我方舰队 二级: 战斗力×10');
+  ok(/npcfixScale\('ship:100',0\.1\)/.test(H), '敌方舰队 二级: 战斗力÷10');
+  ok(/npcfixScale\('humanoid:89',0\.1\)/.test(H), '敌方-小人 二级: 战斗力÷10');
+  ok(/npcfixScale\('ourCombat:1:g=/.test(H), '我方战斗单位 二级带 :g=兵种');
+  ok(/npcfixScale\('monster:1:g=/.test(H), '我方-怪物 二级带 :g=种类');
+  ok(/npcfixClear\('monster:1:g=/.test(H), '我方-怪物 二级清除也带 :g=（只清本组，不再清全部）');
+
+  // 战斗力缩放用的是新后端接口
+  ok(/\/api\/editor\/scale\/batch/.test(src), '前端调 /api/editor/scale/batch');
+
+  // ---------- 9) 安全发展模式 ----------
+  console.log('\n== 9) 安全发展模式 ==');
+  ok(/npcfixSafeToggle\(\)/.test(H), '「敌方单位」有安全发展模式按钮');
+  ok(ctx.npcfixSafeBtnText() === '安全发展模式: 关', '初始状态为「关」');
+  ctx.npcfixSafeToggle();
+  ok(ctx.npcfixSafeBtnText().indexOf('安全发展模式: 开') === 0, '点一下变「开」');
+  ctx.npcfixSafeToggle();
+  ok(ctx.npcfixSafeBtnText() === '安全发展模式: 关', '再点一下变回「关」');
+  const safeSrc = src.slice(src.indexOf('async function npcfixSafeTick'));
+  ok(/NPCFIX_SAFE_BATCH/.test(safeSrc) && /slice\(0, NPCFIX_SAFE_BATCH\)/.test(safeSrc),
+    '每拍只清一小批（慢速，不卡帧）');
+  ok(/k !== 1 && k !== 0/.test(safeSrc), '只清敌方（不含我方 1 / 阵营0）');
+
+  // ---------- 10) 分区线常驻（没有单位也要在） ----------
+  console.log('\n== 10) 分区线常驻 ==');
+  setData([]);
+  await ctx.renderNpcfixBox2();
+  const H2 = els['npcfixBox2Body'].innerHTML;
+  ok(H2.indexOf('>我方单位<') >= 0, '空数据时「我方单位」线仍在');
+  ok(H2.indexOf('>敌方单位<') >= 0, '空数据时「敌方单位」线仍在');
+  ok(H2.indexOf('暂无我方单位') >= 0 && H2.indexOf('暂无敌方单位') >= 0, '空数据时有占位提示');
+  ok(/npcfixScale\('oursAll:ours',10\)/.test(H2) && /npcfixScale\('enemyAll:enemy',0\.1\)/.test(H2),
+    '空数据时分区按钮仍在');
 
   console.log('\n' + (fails === 0 ? 'ALL PASS' : (fails + ' FAILED')));
   process.exit(fails === 0 ? 0 : 1);

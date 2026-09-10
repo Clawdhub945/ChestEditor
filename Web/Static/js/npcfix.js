@@ -496,11 +496,13 @@ function npcfixEntityGroupCard(label, color, icon, list, opts, trailingHtml) {
   return h;
 }
 
-// ===== 一键清除 =====
-// 清除范围用「种类 + 范围」描述，写成 '<kind>:<scope>'：
-//   kind  = monster(怪物) / humanoid(小人) / ship(战舰)
-//   scope = 'all'(不限阵营) / 'enemy'(阵营 ≠ 1) / 具体阵营号
-// 只传字符串，因为要嵌进 onclick 属性里。
+// ===== 一键清除 / 战斗力缩放 / 安全发展模式 =====
+// 目标范围统一用 spec 描述：'<kind>:<scope>[:g=<分组名>]'
+//   kind  = monster(怪物) / humanoid(小人) / ship(战舰) / enemyAll(敌方单位) /
+//           ourCombat(我方战斗单位) / oursAll(我方单位)
+//   scope = all(不限阵营) / enemy(敌方：≠1 且 ≠0) / ours(我方：==1) / 具体阵营号
+//   g=    = 可选，限定某个二级分组（龙 / 兵种名…），中文经 encodeURIComponent
+// 只传字符串，因为要塞进 onclick 属性里。
 function npcfixIsMonsterEntity(e) { return (e.className || '').indexOf('Monster') === 0; }
 
 // 「是战舰」判据：必须与 npcfixCombatClassify 完全一致 ——
@@ -516,9 +518,16 @@ function npcfixIsHumanEntity(e) {
   return npcfixIsHumanUnit(cn) && cn.indexOf('Monster') !== 0 && cn.indexOf('Ship') < 0;
 }
 
+// 我方「战斗」单位：阵营1 且真带兵种（平民在盒子1，不算这里）
+function npcfixIsOurCombatUnit(e) { return npcfixIsHumanEntity(e) && (e.soldierTypeId || 0) > 0; }
+
 // 一切战斗单位（小人 + 怪物 + 战舰）——「毁灭吧！！！」用
 function npcfixIsAnyUnit(e) {
   return npcfixIsHumanEntity(e) || npcfixIsMonsterEntity(e) || npcfixIsWarship(e);
+}
+// 我方一切战斗单位 —— 分区级「战斗力×10」用
+function npcfixIsOurUnit(e) {
+  return npcfixIsOurCombatUnit(e) || npcfixIsMonsterEntity(e) || npcfixIsWarship(e);
 }
 
 const NPCFIX_CLEAR_KINDS = {
@@ -526,21 +535,84 @@ const NPCFIX_CLEAR_KINDS = {
   humanoid: { name: '小人', test: npcfixIsHumanEntity },
   ship: { name: '战舰', test: npcfixIsWarship },
   enemyAll: { name: '敌方单位', test: npcfixIsAnyUnit },
+  ourCombat: { name: '我方战斗单位', test: npcfixIsOurCombatUnit },
+  oursAll: { name: '我方单位', test: npcfixIsOurUnit },
 };
 
-// 二级分组卡片标题栏上的「一键清除」：清除本组（通常是一个阵营）
-function npcfixClearBtn(kind, scope) {
-  const s = 'padding:2px 8px;background:var(--danger,#e74c3c);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px';
-  return '<span style="margin-left:8px"><button onclick="event.preventDefault();event.stopPropagation();npcfixClear(\''
-    + kind + ':' + scope + '\')" style="' + s + '">一键清除</button></span>';
+// 二级分组的组名（必须与渲染分组时用的规则一致，否则 :g= 匹配不上）
+function npcfixGroupKeyOf(kind, e) {
+  if (kind === 'ourCombat') return e.soldierTypeName || '未知兵种';
+  const cn = e.className || '';
+  if (cn.indexOf('Dragon') >= 0) return '龙';
+  return e.name || cn || '未知怪物';
 }
 
-// 一级盒子标题栏上的「一键清除」：清除整个盒子（跨阵营）
-function npcfixBoxClearBtn(kind, scope) {
-  const s = 'padding:2px 10px;background:var(--danger,#e74c3c);color:#fff;border:1px solid var(--danger,#e74c3c)'
-    + ';border-radius:4px;cursor:pointer;font-size:11px;font-weight:400;margin-left:6px';
-  return '<button onclick="event.preventDefault();event.stopPropagation();npcfixClear(\''
-    + kind + ':' + scope + '\')" style="' + s + '">一键清除</button>';
+// 解析 spec → { def, where, pick }；spec 非法返回 null
+function npcfixParseSpec(spec) {
+  const parts = String(spec).split(':');
+  const def = NPCFIX_CLEAR_KINDS[parts[0]];
+  if (!def) return null;
+  const kind = parts[0];
+  const scope = parts[1];
+  const group = (parts[2] && parts[2].indexOf('g=') === 0) ? decodeURIComponent(parts[2].slice(2)) : null;
+  const test = e => {
+    if (!def.test(e)) return false;
+    if (group !== null && npcfixGroupKeyOf(kind, e) !== group) return false;
+    // scope='enemy' 要同时排除阵营 0：阵营0 已被分类函数隐藏，
+    // 操作范围必须跟着"显示范围"走，否则会动到盒子里没显示的东西（历史坑）。
+    const kid = npcfixUnitKingdom(e);
+    if (scope === 'all') return true;
+    if (scope === 'enemy') return kid !== 1 && kid !== 0;
+    if (scope === 'ours') return kid === 1;
+    return kid === Number(scope);
+  };
+  const where = scope === 'all' ? '全部阵营'
+    : scope === 'enemy' ? '敌方全部阵营'
+      : scope === 'ours' ? '我方' : ('阵营' + scope);
+  return { def: def, where: where, pick: () => entityEditorData.filter(test).map(e => e.ptrHash) };
+}
+
+// 拼 spec（按钮工厂共用）
+function npcfixSpecOf(kind, scope, group) {
+  return kind + ':' + scope + (group ? ':g=' + encodeURIComponent(group) : '');
+}
+
+// ---- 按钮工厂：二级卡片标题栏（小） / 一级盒子标题栏（中） / 分区标题条（大） ----
+function npcfixMiniBtn(text, color, action) {
+  const s = 'padding:2px 8px;' + color + ';color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px';
+  return '<span style="margin-left:6px"><button onclick="event.preventDefault();event.stopPropagation();'
+    + action + '" style="' + s + '">' + text + '</button></span>';
+}
+function npcfixBoxBtn(text, color, action) {
+  const s = 'padding:2px 10px;' + color + ';color:#fff;border:none;border-radius:4px'
+    + ';cursor:pointer;font-size:11px;font-weight:400';
+  return '<button onclick="event.preventDefault();event.stopPropagation();' + action + '" style="' + s + '">'
+    + text + '</button>';
+}
+function npcfixSectionBtn(text, color, action, glow) {
+  const s = 'padding:5px 14px;' + color + ';color:#fff;border:none;border-radius:6px;cursor:pointer'
+    + ';font-size:13px;font-weight:700;letter-spacing:1px' + (glow ? ';box-shadow:0 0 10px rgba(231,76,60,.45)' : '');
+  return '<button onclick="event.stopPropagation();' + action + '" style="' + s + '">' + text + '</button>';
+}
+const NPCFIX_BIFF_COLOR = 'background:var(--success-dark,#27ae60)';
+const NPCFIX_NERF_COLOR = 'background:var(--info,#3498db)';
+const NPCFIX_CLEAR_COLOR = 'background:var(--danger,#e74c3c)';
+
+function npcfixClearBtn(kind, scope, group) {
+  return npcfixMiniBtn('一键清除', NPCFIX_CLEAR_COLOR, 'npcfixClear(\'' + npcfixSpecOf(kind, scope, group) + '\')');
+}
+function npcfixScaleBtn(kind, scope, factor, group) {
+  const pct = factor >= 1 ? ('×' + factor) : ('÷' + Math.round(1 / factor));
+  return npcfixMiniBtn('战斗力' + pct, factor >= 1 ? NPCFIX_BIFF_COLOR : NPCFIX_NERF_COLOR,
+    'npcfixScale(\'' + npcfixSpecOf(kind, scope, group) + '\',' + factor + ')');
+}
+function npcfixBoxClearBtn(kind, scope, group) {
+  return npcfixBoxBtn('一键清除', NPCFIX_CLEAR_COLOR, 'npcfixClear(\'' + npcfixSpecOf(kind, scope, group) + '\')');
+}
+function npcfixBoxScaleBtn(kind, scope, factor, group) {
+  const pct = factor >= 1 ? ('×' + factor) : ('÷' + Math.round(1 / factor));
+  return npcfixBoxBtn('战斗力' + pct, factor >= 1 ? NPCFIX_BIFF_COLOR : NPCFIX_NERF_COLOR,
+    'npcfixScale(\'' + npcfixSpecOf(kind, scope, group) + '\',' + factor + ')');
 }
 
 // 大分区标题条：「我方单位」绿 / 「敌方单位」红，右侧可挂按钮
@@ -553,9 +625,68 @@ function npcfixSectionTitle(label, color, trailingHtml) {
 
 // 「毁灭吧！！！」：一键清除全部敌方战斗单位（小人 + 怪物 + 战舰）
 function npcfixDestroyAllBtn() {
-  const s = 'padding:5px 16px;background:var(--danger,#e74c3c);color:#fff;border:none;border-radius:6px'
-    + ';cursor:pointer;font-size:13px;font-weight:700;letter-spacing:1px;box-shadow:0 0 10px rgba(231,76,60,.45)';
-  return '<button onclick="event.stopPropagation();npcfixClear(\'enemyAll:enemy\')" style="' + s + '">毁灭吧！！！</button>';
+  return npcfixSectionBtn('毁灭吧！！！', NPCFIX_CLEAR_COLOR, 'npcfixClear(\'enemyAll:enemy\')', true);
+}
+
+// ===== 安全发展模式：地图上出现敌方单位就慢慢清掉，每拍只动一小批，不卡帧 =====
+let npcfixSafeOn = false;
+let npcfixSafeTimer = null;
+let npcfixSafeDone = new Set();
+let npcfixSafeTicks = 0;
+let npcfixSafeCount = 0;
+const NPCFIX_SAFE_BATCH = 6;         // 每拍最多清几个
+const NPCFIX_SAFE_INTERVAL = 1600;   // 拍间隔 ms
+const NPCFIX_SAFE_RESCAN_EVERY = 8;  // 每 N 拍重扫一次（拿新刷出来的敌人）
+
+function npcfixSafeBtnText() {
+  return npcfixSafeOn ? ('安全发展模式: 开（已清 ' + npcfixSafeCount + '）') : '安全发展模式: 关';
+}
+function npcfixSafeModeBtn() {
+  const s = 'padding:5px 14px;background:var(--bg-input);color:var(--text-secondary)'
+    + ';border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:13px;font-weight:700';
+  return '<button id="npcfixSafeBtn" onclick="event.stopPropagation();npcfixSafeToggle()" style="' + s + '">'
+    + npcfixSafeBtnText() + '</button>';
+}
+function npcfixSafeUpdateBtn() {
+  const b = document.getElementById('npcfixSafeBtn');
+  if (b) b.textContent = npcfixSafeBtnText();
+}
+function npcfixSafeToggle() {
+  npcfixSafeOn = !npcfixSafeOn;
+  if (npcfixSafeOn) {
+    npcfixSafeCount = 0;
+    npcfixSafeTicks = 0;
+    npcfixSafeDone = new Set();
+    toast('安全发展模式已开启（只清敌方，每 1.6 秒一批）');
+    npcfixSafeTick();
+  } else {
+    if (npcfixSafeTimer) { clearTimeout(npcfixSafeTimer); npcfixSafeTimer = null; }
+    toast('安全发展模式已关闭（累计清除 ' + npcfixSafeCount + '）');
+  }
+  npcfixSafeUpdateBtn();
+}
+// 一拍：重扫（偶尔）→ 挑最多 NPCFIX_SAFE_BATCH 个敌方单位 → 小批量销毁
+async function npcfixSafeTick() {
+  if (!npcfixSafeOn) return;
+  try {
+    if (npcfixSafeTicks % NPCFIX_SAFE_RESCAN_EVERY === 0) {
+      await entityEditorScan();
+      npcfixSafeDone = new Set();   // 重扫后数据是新的一份，旧的"已清"记录作废
+    }
+    const targets = entityEditorData
+      .filter(e => !npcfixSafeDone.has(e.ptrHash) && npcfixIsAnyUnit(e))
+      .filter(e => { const k = npcfixUnitKingdom(e); return k !== 1 && k !== 0; })
+      .slice(0, NPCFIX_SAFE_BATCH)
+      .map(e => e.ptrHash);
+    if (targets.length > 0) {
+      const r = await destroyBatch(targets);
+      for (const h of targets) npcfixSafeDone.add(h);
+      npcfixSafeCount += (r && r.destroyed) || 0;
+    }
+  } catch (e) { /* 单拍失败不中断整个模式 */ }
+  npcfixSafeTicks++;
+  npcfixSafeUpdateBtn();
+  if (npcfixSafeOn) npcfixSafeTimer = setTimeout(npcfixSafeTick, NPCFIX_SAFE_INTERVAL);
 }
 
 // 按阵营铺二级分组（敌方-小人 / 敌方-怪物 / 敌方舰队 共用）
@@ -613,10 +744,11 @@ async function renderNpcfixBox2(forceScan) {
     const entries = Object.keys(prof).sort((a, b) => prof[b].length - prof[a].length);
     let inner = '<div class="npcfix-box-body">';
     for (const name of entries)
-      inner += npcfixEntityGroupCard('我方 · ' + name, GREEN, '&#x2694;', prof[name], { combat: true });
+      inner += npcfixEntityGroupCard('我方 · ' + name, GREEN, '&#x2694;', prof[name], { combat: true },
+        npcfixScaleBtn('ourCombat', 1, 10, name));
     inner += '</div>';
     oursHtml += htmlDetailsGroup('我方战斗单位 (' + c.ours.length + ')', GREEN, '&#x2694;',
-      c.ours.length + ' 个', inner, null, npcfixBoxBtns());
+      c.ours.length + ' 个', inner, null, npcfixBoxBtns() + npcfixBoxScaleBtn('ourCombat', 1, 10));
   }
 
   // ===== 我方-怪物（阵营1 地界刷出的怪物：蚁巢工蚁 / 龙…，按种类二级分组） =====
@@ -625,6 +757,7 @@ async function renderNpcfixBox2(forceScan) {
     // 分组名用中文：后端 name = DataTables.ItemName(stuff_id)，怪物就是「5级工蚁 / 5级骷髅战士」；
     // 类名（MonsterAntWorker / Monster3 / Monster23…）只是预制体名，用户看不懂，仅作兜底。
     // 龙单独并成一张卡：每种龙都是个位数、又按「N级X龙」拆开，不合并会铺出十几张卡片，太碎。
+    // 二级按钮带上 :g=组名 —— 否则点「龙」这张卡会的按钮会清/强化全部我方怪物。
     const kinds = {};
     for (const e of c.monstersOurs) {
       const cn = e.className || '';
@@ -636,50 +769,68 @@ async function renderNpcfixBox2(forceScan) {
     for (const name of entries) {
       const isDragon = (name === '龙');
       inner += npcfixEntityGroupCard(name, GREEN, isDragon ? '&#x1F409;' : '&#x1F47E;',
-        kinds[name], {}, npcfixClearBtn('monster', 1));
+        kinds[name], {},
+        npcfixScaleBtn('monster', 1, 10, name) + npcfixClearBtn('monster', 1, name));
     }
     inner += '</div>';
     oursHtml += htmlDetailsGroup('我方-怪物 (' + c.monstersOurs.length + ')', GREEN, '&#x1F47E;',
-      c.monstersOurs.length + ' 个', inner, null, npcfixBoxBtns());
+      c.monstersOurs.length + ' 个', inner, null, npcfixBoxBtns() + npcfixBoxScaleBtn('monster', 1, 10));
   }
 
-  // ===== 敌方-小人（按阵营；一级/二级都可一键清除） =====
+  // ===== 敌方-小人（按阵营；一级/二级都有一键清除 + 战斗力÷10） =====
   if (Object.keys(c.humanoids).length > 0) {
     const n = npcfixSumKinds(c.humanoids);
     enemyHtml += htmlDetailsGroup('敌方-小人 (' + n + ')', '#c0392b', '&#x1F464;', n + ' 个',
       '<div class="npcfix-box-body">' + npcfixKingdomGroups(c.humanoids, 'var(--text-muted)', '&#x1F464;',
-        kid => npcfixClearBtn('humanoid', kid)) + '</div>',
-      null, npcfixBoxBtns() + npcfixBoxClearBtn('humanoid', 'enemy'));
+        kid => npcfixClearBtn('humanoid', kid) + npcfixScaleBtn('humanoid', kid, 0.1)) + '</div>',
+      null, npcfixBoxBtns() + npcfixBoxClearBtn('humanoid', 'enemy') + npcfixBoxScaleBtn('humanoid', 'enemy', 0.1));
   }
 
-  // ===== 敌方-怪物（按阵营；一级/二级都可一键清除） =====
+  // ===== 敌方-怪物（按阵营；一级/二级都有一键清除 + 战斗力÷10） =====
   if (Object.keys(c.monstersEnemy).length > 0) {
     const n = npcfixSumKinds(c.monstersEnemy);
     enemyHtml += htmlDetailsGroup('敌方-怪物 (' + n + ')', 'var(--danger, #e74c3c)', '&#x1F47E;', n + ' 个',
       '<div class="npcfix-box-body">' + npcfixKingdomGroups(c.monstersEnemy, 'var(--danger, #e74c3c)', '&#x1F47E;',
-        kid => npcfixClearBtn('monster', kid)) + '</div>',
-      null, npcfixBoxBtns() + npcfixBoxClearBtn('monster', 'enemy'));
+        kid => npcfixClearBtn('monster', kid) + npcfixScaleBtn('monster', kid, 0.1)) + '</div>',
+      null, npcfixBoxBtns() + npcfixBoxClearBtn('monster', 'enemy') + npcfixBoxScaleBtn('monster', 'enemy', 0.1));
   }
 
-  // ===== 船：只列战舰，区分敌我（货船/商船不计）；一级/二级都可一键清除 =====
+  // ===== 船：只列战舰，区分敌我（货船/商船不计） =====
+  // 我方舰队 → 战斗力×10；敌方舰队 → 一键清除 + 战斗力÷10
   if (c.shipsOurs.length > 0 || Object.keys(c.shipsEnemy).length > 0) {
     let inner = '<div class="npcfix-box-body">';
     if (c.shipsOurs.length > 0)
       inner += npcfixEntityGroupCard('我方舰队', GREEN, '&#x1F6A2;', c.shipsOurs, {},
-        npcfixClearBtn('ship', 1));
-    inner += npcfixKingdomGroups(c.shipsEnemy, '#3498db', '&#x1F6A2;', kid => npcfixClearBtn('ship', kid));
+        npcfixScaleBtn('ship', 1, 10));
+    inner += npcfixKingdomGroups(c.shipsEnemy, '#3498db', '&#x1F6A2;',
+      kid => npcfixClearBtn('ship', kid) + npcfixScaleBtn('ship', kid, 0.1));
     inner += '</div>';
     const n = c.shipsOurs.length + npcfixSumKinds(c.shipsEnemy);
     enemyHtml += htmlDetailsGroup('船 · 战舰 (' + n + ')', '#3498db', '&#x1F6A2;', n + ' 个', inner, null,
-      npcfixBoxBtns() + npcfixBoxClearBtn('ship', 'all'));
+      npcfixBoxBtns() + npcfixBoxClearBtn('ship', 'all') + npcfixBoxScaleBtn('ship', 'all', 0.1));
   }
 
-  // ===== 组装：绿色「我方单位」→ 我方的盒子 → 红色「敌方单位」→ 敌方的盒子 =====
+  // ===== 组装：两条分区线**一直显示**（没有单位也要在），右侧挂分区级按钮 =====
+  //   我方单位 ── [战斗力×10]
+  //   敌方单位 ── [战斗力÷10] [毁灭吧！！！] [安全发展模式]
+  const nOurs = c.ours.length + c.monstersOurs.length + c.shipsOurs.length;
+  const nEnemy = npcfixSumKinds(c.humanoids) + npcfixSumKinds(c.monstersEnemy) + npcfixSumKinds(c.shipsEnemy);
   let h = '';
-  if (oursHtml) h += npcfixSectionTitle('我方单位', GREEN) + oursHtml;
-  if (enemyHtml) h += npcfixSectionTitle('敌方单位', 'var(--danger, #e74c3c)', npcfixDestroyAllBtn()) + enemyHtml;
+  h += npcfixSectionTitle('我方单位', GREEN,
+    npcfixSectionBtn('战斗力×10', NPCFIX_BIFF_COLOR, 'npcfixScale(\'oursAll:ours\',10)'))
+    + (oursHtml || npcfixEmptyHint('暂无我方单位（' + nOurs + ' 个）'));
+  h += npcfixSectionTitle('敌方单位', 'var(--danger, #e74c3c)',
+    npcfixSectionBtn('战斗力÷10', NPCFIX_NERF_COLOR, 'npcfixScale(\'enemyAll:enemy\',0.1)')
+    + npcfixDestroyAllBtn() + npcfixSafeModeBtn())
+    + (enemyHtml || npcfixEmptyHint('暂无敌方单位（' + nEnemy + ' 个）'));
 
-  body.innerHTML = h || '<div style="padding:40px;text-align:center;color:var(--text-muted)">没有匹配的战斗单位</div>';
+  body.innerHTML = h;
+}
+
+// 空分区占位（分区线要一直显示，没内容时给一句灰字）
+function npcfixEmptyHint(text) {
+  return '<div style="padding:12px 14px;color:var(--text-muted);font-size:12px;'
+    + 'border:1px dashed var(--border);border-radius:var(--radius-sm)">' + esc(text) + '</div>';
 }
 
 // ×10：读取当前字段值并写回 10 倍
@@ -731,28 +882,16 @@ async function npcfixKillInChunks(hashes) {
   return { destroyed: destroyed, failed: failed };
 }
 
-// 一键清除（spec = '<kind>:<scope>'，见文件上方 NPCFIX_CLEAR_KINDS）：
-// 按范围收集 → 分批销毁 → 等1秒 → 重扫 → 再清一遍（覆盖分裂怪）→ 刷新。
+// 一键清除（spec 见 npcfixParseSpec）：
+// 按范围收集 → 分批销毁 → 等1秒 → 重扫 → 再清一遍（覆盖分裂怪）→ 舰船落岸船员收尾。
 // 后端对 Monster* 走"静默移除"（skip_show_dead_anim + DeadOnBattle(null,false)），不播死亡动画、不掉东西。
 async function npcfixClear(spec) {
-  const parts = String(spec).split(':');
-  const def = NPCFIX_CLEAR_KINDS[parts[0]];
-  const scope = parts[1];
-  if (!def) return;
-  // scope='enemy' 要同时排除阵营 0：阵营0 已被分类函数隐藏，清除范围必须跟着它走，
-  // 否则"清掉盒子里没显示的东西"（历史坑，见 npcfixIsWarship）。
-  const inScope = e => {
-    const kid = npcfixUnitKingdom(e);
-    if (scope === 'all') return true;
-    if (scope === 'enemy') return kid !== 1 && kid !== 0;
-    return kid === Number(scope);
-  };
+  const p = npcfixParseSpec(spec);
+  if (!p) return;
   // 先算数量：确认框要按数量决定是否追加"可能卡顿"提示
-  const pick = () => entityEditorData.filter(e => def.test(e) && inScope(e)).map(e => e.ptrHash);
-  const hashes = pick();
-  if (hashes.length === 0) { toast('没有可清除的' + def.name, true); return; }
-  const where = scope === 'all' ? '全部阵营' : (scope === 'enemy' ? '敌方全部阵营' : ('阵营' + scope));
-  let msg = '确定清除' + where + '的 ' + hashes.length + ' 个' + def.name + '？\n（将分批执行2遍，覆盖分裂怪）';
+  const hashes = p.pick();
+  if (hashes.length === 0) { toast('没有可清除的' + p.def.name, true); return; }
+  let msg = '确定清除' + p.where + '的 ' + hashes.length + ' 个' + p.def.name + '？\n（将分批执行2遍，覆盖分裂怪）';
   if (hashes.length > 100) msg += '\n\n数量过多可能卡顿2-5s';
   if (!confirm(msg)) return;
 
@@ -765,7 +904,7 @@ async function npcfixClear(spec) {
   await new Promise(r => setTimeout(r, 1000));
   // 重扫拿到分裂新生成的目标，再清一遍
   await entityEditorScan();
-  const hashes2 = pick();
+  const hashes2 = p.pick();
   let d2 = { destroyed: 0 };
   if (hashes2.length > 0) d2 = await npcfixKillInChunks(hashes2);
   await entityEditorScan();
@@ -774,8 +913,8 @@ async function npcfixClear(spec) {
   // （反编译 ShipHelper.DestroyShip 最后那段 do/while + SoldierHelper.CreateSoldier）。
   // 这些士兵不在"动刀前"的名单里，是清完才冒出来的 —— 就是要二次清除的对象。
   let sailor = { destroyed: 0 };
-  const killedShips = parts[0] === 'ship' || parts[0] === 'enemyAll';
-  if (killedShips) {
+  const kindName = String(spec).split(':')[0];
+  if (kindName === 'ship' || kindName === 'enemyAll') {
     for (let round = 0; round < 2; round++) {
       const fresh = entityEditorData
         .filter(e => !before.has(e.ptrHash) && npcfixIsHumanEntity(e))
@@ -791,4 +930,35 @@ async function npcfixClear(spec) {
 
   toast('清除完成: 首轮' + (d1.destroyed || 0) + ' + 二轮' + (d2.destroyed || 0)
     + (sailor.destroyed > 0 ? ' + 落岸船员' + sailor.destroyed : ''));
+}
+
+// 战斗力缩放（spec 见 npcfixParseSpec；factor=10 → ×10，factor=0.1 → ÷10）
+// 只动 攻击/血量/魔法攻击 共 6 个字段，由后端 /api/editor/scale/batch 在一次主线程任务里写完，
+// 所以这里也能分批（每批 40 个实体）而不会把主线程卡死。
+async function npcfixScale(spec, factor) {
+  const p = npcfixParseSpec(spec);
+  if (!p) return;
+  const hashes = p.pick();
+  if (hashes.length === 0) { toast('没有可改战斗力的' + p.def.name, true); return; }
+  const pct = factor >= 1 ? ('×' + factor) : ('÷' + Math.round(1 / factor));
+  let msg = '确定把' + p.where + '的 ' + hashes.length + ' 个' + p.def.name + '战斗力 ' + pct + '？'
+    + '\n（攻击 / 血量 / 魔法攻击，共 6 个字段）';
+  if (hashes.length > 100) msg += '\n\n数量过多可能卡顿2-5s';
+  if (!confirm(msg)) return;
+  toast('战斗力 ' + pct + ' 中...', false);
+  let entities = 0, fields = 0;
+  for (let i = 0; i < hashes.length; i += NPCFIX_KILL_CHUNK) {
+    const part = hashes.slice(i, i + NPCFIX_KILL_CHUNK);
+    try {
+      const r = await fetch('/api/editor/scale/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ptrHashes: part, factor: factor })
+      }).then(x => x.json());
+      entities += (r && r.entities) || 0;
+      fields += (r && r.fields) || 0;
+    } catch (e) { /* 单批失败不中断 */ }
+    await new Promise(rs => setTimeout(rs, 40));
+  }
+  toast('战斗力 ' + pct + ' 完成: ' + entities + ' 个单位 / ' + fields + ' 个字段');
 }

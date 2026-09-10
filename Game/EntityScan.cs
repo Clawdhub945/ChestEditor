@@ -315,6 +315,56 @@ internal static class EntityScan
 
 
     /// <summary>
+    /// 「战斗力」缩放作用的 6 个字段：攻击 / 血量 / 魔法攻击（各含 min/max 或 当前/上限）。
+    /// </summary>
+    private static readonly string[] CombatStatFields =
+        { "atk_min", "atk_max", "magic_atk_min", "magic_atk_max", "hp", "hp_total" };
+
+    /// <summary>
+    /// 按倍率缩放实体的战斗属性（战斗力 ×10 / ÷10）。
+    /// <para>factor &gt; 1 强化，&lt; 1 削弱；实体没有的字段自动跳过（船/平民字段集不同）。</para>
+    /// <para>hp / hp_total 保底 1：否则 ÷10 会把 3 点血的单位写成 0，直接触发死亡/异常状态。</para>
+    /// </summary>
+    /// <returns>实际写入的字段个数（0 = 实体不存在或没有这些字段）。</returns>
+    internal static int ScaleCombatStats(int ptrHash, float factor)
+    {
+        try
+        {
+            foreach (var e in _entities)
+            {
+                if (e.PtrHash != ptrHash) continue;
+                int n = 0;
+                foreach (var name in CombatStatFields)
+                {
+                    if (!e.FieldMeta.TryGetValue(name, out var fe)) continue;
+                    if (fe.IsPointer || fe.IsString) continue;
+                    try
+                    {
+                        if (fe.IsFloat)
+                        {
+                            float v = ReadIl2CppFloat(e.Ptr, fe.Offset) * factor;
+                            if (name == "hp" || name == "hp_total") v = Math.Max(1f, v);
+                            WriteIl2CppFloat(e.Ptr, fe.Offset, v);
+                        }
+                        else
+                        {
+                            float v = ReadIl2CppInt(e.Ptr, fe.Offset) * factor;
+                            if (name == "hp" || name == "hp_total") v = Math.Max(1f, v);
+                            WriteIl2CppInt(e.Ptr, fe.Offset, (int)v);
+                        }
+                        n++;
+                    }
+                    catch { }
+                }
+                return n;
+            }
+        }
+        catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] ScaleCombatStats 失败: {ex.Message}"); }
+        return 0;
+    }
+
+
+    /// <summary>
     /// 设置实体字段值
     /// </summary>
     internal static string SetField(int ptrHash, string fieldName, float value)
