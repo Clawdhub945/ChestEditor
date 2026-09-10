@@ -128,11 +128,13 @@ internal static class EntityScan
     }
 
     /// <summary>
-    /// 推进当前扫描：最多处理 <paramref name="maxObjects"/> 个 GameObject。
-    /// <para>分片的意义：全量扫描实测要几秒，单帧做完就是几秒的卡死；摊到多帧只是帧率略降。</para>
+    /// 推进当前扫描：最多处理 <paramref name="maxObjects"/> 个 GameObject，
+    /// 且单次调用最多耗时 <paramref name="budgetMs"/> 毫秒（两者任一达到就返回）。
+    /// <para>分片的意义：全量扫描实测要几秒，单帧做完就是几秒的卡死；摊到多帧只是帧率略降。
+    /// 用时间预算比固定个数更合理 —— 每个对象的成本会随场景变化，按时间切能自适应。</para>
     /// </summary>
     /// <returns>true = 还没扫完（下帧继续）；false = 已结束。</returns>
-    internal static bool StepScan(int maxObjects)
+    internal static bool StepScan(int maxObjects, double budgetMs = double.PositiveInfinity)
     {
         lock (ScanLock)
         {
@@ -141,7 +143,7 @@ internal static class EntityScan
 
         int processed = 0;
         StepWatch.Restart();
-        while (run.Index < run.Gos.Length && processed < maxObjects)
+        while (run.Index < run.Gos.Length && processed < maxObjects && StepWatch.Elapsed.TotalMilliseconds < budgetMs)
         {
             var go = run.Gos[run.Index++];
             processed++;

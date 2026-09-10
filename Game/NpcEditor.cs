@@ -98,6 +98,7 @@ internal static class NpcEditor
 
                 jw.WriteStartObject();
                 jw.WriteNumber("ptrHash", e.PtrHash);
+                jw.WriteString("className", e.ClassName);   // 诊断用：排查 NpcBody/子弹之类混没混进来
                 jw.WriteNumber("guid", e.Guid);
                 jw.WriteNumber("npcId", e.NpcId);
                 jw.WriteNumber("stuffId", e.StuffId);

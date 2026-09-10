@@ -439,7 +439,11 @@ function npcfixEntityCard(e, opts) {
   opts = opts || {};
   const ph = e.ptrHash || 0;
   const displayName = e.npcName || e.name || e.goName || 'unknown';
-  const suffix = e.stuffNameWithIdIndex || e.soldierTypeName || '';
+  // 后缀：设施/船用带编号的设施名；其余只在真带兵种时显示兵种名
+  // ⚠ soldierTypeId=0 时后端给的 soldierTypeName 是「市民」（DataTables.SoldierTypeName 的 0 值），
+  //   直接拿来当后缀会让怪物/平民卡片都挂一个没意义的「(市民)」。
+  const suffix = e.stuffNameWithIdIndex
+    || ((e.soldierTypeId || 0) > 0 ? (e.soldierTypeName || '') : '');
   const kInfo = getKingdomInfo(npcfixUnitKingdom(e));
   const btn = 'padding:3px 8px;border:none;border-radius:4px;cursor:pointer;font-size:11px;white-space:nowrap;color:#fff';
   let h = '<div class="npc-card" style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius)">';
@@ -644,9 +648,14 @@ const NPCFIX_SAFE_RESCAN_EVERY = 12; // 每 N 拍重扫一次（拿新刷出来�
 
 // 包一层重扫：标记"正在扫描"。分片扫描要好几秒，
 // 这期间让定期清理先别发销毁请求（名单会整体替换，中途发只是白跑一趟）。
+// ⚠ 故意不走 entityEditorScan()：那会 toast + renderContent()，
+//   后台重扫会把整个面板重渲染，展开的字段卡片和滚动位置全丢。
 async function npcfixScan() {
   npcfixScanning = true;
-  try { await entityEditorScan(); } finally { npcfixScanning = false; }
+  try {
+    await fetch('/api/editor/scan', { method: 'POST' });
+    await fetchEntityEditorData();
+  } finally { npcfixScanning = false; }
 }
 
 // 每秒清除数量：localStorage 记忆 + 夹在 1..100

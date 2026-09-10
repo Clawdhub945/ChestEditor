@@ -5,8 +5,8 @@ namespace ChestEditor.Web;
 /// <summary>NPC 面板接口：扫描、列表、字段读写、字段翻译</summary>
 internal static class NpcHandlers
 {
-    /// <summary>扫描每帧处理的 GameObject 个数（分片：全量扫描要几秒，单帧做完会明显卡死）</summary>
-    private const int ScanObjectsPerFrame = 150;
+    /// <summary>扫描每帧的时间预算（毫秒）—— 与 EntityHandlers 的取值保持一致</summary>
+    private const double ScanFrameBudgetMs = 6;
 
     internal static void Register()
     {
@@ -19,7 +19,7 @@ internal static class NpcHandlers
             MainThread.RunPaced(() =>
             {
                 if (!begun) { begun = true; EntityScan.BeginScan(); }
-                return EntityScan.StepScan(ScanObjectsPerFrame);
+                return EntityScan.StepScan(int.MaxValue, ScanFrameBudgetMs);
             }, 120000);
             return MainThread.Run(() =>
             {

@@ -6,8 +6,12 @@ namespace ChestEditor.Web;
 /// <summary>统一实体编辑器接口：扫描、字段读写、销毁、定位、方法枚举</summary>
 internal static class EntityHandlers
 {
-    /// <summary>扫描每帧处理的 GameObject 个数（分片：全量扫描要几秒，单帧做完会明显卡死）</summary>
-    private const int ScanObjectsPerFrame = 150;
+    /// <summary>
+    /// 扫描每帧的时间预算（毫秒）：到点就把剩下的留给下一帧。
+    /// <para>比固定"每帧 N 个对象"更稳 —— 每个对象的成本随场景变化，按时间切能自适应。
+    /// 实机约 25µs/对象，6ms ≈ 每帧 240 个。</para>
+    /// </summary>
+    private const double ScanFrameBudgetMs = 6;
 
     /// <summary>
     /// 单个主线程任务里最多花多少毫秒做销毁/写值 —— 超出的留给下一帧。
@@ -37,7 +41,7 @@ internal static class EntityHandlers
             MainThread.RunPaced(() =>
             {
                 if (!begun) { begun = true; EntityScan.BeginScan(); }
-                return EntityScan.StepScan(ScanObjectsPerFrame);
+                return EntityScan.StepScan(int.MaxValue, ScanFrameBudgetMs);
             }, 120000);
             return MainThread.Run(() =>
             {
