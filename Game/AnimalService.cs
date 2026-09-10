@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using static ChestEditor.Interop.Il2CppApi;
 using static ChestEditor.Interop.Il2CppInvoke;
+using static ChestEditor.Interop.Il2CppMemory;
 
 namespace ChestEditor.Game;
 
@@ -28,9 +29,11 @@ internal static class AnimalService
         _mapStuffHelper = IntPtr.Zero; _destroyElement = IntPtr.Zero;
 
         _animalHelper = GameChainLocator.GetAnimalHelper();
+        Plugin.LogInfo($"[AnimalService] Resolve: animalHelper={_animalHelper.ToInt64():X}");
         if (_animalHelper == IntPtr.Zero)
             throw new InvalidOperationException("找不到 AnimalHelper（未进存档？）");
         _destroyAnimal = FindMethodInHierarchy(GetClass(_animalHelper), "DestroyAnimal", 1);
+        Plugin.LogInfo($"[AnimalService] Resolve: DestroyAnimal(1p)={_destroyAnimal.ToInt64():X}");
         if (_destroyAnimal == IntPtr.Zero)
             throw new InvalidOperationException("找不到 AnimalHelper.DestroyAnimal(animal)");
 
@@ -38,6 +41,7 @@ internal static class AnimalService
         if (_mapStuffHelper == IntPtr.Zero)
             throw new InvalidOperationException("找不到 MapStuffHelper（未进存档？）");
         _destroyElement = FindMethodInHierarchy(GetClass(_mapStuffHelper), "DestroyElement", 1);
+        Plugin.LogInfo($"[AnimalService] Resolve: mapStuffHelper={_mapStuffHelper.ToInt64():X}, DestroyElement(1p)={_destroyElement.ToInt64():X}");
         if (_destroyElement == IntPtr.Zero)
             throw new InvalidOperationException("找不到 MapStuffHelper.DestroyElement(guid)");
     }
@@ -45,17 +49,35 @@ internal static class AnimalService
     /// <summary>
     /// 删一只/一具。<see cref="Resolve"/> 必须已成功。
     /// 按 className 分派：Animal → DestroyAnimal(ptr)；AnimalDeadBody → DestroyElement(guid)。
+    /// <para>⚠ 每步 LogInfo：闪退（native 崩溃没有托管异常）时，日志的最后一条就是崩点。</para>
     /// </summary>
     internal static bool DestroyOne(EntityScan.EditorEntity e)
     {
+        Plugin.LogInfo($"[AnimalService] DestroyOne: {e.ClassName} ptrHash={e.PtrHash} ptr={e.Ptr.ToInt64():X} guid={e.Guid}");
         if (e.ClassName == "AnimalDeadBody")
         {
-            if (e.Guid <= 0) return false;
+            if (e.Guid <= 0) { Plugin.LogInfo("[AnimalService]   guid<=0，跳过"); return false; }
+            Plugin.LogInfo($"[AnimalService]   调 DestroyElement(guid={e.Guid})...");
             Invoke(_destroyElement, _mapStuffHelper, e.Guid);   // void 方法
+            Plugin.LogInfo("[AnimalService]   DestroyElement 返回");
             return true;
         }
+        // 活体：先读 is_dead 预检（扫描后可能已被别的系统注销；重复调 DestroyAnimal
+        // 会走"注册表 Remove 失败直接 return"，虽安全但跳过更干净）
+        if (e.FieldMeta.TryGetValue("is_dead", out var df) && !df.IsString && !df.IsPointer)
+        {
+            try
+            {
+                byte dead = ReadIl2CppByte(e.Ptr, df.Offset);
+                Plugin.LogInfo($"[AnimalService]   is_dead={dead}");
+                if (dead != 0) { Plugin.LogInfo("[AnimalService]   已死，跳过"); return false; }
+            }
+            catch (Exception ex) { Plugin.LogInfo($"[AnimalService]   is_dead 读取失败: {ex.Message}"); }
+        }
         // 活体：传对象指针
+        Plugin.LogInfo("[AnimalService]   调 DestroyAnimal(animal)...");
         Invoke(_destroyAnimal, _animalHelper, e.Ptr);
+        Plugin.LogInfo("[AnimalService]   DestroyAnimal 返回");
         return true;
     }
 
@@ -78,17 +100,31 @@ internal static class AnimalService
         IntPtr areaMap = GameChainLocator.GetAreaMap();
         if (areaMap == IntPtr.Zero)
             throw new InvalidOperationException("未进入存档，找不到 AreaMap");
-        IntPtr getLandPoint = FindMethodInHierarchy(GetClass(areaMap), "GetRandomLandPoint", 0);
+        // ⚠ GetRandomLandPoint(Point center, int range) 是 2 参（0 参版本不存在，上一版按 0 参找失败）；
+        // 用 GetRandomLandPointNotAtMapBorder()（0 参，全图随机陆地 + TerrainHelper 导航调整）。
+        IntPtr getLandPoint = FindMethodInHierarchy(GetClass(areaMap), "GetRandomLandPointNotAtMapBorder", 0);
         if (getLandPoint == IntPtr.Zero)
-            throw new InvalidOperationException("找不到 AreaMap.GetRandomLandPoint()");
+            throw new InvalidOperationException("找不到 AreaMap.GetRandomLandPointNotAtMapBorder()");
 
-        // 每只独立随机陆地格（比 count 只叠在同一点自然）
+        // 每只独立随机陆地格（比 count 只叠在同一点自然）。
+        // 随机取点失败时兜底：借用任意在场实体的 cur_point 字段引用（Point 对象，引用类型字段存指针）。
         for (int i = 0; i < count; i++)
         {
             // runtime_invoke 对引用类型返回值直接给对象指针（Point 是引用类型）
             IntPtr pos = Invoke(getLandPoint, areaMap);
             if (pos == IntPtr.Zero)
-                throw new InvalidOperationException("GetRandomLandPoint 返回空（地图满了？）");
+            {
+                foreach (var e in EntityScan.Snapshot())
+                {
+                    if (e.FieldMeta.TryGetValue("cur_point", out var pf) && pf.IsPointer)
+                    {
+                        IntPtr p = ReadIl2CppPointer(e.Ptr, pf.Offset);
+                        if (p != IntPtr.Zero) { pos = p; break; }
+                    }
+                }
+            }
+            if (pos == IntPtr.Zero)
+                throw new InvalidOperationException("取不到召唤位置（随机陆地失败且地图上没有任何带坐标的实体）");
             Invoke(createAnimal, helper, pos, stuffId, 1);
         }
     }
