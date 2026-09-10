@@ -29,11 +29,11 @@ internal static class AnimalService
         _mapStuffHelper = IntPtr.Zero; _destroyElement = IntPtr.Zero;
 
         _animalHelper = GameChainLocator.GetAnimalHelper();
-        Plugin.LogInfo($"[AnimalService] Resolve: animalHelper={_animalHelper.ToInt64():X}");
+        Plugin.LogVerbose($"[AnimalService] Resolve: animalHelper={_animalHelper.ToInt64():X}");
         if (_animalHelper == IntPtr.Zero)
             throw new InvalidOperationException("找不到 AnimalHelper（未进存档？）");
         _destroyAnimal = FindMethodInHierarchy(GetClass(_animalHelper), "DestroyAnimal", 1);
-        Plugin.LogInfo($"[AnimalService] Resolve: DestroyAnimal(1p)={_destroyAnimal.ToInt64():X}");
+        Plugin.LogVerbose($"[AnimalService] Resolve: DestroyAnimal(1p)={_destroyAnimal.ToInt64():X}");
         if (_destroyAnimal == IntPtr.Zero)
             throw new InvalidOperationException("找不到 AnimalHelper.DestroyAnimal(animal)");
 
@@ -41,7 +41,7 @@ internal static class AnimalService
         if (_mapStuffHelper == IntPtr.Zero)
             throw new InvalidOperationException("找不到 MapStuffHelper（未进存档？）");
         _destroyElement = FindMethodInHierarchy(GetClass(_mapStuffHelper), "DestroyElement", 1);
-        Plugin.LogInfo($"[AnimalService] Resolve: mapStuffHelper={_mapStuffHelper.ToInt64():X}, DestroyElement(1p)={_destroyElement.ToInt64():X}");
+        Plugin.LogVerbose($"[AnimalService] Resolve: mapStuffHelper={_mapStuffHelper.ToInt64():X}, DestroyElement(1p)={_destroyElement.ToInt64():X}");
         if (_destroyElement == IntPtr.Zero)
             throw new InvalidOperationException("找不到 MapStuffHelper.DestroyElement(guid)");
     }
@@ -54,13 +54,13 @@ internal static class AnimalService
     /// <summary>删一只/一具（mode 诊断分派）。</summary>
     internal static bool DestroyOne(EntityScan.EditorEntity e, string mode)
     {
-        Plugin.LogInfo($"[AnimalService] DestroyOne({mode}): {e.ClassName} ptrHash={e.PtrHash} ptr={e.Ptr.ToInt64():X} guid={e.Guid}");
+        Plugin.LogVerbose($"[AnimalService] DestroyOne({mode}): {e.ClassName} ptrHash={e.PtrHash} ptr={e.Ptr.ToInt64():X} guid={e.Guid}");
         if (e.ClassName == "AnimalDeadBody")
         {
-            if (e.Guid <= 0) { Plugin.LogInfo("[AnimalService]   guid<=0，跳过"); return false; }
-            Plugin.LogInfo($"[AnimalService]   调 DestroyElement(guid={e.Guid})...");
+            if (e.Guid <= 0) { Plugin.LogVerbose("[AnimalService]   guid<=0，跳过"); return false; }
+            Plugin.LogVerbose($"[AnimalService]   调 DestroyElement(guid={e.Guid})...");
             Invoke(_destroyElement, _mapStuffHelper, e.Guid);
-            Plugin.LogInfo("[AnimalService]   DestroyElement 返回");
+            Plugin.LogVerbose("[AnimalService]   DestroyElement 返回");
             return true;
         }
 
@@ -68,9 +68,9 @@ internal static class AnimalService
         {
             // 对照实验：只调 Animal.DestroySelf()（跳过注册表/状态池）
             IntPtr ds = FindMethodInHierarchy(GetClass(e.Ptr), "DestroySelf", 0);
-            Plugin.LogInfo($"[AnimalService]   DestroySelf={ds.ToInt64():X}，调用...");
+            Plugin.LogVerbose($"[AnimalService]   DestroySelf={ds.ToInt64():X}，调用...");
             Invoke(ds, e.Ptr);
-            Plugin.LogInfo("[AnimalService]   DestroySelf 返回");
+            Plugin.LogVerbose("[AnimalService]   DestroySelf 返回");
             return true;
         }
 
@@ -80,26 +80,26 @@ internal static class AnimalService
             try
             {
                 byte dead = ReadIl2CppByte(e.Ptr, df.Offset);
-                Plugin.LogInfo($"[AnimalService]   is_dead={dead}");
-                if (dead != 0) { Plugin.LogInfo("[AnimalService]   已死，跳过"); return false; }
+                Plugin.LogVerbose($"[AnimalService]   is_dead={dead}");
+                if (dead != 0) { Plugin.LogVerbose("[AnimalService]   已死，跳过"); return false; }
             }
-            catch (Exception ex) { Plugin.LogInfo($"[AnimalService]   is_dead 读取失败: {ex.Message}"); }
+            catch (Exception ex) { Plugin.LogVerbose($"[AnimalService]   is_dead 读取失败: {ex.Message}"); }
         }
 
         if (mode == "onBeDestroy")
         {
             // 推荐：游戏完整移除流程 ExitFacility + DestroyAnimal
             IntPtr obd = FindMethodInHierarchy(GetClass(e.Ptr), "OnBeDestroy", 1);
-            Plugin.LogInfo($"[AnimalService]   OnBeDestroy={obd.ToInt64():X}，调用...");
+            Plugin.LogVerbose($"[AnimalService]   OnBeDestroy={obd.ToInt64():X}，调用...");
             Invoke(obd, e.Ptr, 0);
-            Plugin.LogInfo("[AnimalService]   OnBeDestroy 返回");
+            Plugin.LogVerbose("[AnimalService]   OnBeDestroy 返回");
             return true;
         }
 
         // mode = destroyAnimal（原路径，闪退）
-        Plugin.LogInfo($"[AnimalService]   调 DestroyAnimal(animal)...");
+        Plugin.LogVerbose($"[AnimalService]   调 DestroyAnimal(animal)...");
         Invoke(_destroyAnimal, _animalHelper, e.Ptr);
-        Plugin.LogInfo("[AnimalService]   DestroyAnimal 返回");
+        Plugin.LogVerbose("[AnimalService]   DestroyAnimal 返回");
         return true;
     }
 
@@ -148,7 +148,7 @@ internal static class AnimalService
         }
         if (pos == IntPtr.Zero)
             throw new InvalidOperationException("取不到召唤位置");
-        Plugin.LogInfo($"[AnimalService] Spawn {count} 只 stuffId={stuffId}，位置来源：{posSrc}");
+        Plugin.LogVerbose($"[AnimalService] Spawn {count} 只 stuffId={stuffId}，位置来源：{posSrc}");
 
         for (int i = 0; i < count; i++)
         {
