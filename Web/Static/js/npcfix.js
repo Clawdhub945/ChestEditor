@@ -1712,6 +1712,10 @@ async function npcfixBox4Spawn() {
   const name = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : ('#' + stuffId);
   if (!confirm('确定召唤 ' + count + ' 只「' + name + '」？（生成在我方建筑旁）')) return;
   toast('召唤中...', false);
+  // ⚠ 定位不用 guid：CreateAnimal 刚返回时游戏还没分配 guid（读到 0，会匹配到
+  // 2266 个 guid=0 实体里的任意一个——实测相机飞到了不相干的 NPC 头上）。
+  // 改用 ptrHash 差集：召唤前记快照，重扫后取新出现的动物。
+  const beforeHashes = new Set(entityEditorData.map(e => e.ptrHash));
   let r = null;
   try {
     r = await fetch('/api/editor/animal/spawn', {
@@ -1722,16 +1726,15 @@ async function npcfixBox4Spawn() {
   } catch (e) { toast('召唤失败: ' + esc(String((e && e.message) || e)), true); return; }
   const spawned = (r && r.spawned) || 0;
   toast('召唤完成: ' + spawned + ' 只「' + name + '」已出现');
-  // 重扫后按 guid 定位到新动物（locate 读真实 transform 坐标，视角精确落在动物身上）
   await npcfixScan();
-  const wanted = new Set((r && r.guids) || []);
-  const target = entityEditorData.find(e => wanted.has(e.guid)) || entityEditorData.find(e => wanted.has(-e.guid));
-  if (target) {
+  const newborn = entityEditorData
+    .filter(e => !beforeHashes.has(e.ptrHash) && (e.className || '') === 'Animal')[0];
+  if (newborn) {
     try {
       await fetch('/api/editor/locate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ptrHash: target.ptrHash })
+        body: JSON.stringify({ ptrHash: newborn.ptrHash })
       });
     } catch (e) { /* 定位失败不影响结果 */ }
   }

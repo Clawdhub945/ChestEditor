@@ -253,16 +253,13 @@ internal static class EntityHandlers
             if (count > 10) count = 10;
             return MainThread.Run(() =>
             {
-                var (gx, gy, newGuids) = AnimalService.Spawn(stuffId, count);
+                var (gx, gy, spawned) = AnimalService.Spawn(stuffId, count);
                 return JsonBuilder.Object(w =>
                 {
                     w.WriteBoolean("ok", true);
-                    w.WriteNumber("spawned", newGuids.Count);
+                    w.WriteNumber("spawned", spawned);
                     w.WriteNumber("gx", gx);
                     w.WriteNumber("gy", gy);
-                    w.WriteStartArray("guids");
-                    foreach (var g in newGuids) w.WriteNumberValue(g);
-                    w.WriteEndArray();
                 });
             }, 30000);
         });

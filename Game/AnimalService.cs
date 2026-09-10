@@ -122,7 +122,7 @@ internal static class AnimalService
     /// <param name="stuffId">动物种类（animal.json 的 animal_id，如 501005=猪）</param>
     /// <param name="count">数量（前端夹取 1..10）</param>
     /// <returns>(gx, gy) 实际召唤的格子坐标；newGuids = 新动物 guid 列表（用于前端定位）</returns>
-    internal static (int gx, int gy, List<int> newGuids) Spawn(int stuffId, int count)
+    internal static (int gx, int gy, int spawned) Spawn(int stuffId, int count)
     {
         IntPtr helper = GameChainLocator.GetAnimalHelper();
         if (helper == IntPtr.Zero)
@@ -175,19 +175,14 @@ internal static class AnimalService
         //（x 低 32 位、y 高 32 位，小端）。传 il2cpp_object_new 的"对象指针"会把 klass 头
         // 读成坐标（实测 x=1.37e9 = klass 低 32 位），这就是"幽灵动物"的根因。
         IntPtr posSlot = new IntPtr(gx | (gy << 32));
-        var newGuids = new List<int>();
+        int spawned = 0;
         for (int i = 0; i < count; i++)
         {
-            IntPtr created = Invoke(createAnimal, helper, posSlot, stuffId, 1);   // 返回 Animal 对象指针
-            if (created == IntPtr.Zero) continue;
-            try
-            {
-                var cls = GetClass(created);
-                if (GetClassFieldsCached(cls, "Animal").TryGetValue("guid", out var gf) && !gf.IsString && !gf.IsPointer)
-                    newGuids.Add(ReadIl2CppInt(created, gf.Offset));
-            }
-            catch { }
+            if (Invoke(createAnimal, helper, posSlot, stuffId, 1) != IntPtr.Zero) spawned++;
         }
-        return (gx, gy, newGuids);
+        // ⚠ 不在这里读新动物的 guid：CreateAnimal 返回时 guid 还没分配（实测读到 0），
+        // 前端按 guid 找实体会匹配到 2266 个 guid=0 实体里的任意一个（相机飞错地方）。
+        // 前端定位改用 ptrHash 差集（召唤前快照 vs 重扫后）。
+        return (gx, gy, spawned);
     }
 }
