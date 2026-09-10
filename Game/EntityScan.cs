@@ -97,6 +97,9 @@ internal static class EntityScan
     private static readonly object ScanLock = new();
     private static readonly System.Diagnostics.Stopwatch StepWatch = new();
 
+    /// <summary>是否正有分片扫描在进行（网页端据此提示"正在扫描"）。</summary>
+    internal static bool IsScanning => _run != null;
+
     /// <summary>
     /// 开始一次扫描：清空结果 + 枚举场景对象；真正的遍历交给 <see cref="StepScan"/> 分片推进。
     /// </summary>

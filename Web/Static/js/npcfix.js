@@ -628,15 +628,18 @@ function npcfixDestroyAllBtn() {
   return npcfixSectionBtn('毁灭吧！！！', NPCFIX_CLEAR_COLOR, 'npcfixClear(\'enemyAll:enemy\')', true);
 }
 
-// ===== 安全发展模式：地图上出现敌方单位就慢慢清掉，每拍只动一小批，不卡帧 =====
+// ===== 安全发展模式（独立一行盒子）：地图上出现敌方单位就慢慢清掉，不卡帧 =====
+// 节奏固定为「每 1 秒一批」，每批数量用户可调（默认 20，最大 100）——时间不能改，数量能改。
 let npcfixSafeOn = false;
 let npcfixSafeTimer = null;
 let npcfixSafeDone = new Set();
 let npcfixSafeTicks = 0;
 let npcfixSafeCount = 0;
 let npcfixScanning = false;          // 正在全量重扫（扫描期间别再发销毁，省得大批 not found）
-const NPCFIX_SAFE_BATCH = 20;        // 每拍最多清几个（后端已按帧摊开，批量大也不会顿）
-const NPCFIX_SAFE_INTERVAL = 1500;   // 拍间隔 ms
+let npcfixSafeSaveLoads = 0;         // 开启那一刻的"读档成功次数"；变了 = 读过档 → 自动关闭
+const NPCFIX_SAFE_INTERVAL = 1000;   // 拍间隔 ms（固定 1 秒，不可改）
+const NPCFIX_SAFE_BATCH_DEFAULT = 20;
+const NPCFIX_SAFE_BATCH_MAX = 100;
 const NPCFIX_SAFE_RESCAN_EVERY = 12; // 每 N 拍重扫一次（拿新刷出来的敌人）
 
 // 包一层重扫：标记"正在扫描"。分片扫描要好几秒，
@@ -646,47 +649,120 @@ async function npcfixScan() {
   try { await entityEditorScan(); } finally { npcfixScanning = false; }
 }
 
-function npcfixSafeBtnText() {
-  return npcfixSafeOn ? ('安全发展模式: 开（已清 ' + npcfixSafeCount + '）') : '安全发展模式: 关';
+// 每秒清除数量：localStorage 记忆 + 夹在 1..100
+function npcfixSafeGetBatch() {
+  const v = parseInt(localStorage.getItem('chesteditor.safeBatch') || '', 10);
+  if (isNaN(v)) return NPCFIX_SAFE_BATCH_DEFAULT;
+  return Math.min(NPCFIX_SAFE_BATCH_MAX, Math.max(1, v));
 }
-function npcfixSafeModeBtn() {
-  const s = 'padding:5px 14px;background:var(--bg-input);color:var(--text-secondary)'
-    + ';border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:13px;font-weight:700';
-  return '<button id="npcfixSafeBtn" onclick="event.stopPropagation();npcfixSafeToggle()" style="' + s + '">'
-    + npcfixSafeBtnText() + '</button>';
+function npcfixSafeBatchChange(inp) {
+  let v = parseInt(inp.value, 10);
+  if (isNaN(v)) v = NPCFIX_SAFE_BATCH_DEFAULT;
+  v = Math.min(NPCFIX_SAFE_BATCH_MAX, Math.max(1, v));
+  inp.value = v;
+  localStorage.setItem('chesteditor.safeBatch', String(v));
+  toast('安全发展模式：每秒清除 ' + v + ' 个');
 }
+
+function npcfixSafeStateText() {
+  return npcfixSafeOn ? ('开（已清 ' + npcfixSafeCount + '）') : '关';
+}
+// 独立一行盒子：标题 + 状态 + 每秒数量输入 + 开关
+function npcfixSafeBox() {
+  const on = npcfixSafeOn;
+  let h = '<div style="margin:0 0 12px;padding:10px 14px;border:1px solid var(--border);'
+    + 'border-radius:var(--radius-sm);background:var(--bg-card);display:flex;align-items:center;gap:10px;flex-wrap:wrap">';
+  h += '<span style="font-size:13px;font-weight:700;color:var(--text-primary)">&#x1F6E1; 安全发展模式</span>';
+  h += '<span id="npcfixSafeState" style="font-size:12px;color:'
+    + (on ? 'var(--success-dark,#27ae60)' : 'var(--text-muted)') + '">' + esc(npcfixSafeStateText()) + '</span>';
+  h += '<span style="flex:1"></span>';
+  h += '<span style="font-size:12px;color:var(--text-muted)">每秒清除</span>';
+  h += '<input id="npcfixSafeBatch" type="number" min="1" max="' + NPCFIX_SAFE_BATCH_MAX + '" value="'
+    + npcfixSafeGetBatch() + '" onchange="npcfixSafeBatchChange(this)" '
+    + 'style="width:64px;padding:3px 6px;background:var(--bg-input);color:var(--text-primary)'
+    + ';border:1px solid var(--border);border-radius:4px;font-size:12px">';
+  h += '<span style="font-size:12px;color:var(--text-muted)">个敌方单位</span>';
+  h += '<button onclick="event.stopPropagation();npcfixSafeToggle()" style="padding:5px 16px;'
+    + (on ? 'background:var(--success-dark,#27ae60);color:#fff' : 'background:var(--bg-input);color:var(--text-secondary)')
+    + ';border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:13px;font-weight:700">'
+    + (on ? '关闭' : '开启') + '</button>';
+  h += '<span style="font-size:11px;color:var(--text-muted)">只清敌方 · 读取存档时自动关闭</span>';
+  h += '</div>';
+  return h;
+}
+// 兼容旧调用：状态文本变了就就地更新（避免整盒重渲染）
 function npcfixSafeUpdateBtn() {
-  const b = document.getElementById('npcfixSafeBtn');
-  if (b) b.textContent = npcfixSafeBtnText();
-}
-function npcfixSafeToggle() {
-  npcfixSafeOn = !npcfixSafeOn;
-  if (npcfixSafeOn) {
-    npcfixSafeCount = 0;
-    npcfixSafeTicks = 0;
-    npcfixSafeDone = new Set();
-    toast('安全发展模式已开启（只清敌方，每 1.6 秒一批）');
-    npcfixSafeTick();
-  } else {
-    if (npcfixSafeTimer) { clearTimeout(npcfixSafeTimer); npcfixSafeTimer = null; }
-    toast('安全发展模式已关闭（累计清除 ' + npcfixSafeCount + '）');
+  const st = document.getElementById('npcfixSafeState');
+  if (st) {
+    st.textContent = npcfixSafeStateText();
+    st.style.color = npcfixSafeOn ? 'var(--success-dark,#27ae60)' : 'var(--text-muted)';
   }
+}
+// 读后端状态（主线程上判断"进没进存档 / 在不在读档 / 在不在扫描"）
+async function npcfixFetchState() {
+  try { return await fetch('/api/editor/state').then(r => r.json()); }
+  catch (e) { return null; }
+}
+// 状态不对就自动关：返回 true 表示已自动关闭
+function npcfixSafeCheckState(st) {
+  if (!st) return false;                                  // 连不上就不动，别误关
+  if (st.loading || (typeof st.saveLoads === 'number' && st.saveLoads !== npcfixSafeSaveLoads)) {
+    npcfixSafeAutoOff('检测到读取存档，安全发展模式已自动关闭');
+    return true;
+  }
+  if (st.inSave === false) {
+    npcfixSafeAutoOff('已退出存档，安全发展模式已自动关闭');
+    return true;
+  }
+  return false;
+}
+function npcfixSafeAutoOff(reason) {
+  npcfixSafeOn = false;
+  if (npcfixSafeTimer) { clearTimeout(npcfixSafeTimer); npcfixSafeTimer = null; }
+  toast(reason + '（本次累计清除 ' + npcfixSafeCount + '）', true);
   npcfixSafeUpdateBtn();
 }
-// 一拍：重扫（偶尔）→ 挑最多 NPCFIX_SAFE_BATCH 个敌方单位 → 批量销毁（后端按帧摊开）
+async function npcfixSafeToggle() {
+  if (npcfixSafeOn) {          // 关闭
+    npcfixSafeOn = false;
+    if (npcfixSafeTimer) { clearTimeout(npcfixSafeTimer); npcfixSafeTimer = null; }
+    toast('安全发展模式已关闭（累计清除 ' + npcfixSafeCount + '）');
+    npcfixSafeUpdateBtn();
+    return;
+  }
+  // 开启前先问后端"现在能不能开"
+  const st = await npcfixFetchState();
+  if (st === null) { toast('开启失败：无法连接游戏接口', true); return; }
+  if (st.inSave === false) { toast('开启失败：未进入存档', true); return; }
+  if (st.loading) { toast('开启失败：正在读取存档', true); return; }
+  if (st.scanning) { toast('开启失败：正在扫描，请稍后再试', true); return; }
+
+  npcfixSafeOn = true;
+  npcfixSafeCount = 0;
+  npcfixSafeTicks = 0;
+  npcfixSafeDone = new Set();
+  npcfixSafeSaveLoads = (typeof st.saveLoads === 'number') ? st.saveLoads : 0;
+  toast('安全发展模式已开启（每秒清除 ' + npcfixSafeGetBatch() + ' 个敌方单位）');
+  npcfixSafeUpdateBtn();
+  npcfixSafeTick();
+}
+
+// 一拍：核对游戏状态 → 重扫（偶尔）→ 挑最多「每秒数量」个敌方单位 → 批量销毁（后端按帧摊开）
 async function npcfixSafeTick() {
   if (!npcfixSafeOn) return;
   try {
+    // 每拍先核对状态：读档了 / 退出存档了 → 自动关闭。
+    // ⚠ 放在"有没有敌人"之前 —— 地图上没敌人时也得能感知到读档。
+    if (npcfixSafeCheckState(await npcfixFetchState())) return;
     if (npcfixSafeTicks % NPCFIX_SAFE_RESCAN_EVERY === 0) {
       await npcfixScan();
       npcfixSafeDone = new Set();   // 重扫后数据是新的一份，旧的"已清"记录作废
     }
-    // 正在重扫就跳过这一拍的销毁：这期间名单在整体替换，发了也是白跑
     if (!npcfixScanning) {
       const targets = entityEditorData
         .filter(e => !npcfixSafeDone.has(e.ptrHash) && npcfixIsAnyUnit(e))
         .filter(e => { const k = npcfixUnitKingdom(e); return k !== 1 && k !== 0; })
-        .slice(0, NPCFIX_SAFE_BATCH)
+        .slice(0, npcfixSafeGetBatch())
         .map(e => e.ptrHash);
       if (targets.length > 0) {
         const r = await destroyBatch(targets);
@@ -826,16 +902,18 @@ async function renderNpcfixBox2(forceScan) {
 
   // ===== 组装：两条分区线**一直显示**（没有单位也要在），右侧挂分区级按钮 =====
   //   我方单位 ── [战斗力×10]
-  //   敌方单位 ── [战斗力÷10] [毁灭吧！！！] [安全发展模式]
+  //   敌方单位 ── [战斗力÷10] [毁灭吧！！！]
+  //   （安全发展模式独立成一行盒子，放在最上面）
   const nOurs = c.ours.length + c.monstersOurs.length + c.shipsOurs.length;
   const nEnemy = npcfixSumKinds(c.humanoids) + npcfixSumKinds(c.monstersEnemy) + npcfixSumKinds(c.shipsEnemy);
   let h = '';
+  h += npcfixSafeBox();
   h += npcfixSectionTitle('我方单位', GREEN,
     npcfixSectionBtn('战斗力×10', NPCFIX_BIFF_COLOR, 'npcfixScale(\'oursAll:ours\',10)'))
     + (oursHtml || npcfixEmptyHint('暂无我方单位（' + nOurs + ' 个）'));
   h += npcfixSectionTitle('敌方单位', 'var(--danger, #e74c3c)',
     npcfixSectionBtn('战斗力÷10', NPCFIX_NERF_COLOR, 'npcfixScale(\'enemyAll:enemy\',0.1)')
-    + npcfixDestroyAllBtn() + npcfixSafeModeBtn())
+    + npcfixDestroyAllBtn())
     + (enemyHtml || npcfixEmptyHint('暂无敌方单位（' + nEnemy + ' 个）'));
 
   body.innerHTML = h;

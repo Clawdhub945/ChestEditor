@@ -43,13 +43,27 @@ function mkEl() {
   };
 }
 const els = {};
+// fetch 桩：按 URL 分发（/state 由测试用例随时改写）
+let stateResp = { inSave: true, loading: false, saveLoads: 5 };
+const lsStore = {};
 const ctx = {
   console, window: {},
   document: { body: mkEl(), getElementById: id => (els[id] = els[id] || mkEl()),
     querySelector: () => null, querySelectorAll: () => [], createElement: mkEl, addEventListener() {} },
-  localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
-  // 只用于让"空数据时 renderNpcfixBox2 自动扫描"这条路走通（扫描结果就是空）
-  fetch: () => Promise.resolve({ json: () => Promise.resolve([]) }),
+  localStorage: {
+    getItem: k => (k in lsStore ? lsStore[k] : null),
+    setItem: (k, v) => { lsStore[k] = String(v); }, removeItem: k => { delete lsStore[k]; },
+  },
+  // 分发：state / destroy 带游戏状态，entities 返回空数组
+  fetch: url => {
+    const u = String(url);
+    let body = {};
+    if (u.indexOf('/api/editor/state') >= 0) body = stateResp;
+    else if (u.indexOf('/api/editor/destroy') >= 0)
+      body = { ok: true, destroyed: 0, failed: 0, inSave: stateResp.inSave, loading: stateResp.loading, saveLoads: stateResp.saveLoads };
+    else if (u.indexOf('/api/editor/entities') >= 0) body = [];
+    return Promise.resolve({ json: () => Promise.resolve(body) });
+  },
   setTimeout, clearTimeout, Date, JSON, Math, Number, String, Object, Array, Promise, Set, Map,
 };
 ctx.window = ctx; ctx.globalThis = ctx;
@@ -262,23 +276,72 @@ const src = fs.readFileSync(path.join(dir, 'npcfix.js'), 'utf8');
   // 战斗力缩放用的是新后端接口
   ok(/\/api\/editor\/scale\/batch/.test(src), '前端调 /api/editor/scale/batch');
 
-  // ---------- 9) 安全发展模式 ----------
+  // ---------- 9) 安全发展模式（独立盒子 + 每秒数量可调 + 各种判断） ----------
   console.log('\n== 9) 安全发展模式 ==');
-  ok(/npcfixSafeToggle\(\)/.test(H), '「敌方单位」有安全发展模式按钮');
-  ok(ctx.npcfixSafeBtnText() === '安全发展模式: 关', '初始状态为「关」');
+  ok(/npcfixSafeBox\(\)/.test(src), '安全发展模式渲染成独立一行盒子（npcfixSafeBox）');
+  ok(H.indexOf('安全发展模式') >= 0 && H.indexOf('安全发展模式') < H.indexOf('>我方单位<'),
+    '安全发展模式盒子在「我方单位」之前（独立一行）');
+  ok(H.indexOf('npcfixSafeBatchChange(this)') >= 0, '有"每秒清除 N 个"的数字输入框');
+  ok(H.indexOf('npcfixSafeToggle()') >= 0, '有开/关按钮');
+  ok(/npcfixSafeModeBtn/.test(H) === false, '「敌方单位」标题条上不再挂安全发展模式');
+  ok(ev('NPCFIX_SAFE_INTERVAL') === 1000, '节奏固定 1 秒一拍（时间不可改）');
+  console.log('  默认每秒', ev('NPCFIX_SAFE_BATCH_DEFAULT'), '个 / 上限', ev('NPCFIX_SAFE_BATCH_MAX'),
+    '个 / 间隔', ev('NPCFIX_SAFE_INTERVAL') + 'ms / 每', ev('NPCFIX_SAFE_RESCAN_EVERY'), '拍重扫');
+  ok(ev('NPCFIX_SAFE_BATCH_DEFAULT') === 20 && ev('NPCFIX_SAFE_BATCH_MAX') === 100,
+    '默认 20 / 最大 100');
+
+  // 数量输入的夹取
+  ctx.npcfixSafeBatchChange({ value: '55' });
+  ok(ctx.npcfixSafeGetBatch() === 55, '输入 55 → 生效 55（localStorage 记忆）');
+  ctx.npcfixSafeBatchChange({ value: '500' });
+  ok(ctx.npcfixSafeGetBatch() === 100, '输入 500 → 夹到上限 100');
+  ctx.npcfixSafeBatchChange({ value: '0' });
+  ok(ctx.npcfixSafeGetBatch() === 1, '输入 0 → 夹到下限 1');
+  ctx.npcfixSafeBatchChange({ value: 'abc' });
+  ok(ctx.npcfixSafeGetBatch() === 20, '输入非法 → 回到默认 20');
+
+  // 开关 + 各种判断
+  ok(ctx.npcfixSafeStateText() === '关', '初始状态为「关」');
+  let toasts = [];
+  ctx.toast = (m, isErr) => { toasts.push(m); };
+  stateResp = { inSave: false, loading: false, saveLoads: 0 };      // 没进存档
+  await ctx.npcfixSafeToggle();
+  ok(ev('npcfixSafeOn') === false, '未进存档 → 开启失败（保持关闭）');
+  ok(toasts.some(t => t.indexOf('开启失败') === 0), '弹出「开启失败」');
+
+  stateResp = { inSave: true, loading: true, saveLoads: 0 };        // 正在读档
+  await ctx.npcfixSafeToggle();
+  ok(ev('npcfixSafeOn') === false, '正在读档 → 开启失败');
+
+  stateResp = { inSave: true, loading: false, saveLoads: 3, scanning: false };
+  await ctx.npcfixSafeToggle();
+  ok(ev('npcfixSafeOn') === true, '进存档后可正常开启');
+  ok(toasts.some(t => t.indexOf('每秒清除 20') >= 0), '开启提示带每秒数量');
   ctx.npcfixSafeToggle();
-  ok(ctx.npcfixSafeBtnText().indexOf('安全发展模式: 开') === 0, '点一下变「开」');
-  ctx.npcfixSafeToggle();
-  ok(ctx.npcfixSafeBtnText() === '安全发展模式: 关', '再点一下变回「关」');
+  ok(ev('npcfixSafeOn') === false, '再点一次关闭');
+
+  // 读档后自动关闭
+  stateResp = { inSave: true, loading: false, saveLoads: 3, scanning: false };
+  await ctx.npcfixSafeToggle();
+  ok(ev('npcfixSafeOn') === true, '再次开启（saveLoads=3）');
+  stateResp = { inSave: true, loading: false, saveLoads: 4, scanning: false };  // 读了一次档
+  await ctx.npcfixSafeTick();
+  ok(ev('npcfixSafeOn') === false, '读档后自动关闭');
+  ok(toasts.some(t => t.indexOf('读取存档') >= 0), '提示「读取存档，已自动关闭」');
+
+  // 退出存档后自动关闭
+  stateResp = { inSave: true, loading: false, saveLoads: 4, scanning: false };
+  await ctx.npcfixSafeToggle();
+  ok(ev('npcfixSafeOn') === true, '再次开启');
+  stateResp = { inSave: false, loading: false, saveLoads: 4, scanning: false }; // 退出了
+  await ctx.npcfixSafeTick();
+  ok(ev('npcfixSafeOn') === false, '退出存档 → 自动关闭');
+
   const safeSrc = src.slice(src.indexOf('async function npcfixSafeTick'));
-  ok(/NPCFIX_SAFE_BATCH/.test(safeSrc) && /slice\(0, NPCFIX_SAFE_BATCH\)/.test(safeSrc),
-    '每拍按 NPCFIX_SAFE_BATCH 取一批');
-  const safeBatch = ev('NPCFIX_SAFE_BATCH');
-  console.log('  NPCFIX_SAFE_BATCH =', safeBatch, '/ 间隔', ev('NPCFIX_SAFE_INTERVAL') + 'ms',
-    '/ 每', ev('NPCFIX_SAFE_RESCAN_EVERY'), '拍重扫');
-  ok(safeBatch >= 20, '每拍清除数量已调大（≥20）');
+  ok(/slice\(0, npcfixSafeGetBatch\(\)\)/.test(safeSrc), '每批数量来自可调输入');
   ok(/k !== 1 && k !== 0/.test(safeSrc), '只清敌方（不含我方 1 / 阵营0）');
   ok(/npcfixScanning/.test(safeSrc), '重扫进行中时跳过这一拍（避免大批 not found）');
+  ok(/npcfixSafeCheckState\(/.test(safeSrc), '每一拍都会核对游戏状态（读档/退出自动关闭）');
   ok(/async function npcfixScan\(\)/.test(src) && /npcfixScanning = true/.test(src),
     'npcfixScan() 会给重扫打标记');
   console.log('  NPCFIX_KILL_CHUNK =', ev('NPCFIX_KILL_CHUNK'), '（后端按帧摊开，批次可以更大）');

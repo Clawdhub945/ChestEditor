@@ -18,6 +18,15 @@ internal static class EntityHandlers
 
     internal static void Register()
     {
+        // 游戏/存档状态：网页端据此判断"现在能不能开安全发展模式"
+        Router.Add("GET", "/api/editor/state", _ => MainThread.Run(() => JsonBuilder.Object(w =>
+        {
+            w.WriteBoolean("inSave", GameChainLocator.IsWorldReady());   // 能定位到 AreaMap 才算进了世界
+            w.WriteBoolean("loading", Core.AppState.Loading);             // 正在读档
+            w.WriteNumber("saveLoads", Core.AppState.SaveLoads);          // 读档成功次数（变了 = 读过档）
+            w.WriteBoolean("scanning", EntityScan.IsScanning);            // 正在全量扫描
+        }), 10000));
+
         // 全量扫描：分片推进（每帧一批），扫完再在主线程上应用待写入的修改。
         // ⚠⚠ 开扫那一步（BeginScan → Resources.FindObjectsOfTypeAll）**必须跑在主线程**上：
         // 之前直接写在请求处理体里（HTTP 线程池线程）→ AccessViolationException → 游戏闪退。
@@ -90,7 +99,16 @@ internal static class EntityHandlers
             }, 120000);
             Plugin.LogInfo($"[EntityDestroyer] 批量销毁: {ok} 成功 / {fail} 失败 / 共 {hashes.Count} 个, "
                 + $"分 {frames} 帧, 墙钟 {swTotal.ElapsedMilliseconds}ms（其中主线程占用已按帧摊开）");
-            return JsonBuilder.Object(w => { w.WriteBoolean("ok", true); w.WriteNumber("destroyed", ok); w.WriteNumber("failed", fail); });
+            // 顺带把游戏状态带回给网页端：安全发展模式靠它发现"读档了/退出存档了"并自动关闭
+            return JsonBuilder.Object(w =>
+            {
+                w.WriteBoolean("ok", true);
+                w.WriteNumber("destroyed", ok);
+                w.WriteNumber("failed", fail);
+                w.WriteBoolean("inSave", GameChainLocator.IsWorldReady());
+                w.WriteBoolean("loading", Core.AppState.Loading);
+                w.WriteNumber("saveLoads", Core.AppState.SaveLoads);
+            });
         });
 
         // 战斗力批量缩放（×10 / ÷10；一次主线程任务循环执行，界面上的「战斗力×10 / ÷10」用）

@@ -53,11 +53,17 @@ public static class SaveLoadPatches
         {
             try
             {
-                harmony.Patch(method, postfix: new HarmonyMethod(typeof(SaveLoadPatches), nameof(OnDoLoadPostfix)));
+                // prefix 标记"正在读档"，postfix 记"读档成功次数"（网页端据此自动关闭安全发展模式）
+                harmony.Patch(method,
+                    prefix: new HarmonyMethod(typeof(SaveLoadPatches), nameof(OnDoLoadPrefix)),
+                    postfix: new HarmonyMethod(typeof(SaveLoadPatches), nameof(OnDoLoadPostfix)));
             }
             catch (Exception ex) { Plugin.LogError($"钩住 DoLoad 失败: {ex.Message}"); }
         }
     }
+
+    /// <summary>DoLoad 开始：标记正在读档（读档期间网页端的长任务应当停手）。</summary>
+    public static void OnDoLoadPrefix() => Core.AppState.OnSaveLoadBegin();
 
     /// <summary>
     /// 钩住 NpcStateWalk.StartPathFinding 以获取 area_map.my_territory
@@ -121,6 +127,7 @@ public static class SaveLoadPatches
 
     public static void OnDoLoadPostfix(string __0, bool __result)
     {
+        Core.AppState.OnSaveLoadEnd(__result);
         if (__result)
         {
             Plugin.LogInfo($"存档加载成功: {__0}");

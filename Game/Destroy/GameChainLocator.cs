@@ -20,6 +20,17 @@ internal static class GameChainLocator
     // ===== 公共链路 =====
 
     /// <summary>
+    /// 是否已进入游戏世界（能沿 Game → MainScene → AreaMap 定位到对象才算）。
+    /// <para>主菜单 / 读档过程中取不到 → false。网页端的"现在能不能操作"以它为准。</para>
+    /// <para>⚠ 只能在主线程调用（会 Invoke IL2CPP 静态方法）。</para>
+    /// </summary>
+    internal static bool IsWorldReady()
+    {
+        try { return GetAreaMap() != IntPtr.Zero; }
+        catch { return false; }
+    }
+
+    /// <summary>
     /// Game.get_main_scene()，含候选方法名回退。失败返回 <see cref="IntPtr.Zero"/>。
     /// </summary>
     internal static IntPtr GetMainScene()
