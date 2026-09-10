@@ -44,14 +44,23 @@ function npcfixGrid(list, groupKey) {
   return h;
 }
 
+// 一键展开 / 一键收起：作用于盒子1 里所有二级分组卡片（士兵·兵种 / 市民·职业 /
+// 贵族·身份），不含一级盒子和 NPC 卡片内的「所有字段」折叠。
+function npcfixToggleGroups(open) {
+  const root = document.getElementById('npcfixBox1Body');
+  if (!root) return;
+  const groups = root.querySelectorAll('.npcfix-group');
+  for (const g of groups) g.open = !!open;
+}
+
 // 分组卡片：彩色左条标题栏 + 内部 NPC 网格。
 // 取代原来的二级 <details> 折叠 —— 一级盒子展开后直接铺出若干张分组卡片，
 // 少点一次（士兵→兵种 / 市民→职业 / 贵族→身份）。
-// 卡片本身是 <details open>：默认就是铺开的（保持"少点一次"），
-// 点标题栏可把这一组整体收起/再展开，人多的盒子能自己腾地方。
+// 卡片本身是 <details>：**默认收起**，点标题栏单独展开/收起；
+// 想一次全摊开用顶栏的「全部展开 / 全部收起」。
 function npcfixGroupCard(label, color, icon, list, groupKey) {
   if (!list || list.length === 0) return '';
-  let h = '<details class="npcfix-group" style="--gc:' + color + '" open>';
+  let h = '<details class="npcfix-group" style="--gc:' + color + '">';
   h += '<summary class="npcfix-group-head">';
   h += '<span class="npcfix-chev">&#x25B6;</span>';
   h += '<span>' + icon + '</span><span>' + esc(label) + '</span>';
@@ -79,7 +88,9 @@ async function renderNpcfixBox1(forceScan) {
   html += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-shrink:0">';
   html += '<h2 style="color:var(--accent-light);margin:0;font-size:18px">&#x1F9F0; 小人数值修改</h2>';
   html += '<span style="color:var(--text-muted);font-size:13px">我方NPC · 字段按职业定制</span>';
-  html += '<button onclick="renderNpcfixBox1(true)" style="padding:6px 16px;background:var(--accent);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;font-size:13px;margin-left:auto">重新扫描</button>';
+  html += '<button onclick="npcfixToggleGroups(true)" style="padding:6px 14px;background:var(--bg-input);color:var(--text-secondary);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-size:13px;margin-left:auto">全部展开</button>';
+  html += '<button onclick="npcfixToggleGroups(false)" style="padding:6px 14px;background:var(--bg-input);color:var(--text-secondary);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-size:13px">全部收起</button>';
+  html += '<button onclick="renderNpcfixBox1(true)" style="padding:6px 16px;background:var(--accent);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;font-size:13px">重新扫描</button>';
   html += '</div>';
   html += '<div id="npcfixBox1Body" style="flex:1;overflow-y:auto;min-height:0;color:var(--text-muted)">' + (needScan ? '扫描中...' : '') + '</div>';
   html += '</div>';
