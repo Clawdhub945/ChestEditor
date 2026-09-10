@@ -54,6 +54,18 @@ internal static class AnimalService
     internal static bool DestroyOne(EntityScan.EditorEntity e)
     {
         Plugin.LogInfo($"[AnimalService] DestroyOne: {e.ClassName} ptrHash={e.PtrHash} ptr={e.Ptr.ToInt64():X} guid={e.Guid}");
+        // ⚠ 防护：GameObject 未激活的对象（召唤在未加载区块的"幽灵动物"/池化尸体）
+        // DestroySelf 会访问未创建的渲染组件 → native 崩溃。一律跳过并在日志标记。
+        if (e.GoRef != null)
+        {
+            try
+            {
+                bool active = e.GoRef.activeInHierarchy;
+                Plugin.LogInfo($"[AnimalService]   go.active={active}");
+                if (!active) { Plugin.LogInfo("[AnimalService]   GO 未激活（幽灵/池化），跳过不删"); return false; }
+            }
+            catch (Exception ex) { Plugin.LogInfo($"[AnimalService]   activeInHierarchy 检查异常: {ex.Message}，继续"); }
+        }
         if (e.ClassName == "AnimalDeadBody")
         {
             if (e.Guid <= 0) { Plugin.LogInfo("[AnimalService]   guid<=0，跳过"); return false; }
@@ -100,31 +112,40 @@ internal static class AnimalService
         IntPtr areaMap = GameChainLocator.GetAreaMap();
         if (areaMap == IntPtr.Zero)
             throw new InvalidOperationException("未进入存档，找不到 AreaMap");
-        // ⚠ GetRandomLandPoint(Point center, int range) 是 2 参（0 参版本不存在，上一版按 0 参找失败）；
-        // 用 GetRandomLandPointNotAtMapBorder()（0 参，全图随机陆地 + TerrainHelper 导航调整）。
         IntPtr getLandPoint = FindMethodInHierarchy(GetClass(areaMap), "GetRandomLandPointNotAtMapBorder", 0);
         if (getLandPoint == IntPtr.Zero)
             throw new InvalidOperationException("找不到 AreaMap.GetRandomLandPointNotAtMapBorder()");
 
-        // 每只独立随机陆地格（比 count 只叠在同一点自然）。
-        // 随机取点失败时兜底：借用任意在场实体的 cur_point 字段引用（Point 对象，引用类型字段存指针）。
+        // ⚠ 位置策略：GetRandomLandPointNotAtMapBorder 是全图随机 —— 可能落在几屏幕之外、
+        // 区块未加载 → 动物逻辑存在但看不见（用户实测"幽灵生物"），且对它调 DestroySelf
+        // 会因渲染组件未创建而 native 崩溃。
+        // 改为：优先召唤到【牧场】/任意在场设施/动物的 cur_point（玩家视野内）；全无则退回全图随机。
+        IntPtr pos = IntPtr.Zero;
+        foreach (var e in EntityScan.Snapshot())
+        {
+            string? cn = e.ClassName;
+            bool okSrc = cn == "FacilityPasture" || (cn != null && cn.IndexOf("Facility", StringComparison.Ordinal) == 0)
+                || cn == "Animal" || cn == "Npc";
+            if (!okSrc) continue;
+            if (e.FieldMeta.TryGetValue("cur_point", out var pf) && pf.IsPointer)
+            {
+                IntPtr p = ReadIl2CppPointer(e.Ptr, pf.Offset);
+                if (p != IntPtr.Zero) { pos = p; break; }
+            }
+        }
+        if (pos == IntPtr.Zero)
+        {
+            for (int i = 0; i < count; i++)
+            {
+                IntPtr p = Invoke(getLandPoint, areaMap);
+                if (p != IntPtr.Zero) { pos = p; break; }
+            }
+        }
+        if (pos == IntPtr.Zero)
+            throw new InvalidOperationException("取不到召唤位置（地图上没有任何带坐标的实体）");
+
         for (int i = 0; i < count; i++)
         {
-            // runtime_invoke 对引用类型返回值直接给对象指针（Point 是引用类型）
-            IntPtr pos = Invoke(getLandPoint, areaMap);
-            if (pos == IntPtr.Zero)
-            {
-                foreach (var e in EntityScan.Snapshot())
-                {
-                    if (e.FieldMeta.TryGetValue("cur_point", out var pf) && pf.IsPointer)
-                    {
-                        IntPtr p = ReadIl2CppPointer(e.Ptr, pf.Offset);
-                        if (p != IntPtr.Zero) { pos = p; break; }
-                    }
-                }
-            }
-            if (pos == IntPtr.Zero)
-                throw new InvalidOperationException("取不到召唤位置（随机陆地失败且地图上没有任何带坐标的实体）");
             Invoke(createAnimal, helper, pos, stuffId, 1);
         }
     }
