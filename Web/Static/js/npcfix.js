@@ -84,30 +84,52 @@ async function renderNpcfixBox1() {
 
   // ===== 我方 =====
   html2 += '<div style="font-size:13px;font-weight:600;color:var(--success-dark,#27ae60);margin:4px 0 6px">我方 (阵营1) · ' + ours.length + ' 个</div>';
-  // 士兵按职业细分
+
+  // 士兵：整组套一个盒子（绿色主题），展开后再按兵种细分（二级菜单）
   const profEntries = Object.entries(professions).sort((a, b) => b[1].length - a[1].length);
-  for (const [prof, list] of profEntries) {
-    let cards = '<div style="padding:4px 0">';
-    for (const npc of list)
-      cards += '<div style="margin-bottom:6px">' + renderNpcCard(npc, {groupKey: 'soldiers'}) + '</div>';
-    cards += '</div>';
-    html2 += htmlDetailsGroup('士兵·' + prof + ' (' + list.length + ')', '#e74c3c', '&#x2694;', list.length + ' 个', cards);
+  if (profEntries.length > 0) {
+    let inner = '<div style="padding:2px 0 2px 10px">';
+    for (const [prof, list] of profEntries) {
+      let cards = '<div style="padding:4px 0">';
+      for (const npc of list)
+        cards += '<div style="margin-bottom:6px">' + renderNpcCard(npc, {groupKey: 'soldiers'}) + '</div>';
+      cards += '</div>';
+      inner += htmlDetailsGroup('士兵·' + prof + ' (' + list.length + ')', 'var(--success-dark, #27ae60)', '&#x2694;', list.length + ' 个', cards);
+    }
+    inner += '</div>';
+    html2 += htmlDetailsGroup('士兵 (' + oursByType.soldiers.length + ')', 'var(--success-dark, #27ae60)', '&#x2694;', oursByType.soldiers.length + ' 个', inner);
   }
-  // 非士兵职业组
-  const nonSoldierGroups = [
+
+  // 市民：工作者 / 杂工 / 儿童 归入同一个盒子（二级菜单）
+  const citizenGroups = [
     { key: 'workers', label: '工作者', icon: '&#x1F527;', color: '#f39c12' },
     { key: 'laborers', label: '杂工', icon: '&#x1F6E0;', color: '#95a5a6' },
     { key: 'children', label: '儿童', icon: '&#x1F476;', color: '#e91e63' },
-    { key: 'others', label: '其他', icon: '&#x2753;', color: '#34495e' },
   ];
-  for (const g of nonSoldierGroups) {
+  let citizenInner = '<div style="padding:2px 0 2px 10px">';
+  let citizenCount = 0;
+  for (const g of citizenGroups) {
     const list = oursByType[g.key];
     if (!list || list.length === 0) continue;
+    citizenCount += list.length;
     let cards = '<div style="padding:4px 0">';
     for (const npc of list)
       cards += '<div style="margin-bottom:6px">' + renderNpcCard(npc, {groupKey: g.key}) + '</div>';
     cards += '</div>';
-    html2 += htmlDetailsGroup(g.label + ' (' + list.length + ')', g.color, g.icon, list.length + ' 个', cards);
+    citizenInner += htmlDetailsGroup(g.label + ' (' + list.length + ')', g.color, g.icon, list.length + ' 个', cards);
+  }
+  citizenInner += '</div>';
+  if (citizenCount > 0)
+    html2 += htmlDetailsGroup('市民 (' + citizenCount + ')', '#3498db', '&#x1F3E0;', citizenCount + ' 个', citizenInner);
+
+  // 其他（未归类的我方 NPC，保持独立盒子）
+  const othersList = oursByType.others;
+  if (othersList && othersList.length > 0) {
+    let cards = '<div style="padding:4px 0">';
+    for (const npc of othersList)
+      cards += '<div style="margin-bottom:6px">' + renderNpcCard(npc, {groupKey: 'others'}) + '</div>';
+    cards += '</div>';
+    html2 += htmlDetailsGroup('其他 (' + othersList.length + ')', '#34495e', '&#x2753;', othersList.length + ' 个', cards);
   }
 
   // ===== 敌方士兵（按阵营） =====
