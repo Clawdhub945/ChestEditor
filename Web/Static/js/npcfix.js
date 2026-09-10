@@ -369,21 +369,34 @@ function npcfixUnitKingdom(e) {
   return e.kingdomId || e.hometownKingdomId || e.territoryKingdomId || 0;
 }
 
-// NPC/Soldier/BattleUnit 组件（Monster / Ship 另有分类，不在此列）
+// 真·人形单位：类名白名单 + 表现层/UI 黑名单。
+// ⚠ 绝不能用 /Npc|Soldier|BattleUnit/ 这种"包含"匹配 —— 实体扫描会把 NPC 的**躯体模型**
+// （NpcBody，goName 就是 body / npc_body）、UI 预制件（NpcListView / NpcListItem /
+// NpcAttrItem / NpcBodyUI…）、子弹（BulletSoldier）、尸体（NpcDeadBody）一并扫出来。
+// 它们是表现层/界面物件，自身不持有 kingdom_id，三个阵营字段全为 0，于是一股脑落进
+// 「阵营0」。实机 11208 条实体里「阵营0」2548 条，其中 2240 条是 NpcBody —— 全是垃圾。
+const NPCFIX_UNIT_RE = /^(Npc|Monster|Soldier|BattleUnit)/;
+const NPCFIX_NOT_UNIT_RE = /(Body|Footprint|View|UI|Item|Dialog|Panel|Bar|Group|Text|Button|Bullet|Faeces|Orderly|AdjustLimit|Recruit|Attr|Nature|Helper|Task|Finder|Limit)/;
+
+// 人形单位（NPC / Soldier / BattleUnit；Monster 与 Ship 另有分支，不经过这里）
 function npcfixIsHumanUnit(cn) {
-  return /Npc|Soldier|BattleUnit/.test(cn) && !/NpcHelper|NpcTask|NpcFinder/.test(cn);
+  return NPCFIX_UNIT_RE.test(cn) && !NPCFIX_NOT_UNIT_RE.test(cn);
 }
 
-// 我方「战斗」单位：得有兵种才算，平民（工作者/儿童…）留在盒子1，不重复出现在战斗面板
+// 我方「战斗」单位：只有带兵种（soldier_type_id > 0）才算。
+// ⚠ 不能写成 `|| !!e.soldierTypeName`：后端对 id=0 输出的是「市民」（非空字符串，
+// 见 DataTables.SoldierTypeName），那样判据恒真 —— 实机「我方战斗单位」1143 条里
+// 只有 206 条真有兵种，其余是 875 个平民 NPC + 62 具尸体。
 function npcfixIsCombatUnit(e) {
-  return (e.soldierTypeId || 0) > 0 || !!e.soldierTypeName;
+  return (e.soldierTypeId || 0) > 0;
 }
 
 // 分类（纯函数，便于单测）：
-//   我方战斗单位 / 敌方-小人(按阵营) / 敌方-怪物(按阵营) / 船(我方 & 敌方，排除商船)
+//   我方战斗单位 / 我方-怪物 / 敌方-小人(按阵营) / 敌方-怪物(按阵营) /
+//   船(我方 & 敌方，排除商船)
 function npcfixCombatClassify(list) {
   const ours = [];
-  const humanoids = {}, monsters = {};
+  const humanoids = {}, monstersEnemy = {}, monstersOurs = [];
   const shipsOurs = [], shipsEnemy = {};
   for (const e of list) {
     const cn = e.className || '';
@@ -396,14 +409,18 @@ function npcfixCombatClassify(list) {
       continue;
     }
     if (cn.indexOf('Monster') === 0) {
-      (monsters[kid] = monsters[kid] || []).push(e);
+      // 怪物也分敌我：阵营1 的是我方地界刷出来的（蚁巢工蚁、龙…），
+      // 不能混进「敌方-怪物」，否则组头会显示成「敌方-怪物 → 我方」，语义反了。
+      if (kid === 1) monstersOurs.push(e);
+      else (monstersEnemy[kid] = monstersEnemy[kid] || []).push(e);
       continue;
     }
     if (!npcfixIsHumanUnit(cn)) continue;
     if (kid === 1) { if (npcfixIsCombatUnit(e)) ours.push(e); }
     else (humanoids[kid] = humanoids[kid] || []).push(e);
   }
-  return { ours: ours, humanoids: humanoids, monsters: monsters, shipsOurs: shipsOurs, shipsEnemy: shipsEnemy };
+  return { ours: ours, humanoids: humanoids, monstersOurs: monstersOurs,
+           monstersEnemy: monstersEnemy, shipsOurs: shipsOurs, shipsEnemy: shipsEnemy };
 }
 
 function npcfixSumKinds(o) {
@@ -502,7 +519,7 @@ async function renderNpcfixBox2(forceScan) {
   html += '<div style="padding:20px;height:100%;box-sizing:border-box;display:flex;flex-direction:column;overflow:hidden">';
   html += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-shrink:0">';
   html += '<h2 style="color:var(--accent-light);margin:0;font-size:18px">&#x2694; 战斗单位</h2>';
-  html += '<span style="color:var(--text-muted);font-size:13px">我方战斗单位 · 敌方小人/怪物 · 舰船（区分敌我，商船不计）</span>';
+  html += '<span style="color:var(--text-muted);font-size:13px">我方战斗单位/怪物 · 敌方小人/怪物 · 舰船（区分敌我，商船不计）</span>';
   html += '<button onclick="renderNpcfixBox2(true)" style="padding:6px 16px;background:var(--accent);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;font-size:13px;margin-left:auto">重新扫描</button>';
   html += '</div>';
   html += '<div id="npcfixBox2Body" style="flex:1;overflow-y:auto;min-height:0;color:var(--text-muted)">' + (needScan ? '扫描中...' : '') + '</div>';
@@ -549,11 +566,27 @@ async function renderNpcfixBox2(forceScan) {
       null, npcfixBoxBtns());
   }
 
+  // ===== 我方-怪物（阵营1 地界刷出的怪物：蚁巢工蚁 / 龙…，按种类二级分组） =====
+  if (c.monstersOurs.length > 0) {
+    const kinds = {};
+    for (const e of c.monstersOurs) {
+      const k = e.className || '未知怪物';
+      (kinds[k] = kinds[k] || []).push(e);
+    }
+    const entries = Object.keys(kinds).sort((a, b) => kinds[b].length - kinds[a].length);
+    let inner = '<div class="npcfix-box-body">';
+    for (const name of entries)
+      inner += npcfixEntityGroupCard(name, 'var(--warning, #e67e22)', '&#x1F47E;', kinds[name], {}, npcfixKillBtn(1));
+    inner += '</div>';
+    h += htmlDetailsGroup('我方-怪物 (' + c.monstersOurs.length + ')', 'var(--warning, #e67e22)', '&#x1F47E;',
+      c.monstersOurs.length + ' 个', inner, null, npcfixBoxBtns());
+  }
+
   // ===== 敌方-怪物（按阵营，每组带一键清除） =====
-  if (Object.keys(c.monsters).length > 0) {
-    const n = npcfixSumKinds(c.monsters);
+  if (Object.keys(c.monstersEnemy).length > 0) {
+    const n = npcfixSumKinds(c.monstersEnemy);
     h += htmlDetailsGroup('敌方-怪物 (' + n + ')', 'var(--danger, #e74c3c)', '&#x1F47E;', n + ' 个',
-      '<div class="npcfix-box-body">' + npcfixKingdomGroups(c.monsters, 'var(--danger, #e74c3c)', '&#x1F47E;', npcfixKillBtn) + '</div>',
+      '<div class="npcfix-box-body">' + npcfixKingdomGroups(c.monstersEnemy, 'var(--danger, #e74c3c)', '&#x1F47E;', npcfixKillBtn) + '</div>',
       null, npcfixBoxBtns());
   }
 
