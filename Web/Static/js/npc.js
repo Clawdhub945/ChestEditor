@@ -97,11 +97,13 @@ function renderNpcPanel() {
 }
 
 // 折叠分组（details + 徽章 + 计数）——NPC 阵营/职业与实体编辑器共用
-function htmlDetailsGroup(label, color, icon, countHtml, contentHtml, extraStyle) {
+// trailingHtml：追加在计数右侧的 summary 内容（如一级盒子的「展开/收起」按钮）
+function htmlDetailsGroup(label, color, icon, countHtml, contentHtml, extraStyle, trailingHtml) {
   let h = '<details style="margin-bottom:8px">';
   h += '<summary style="cursor:pointer;padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-weight:600;font-size:13px;display:flex;align-items:center;gap:8px' + (extraStyle ? ';' + extraStyle : '') + '">';
   h += '<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:' + color + ';color:#fff">' + icon + ' ' + label + '</span>';
   h += '<span style="margin-left:auto;font-size:12px;color:var(--text-muted);font-weight:400">' + countHtml + '</span>';
+  h += (trailingHtml || '');
   h += '</summary>';
   h += contentHtml;
   h += '</details>';
@@ -147,7 +149,7 @@ function renderNpcCard(npc, opts) {
     : ('所有字段 (' + (npc.fieldCount || 0) + ')');
   let h = '';
 
-  h += '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius)">';
+  h += '<div class="npc-card" style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius)">';
 
   // 头部：名称 + NPC类型 + 兵种
   h += '<div style="display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid var(--border)">';
@@ -167,7 +169,9 @@ function renderNpcCard(npc, opts) {
   // 字段折叠（懒加载）
   h += '<details style="border-top:1px solid var(--border)" ontoggle="' + toggleCall + '">';
   h += '<summary style="cursor:pointer;padding:6px 14px;font-size:12px;color:var(--text-muted);user-select:none">' + summaryText + '</summary>';
-  h += '<div id="' + bodyId + '" style="padding:6px 14px 10px;color:var(--text-muted);font-size:12px">展开加载...</div>';
+  // overflow-x:auto 是兜底：字段表最小宽度约 330px，万一可用宽度仍不足，
+  // 让表格在卡片内横向滚动，而不是捅出卡片边框
+  h += '<div id="' + bodyId + '" style="padding:6px 14px 10px;color:var(--text-muted);font-size:12px;overflow-x:auto">展开加载...</div>';
   h += '</details>';
 
   h += '</div>';

@@ -1003,6 +1003,10 @@ input[type='number']::-webkit-inner-spin-button {
 }
 .npcfix-group[open] .npcfix-group-head .npcfix-chev { transform: rotate(90deg); }
 
+/* 展开字段的卡片占满整行：字段表（字段/翻译/数值/操作）最小宽度约 330px，
+   留在 260px 的网格格里一定横向溢出。class 由 loadNpcfixCard 在 ontoggle 里切换。 */
+.npcfix-grid > .npc-card-open { grid-column: 1 / -1; }
+
 /* NPC 卡片网格：260px 起自适应列数，窄窗口自动降为 1 列 */
 .npcfix-grid {
   display: grid;

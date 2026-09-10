@@ -44,20 +44,31 @@ function npcfixGrid(list, groupKey) {
   return h;
 }
 
-// 一键展开 / 一键收起：作用于盒子1 里所有二级分组卡片（士兵·兵种 / 市民·职业 /
-// 贵族·身份），不含一级盒子和 NPC 卡片内的「所有字段」折叠。
-function npcfixToggleGroups(open) {
-  const root = document.getElementById('npcfixBox1Body');
-  if (!root) return;
-  const groups = root.querySelectorAll('.npcfix-group');
-  for (const g of groups) g.open = !!open;
+// 一级盒子标题栏右侧的「展开 / 收起」按钮：作用于**本盒子内**的二级分组卡片。
+// ⚠ 按钮长在 <summary> 里：不阻止冒泡的话，点一下会连带把一级盒子收起/展开。
+function npcfixBoxBtns() {
+  const s = 'padding:2px 10px;background:var(--bg-input);color:var(--text-secondary)'
+    + ';border:1px solid var(--border);border-radius:4px;cursor:pointer;font-size:11px;font-weight:400';
+  const guard = 'event.preventDefault();event.stopPropagation();';
+  return '<span style="display:flex;gap:4px;margin-left:8px">'
+    + '<button onclick="' + guard + 'npcfixBoxExpandAll(this,true)" style="' + s + '">展开</button>'
+    + '<button onclick="' + guard + 'npcfixBoxExpandAll(this,false)" style="' + s + '">收起</button>'
+    + '</span>';
+}
+
+// el = 被点的按钮；就近取到所属的一级 <details>，只切换它内部的 .npcfix-group。
+// 选择器严格限定 .npcfix-group：一级盒子与 NPC 卡片本身也是 details，不能用 'details'。
+function npcfixBoxExpandAll(el, open) {
+  const box = el && el.closest ? el.closest('details') : null;
+  if (!box) return;
+  for (const g of box.querySelectorAll('.npcfix-group')) g.open = !!open;
 }
 
 // 分组卡片：彩色左条标题栏 + 内部 NPC 网格。
 // 取代原来的二级 <details> 折叠 —— 一级盒子展开后直接铺出若干张分组卡片，
 // 少点一次（士兵→兵种 / 市民→职业 / 贵族→身份）。
 // 卡片本身是 <details>：**默认收起**，点标题栏单独展开/收起；
-// 想一次全摊开用顶栏的「全部展开 / 全部收起」。
+// 想一次全摊开用所属一级盒子标题栏上的「展开 / 收起」。
 function npcfixGroupCard(label, color, icon, list, groupKey) {
   if (!list || list.length === 0) return '';
   let h = '<details class="npcfix-group" style="--gc:' + color + '">';
@@ -88,9 +99,7 @@ async function renderNpcfixBox1(forceScan) {
   html += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-shrink:0">';
   html += '<h2 style="color:var(--accent-light);margin:0;font-size:18px">&#x1F9F0; 小人数值修改</h2>';
   html += '<span style="color:var(--text-muted);font-size:13px">我方NPC · 字段按职业定制</span>';
-  html += '<button onclick="npcfixToggleGroups(true)" style="padding:6px 14px;background:var(--bg-input);color:var(--text-secondary);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-size:13px;margin-left:auto">全部展开</button>';
-  html += '<button onclick="npcfixToggleGroups(false)" style="padding:6px 14px;background:var(--bg-input);color:var(--text-secondary);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-size:13px">全部收起</button>';
-  html += '<button onclick="renderNpcfixBox1(true)" style="padding:6px 16px;background:var(--accent);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;font-size:13px">重新扫描</button>';
+  html += '<button onclick="renderNpcfixBox1(true)" style="padding:6px 16px;background:var(--accent);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;font-size:13px;margin-left:auto">重新扫描</button>';
   html += '</div>';
   html += '<div id="npcfixBox1Body" style="flex:1;overflow-y:auto;min-height:0;color:var(--text-muted)">' + (needScan ? '扫描中...' : '') + '</div>';
   html += '</div>';
@@ -156,7 +165,7 @@ async function renderNpcfixBox1(forceScan) {
     for (const [prof, list] of profEntries)
       inner += npcfixGroupCard('士兵 · ' + prof, 'var(--success-dark, #27ae60)', '&#x2694;', list, 'soldiers');
     inner += '</div>';
-    html2 += htmlDetailsGroup('士兵 (' + oursByType.soldiers.length + ')', 'var(--success-dark, #27ae60)', '&#x2694;', oursByType.soldiers.length + ' 个', inner);
+    html2 += htmlDetailsGroup('士兵 (' + oursByType.soldiers.length + ')', 'var(--success-dark, #27ae60)', '&#x2694;', oursByType.soldiers.length + ' 个', inner, null, npcfixBoxBtns());
   }
 
   // 市民：工作者 / 杂工 / 儿童 归入同一个盒子（二级菜单）
@@ -177,7 +186,7 @@ async function renderNpcfixBox1(forceScan) {
   }
   citizenInner += '</div>';
   if (citizenCount > 0)
-    html2 += htmlDetailsGroup('市民 (' + citizenCount + ')', '#3498db', '&#x1F3E0;', citizenCount + ' 个', citizenInner);
+    html2 += htmlDetailsGroup('市民 (' + citizenCount + ')', '#3498db', '&#x1F3E0;', citizenCount + ' 个', citizenInner, null, npcfixBoxBtns());
 
   // 俘虏
   html2 += npcfixSimpleGroup('俘虏', '#7f8c8d', '&#x1F512;', oursByType.prisoners, 'prisoners');
@@ -198,7 +207,7 @@ async function renderNpcfixBox1(forceScan) {
   }
   nobleInner += '</div>';
   if (nobleCount > 0)
-    html2 += htmlDetailsGroup('贵族 (' + nobleCount + ')', '#f1c40f', '&#x1F451;', nobleCount + ' 个', nobleInner);
+    html2 += htmlDetailsGroup('贵族 (' + nobleCount + ')', '#f1c40f', '&#x1F451;', nobleCount + ' 个', nobleInner, null, npcfixBoxBtns());
 
   // 外来者：旅客 / 商人 / 外乡人 等（npcType -15 ~ -5）
   html2 += npcfixSimpleGroup('外来者', '#9b59b6', '&#x1F464;', oursByType.outsiders, 'outsiders');
@@ -233,6 +242,11 @@ async function renderNpcfixBox1(forceScan) {
 
 // 卡片字段加载：一次请求，渲染 职业快速字段 + 全字段表格
 async function loadNpcfixCard(details, ptrHash, groupKey) {
+  // 展开字段时让这张卡片占满整行（CSS .npc-card-open）：
+  // 字段表最小宽度约 330px，留在 260px 的网格格里会横向溢出卡片。
+  // 收起时同步摘掉 class —— 必须在下面的提前 return 之前处理。
+  const card = details.closest ? details.closest('.npc-card') : null;
+  if (card) card.classList.toggle('npc-card-open', details.open);
   if (!details.open) return;
   const body = document.getElementById('npcfix-body-' + ptrHash);
   if (!body || body.dataset.loaded) return;
