@@ -951,4 +951,52 @@ input[type='number']::-webkit-inner-spin-button {
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border-light); border-radius: 3px; }
+
+/* ===== NPC修改 → 盒子1：一级盒子展开后的「分组卡片 + NPC 网格」 ===== */
+/* 盒内内容区比 summary 深一档，给"盒子里的东西"一个明确边界（原来是一堆悬浮的折叠条） */
+.npcfix-box-body {
+  padding: 8px;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border);
+}
+
+/* 分组卡片：士兵→兵种 / 市民→职业 / 贵族→身份（取代原来的二级 <details> 折叠） */
+.npcfix-group {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+.npcfix-group:last-child { margin-bottom: 0; }
+
+.npcfix-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  background: var(--bg-input);
+  border-left: 3px solid var(--gc, var(--accent));  /* 分组主题色：靠左色条体现 */
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.npcfix-group-head .npcfix-count {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+/* NPC 卡片网格：300px 起自适应列数，窄窗口自动降为 1 列 */
+.npcfix-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 8px;
+  padding: 8px;
+  background: var(--bg-secondary);
+  align-items: start;
+  /* 行高按内容定：Chrome 对嵌套 flex 卡片的 auto 行高会算偏低，
+     导致下一行卡片盖住上一行（与 .items 网格同一个坑） */
+  grid-auto-rows: max-content;
+}
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }

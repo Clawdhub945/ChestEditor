@@ -36,14 +36,33 @@ function selectNpcfixView(view) {
 
 // ===== 盒子1 小人数值修改 =====
 
-// 我方单类别盒子：类内直接铺卡片（俘虏 / 外来者 / 其他 复用；空则不输出）
+// NPC 卡片网格（自适应列数；窄窗口自动降为 1 列，不会挤坏卡片）
+function npcfixGrid(list, groupKey) {
+  let h = '<div class="npcfix-grid">';
+  for (const npc of list) h += renderNpcCard(npc, {groupKey: groupKey});
+  h += '</div>';
+  return h;
+}
+
+// 分组卡片：彩色左条标题栏 + 内部 NPC 网格。
+// 取代原来的二级 <details> 折叠 —— 一级盒子展开后直接铺出若干张分组卡片，
+// 少点一次（士兵→兵种 / 市民→职业 / 贵族→身份）。
+function npcfixGroupCard(label, color, icon, list, groupKey) {
+  if (!list || list.length === 0) return '';
+  let h = '<div class="npcfix-group" style="--gc:' + color + '">';
+  h += '<div class="npcfix-group-head"><span>' + icon + '</span><span>' + esc(label) + '</span>';
+  h += '<span class="npcfix-count">' + list.length + ' 个</span></div>';
+  h += npcfixGrid(list, groupKey);
+  h += '</div>';
+  return h;
+}
+
+// 我方单类别盒子（俘虏 / 外来者 / 其他）：展开后直接铺卡片网格；
+// 只有一类，不再套一层分组卡片。
 function npcfixSimpleGroup(label, color, icon, list, groupKey) {
   if (!list || list.length === 0) return '';
-  let cards = '<div style="padding:4px 0">';
-  for (const npc of list)
-    cards += '<div style="margin-bottom:6px">' + renderNpcCard(npc, {groupKey: groupKey}) + '</div>';
-  cards += '</div>';
-  return htmlDetailsGroup(label + ' (' + list.length + ')', color, icon, list.length + ' 个', cards);
+  return htmlDetailsGroup(label + ' (' + list.length + ')', color, icon, list.length + ' 个',
+    '<div class="npcfix-box-body">' + npcfixGrid(list, groupKey) + '</div>');
 }
 
 async function renderNpcfixBox1(forceScan) {
@@ -117,14 +136,9 @@ async function renderNpcfixBox1(forceScan) {
   // 士兵：整组套一个盒子（绿色主题），展开后再按兵种细分（二级菜单）
   const profEntries = Object.entries(professions).sort((a, b) => b[1].length - a[1].length);
   if (profEntries.length > 0) {
-    let inner = '<div style="padding:2px 0 2px 10px">';
-    for (const [prof, list] of profEntries) {
-      let cards = '<div style="padding:4px 0">';
-      for (const npc of list)
-        cards += '<div style="margin-bottom:6px">' + renderNpcCard(npc, {groupKey: 'soldiers'}) + '</div>';
-      cards += '</div>';
-      inner += htmlDetailsGroup('士兵·' + prof + ' (' + list.length + ')', 'var(--success-dark, #27ae60)', '&#x2694;', list.length + ' 个', cards);
-    }
+    let inner = '<div class="npcfix-box-body">';
+    for (const [prof, list] of profEntries)
+      inner += npcfixGroupCard('士兵 · ' + prof, 'var(--success-dark, #27ae60)', '&#x2694;', list, 'soldiers');
     inner += '</div>';
     html2 += htmlDetailsGroup('士兵 (' + oursByType.soldiers.length + ')', 'var(--success-dark, #27ae60)', '&#x2694;', oursByType.soldiers.length + ' 个', inner);
   }
@@ -137,17 +151,13 @@ async function renderNpcfixBox1(forceScan) {
     { key: 'laborers', label: '杂工', icon: '&#x1F6E0;', color: '#95a5a6', list: (oursByType.laborers || []).concat(oursByType.misc || []) },
     { key: 'children', label: '儿童', icon: '&#x1F476;', color: '#e91e63', list: oursByType.children },
   ];
-  let citizenInner = '<div style="padding:2px 0 2px 10px">';
+  let citizenInner = '<div class="npcfix-box-body">';
   let citizenCount = 0;
   for (const g of citizenGroups) {
     const list = g.list;
     if (!list || list.length === 0) continue;
     citizenCount += list.length;
-    let cards = '<div style="padding:4px 0">';
-    for (const npc of list)
-      cards += '<div style="margin-bottom:6px">' + renderNpcCard(npc, {groupKey: g.key}) + '</div>';
-    cards += '</div>';
-    citizenInner += htmlDetailsGroup(g.label + ' (' + list.length + ')', g.color, g.icon, list.length + ' 个', cards);
+    citizenInner += npcfixGroupCard(g.label, g.color, g.icon, list, g.key);
   }
   citizenInner += '</div>';
   if (citizenCount > 0)
@@ -162,17 +172,13 @@ async function renderNpcfixBox1(forceScan) {
     { key: 'nobles', label: '贵族', icon: '&#x1F451;', color: '#f1c40f', list: oursByType.nobles },
     { key: 'royals', label: '王室成员', icon: '&#x1F934;', color: '#8e44ad', list: royals },
   ];
-  let nobleInner = '<div style="padding:2px 0 2px 10px">';
+  let nobleInner = '<div class="npcfix-box-body">';
   let nobleCount = 0;
   for (const g of nobleGroups) {
     const list = g.list;
     if (!list || list.length === 0) continue;
     nobleCount += list.length;
-    let cards = '<div style="padding:4px 0">';
-    for (const npc of list)
-      cards += '<div style="margin-bottom:6px">' + renderNpcCard(npc, {groupKey: g.key}) + '</div>';
-    cards += '</div>';
-    nobleInner += htmlDetailsGroup(g.label + ' (' + list.length + ')', g.color, g.icon, list.length + ' 个', cards);
+    nobleInner += npcfixGroupCard(g.label, g.color, g.icon, list, g.key);
   }
   nobleInner += '</div>';
   if (nobleCount > 0)

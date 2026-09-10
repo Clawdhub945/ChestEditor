@@ -154,7 +154,10 @@ function renderNpcCard(npc, opts) {
   h += '<span style="font-weight:600;color:var(--text-primary);font-size:13px">' + esc(displayName) + '</span>';
   if (npcTypeName) h += '<span style="font-size:11px;padding:1px 8px;border-radius:8px;background:var(--warning,#e67e22);color:#fff">' + esc(npcTypeName) + '</span>';
   if (soldierType) h += '<span style="font-size:11px;padding:1px 8px;border-radius:8px;background:var(--accent);color:#fff">' + esc(soldierType) + '</span>';
-  h += '<span style="font-size:11px;color:var(--text-muted);margin-left:auto">GUID:' + npc.guid + '</span>';
+  // 盒子1 是网格布局（一格约 300px），GUID 全写会挤掉徽章：只留 #id + title 悬停
+  h += isFix
+    ? '<span style="font-size:11px;color:var(--text-muted);margin-left:auto" title="GUID:' + npc.guid + '">#' + npc.guid + '</span>'
+    : '<span style="font-size:11px;color:var(--text-muted);margin-left:auto">GUID:' + npc.guid + '</span>';
   h += '<button onclick="event.stopPropagation();locateEditorEntity(' + ptrHash + ')" style="padding:3px 8px;background:var(--info,#3498db);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px">定位</button>';
   h += '</div>';
 
