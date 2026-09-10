@@ -119,30 +119,26 @@ internal static class AnimalService
         // ⚠ 位置策略：GetRandomLandPointNotAtMapBorder 是全图随机 —— 可能落在几屏幕之外、
         // 区块未加载 → 动物逻辑存在但看不见（用户实测"幽灵生物"），且对它调 DestroySelf
         // 会因渲染组件未创建而 native 崩溃。
-        // 改为：优先召唤到【牧场】/任意在场设施/动物的 cur_point（玩家视野内）；全无则退回全图随机。
+        // 位置来源：**在场动物的 get_CurPoint()**（0 参属性 getter 返回 Point 对象，沿继承链可找）
+        // → 召唤到现有动物旁边（玩家领地内、看得见）。无动物时退回全图随机。
         IntPtr pos = IntPtr.Zero;
+        string posSrc = "";
         foreach (var e in EntityScan.Snapshot())
         {
-            string? cn = e.ClassName;
-            bool okSrc = cn == "FacilityPasture" || (cn != null && cn.IndexOf("Facility", StringComparison.Ordinal) == 0)
-                || cn == "Animal" || cn == "Npc";
-            if (!okSrc) continue;
-            if (e.FieldMeta.TryGetValue("cur_point", out var pf) && pf.IsPointer)
-            {
-                IntPtr p = ReadIl2CppPointer(e.Ptr, pf.Offset);
-                if (p != IntPtr.Zero) { pos = p; break; }
-            }
+            if (e.ClassName != "Animal" || e.Ptr == IntPtr.Zero) continue;
+            IntPtr getCur = FindMethodInHierarchy(GetClass(e.Ptr), "get_CurPoint", 0);
+            if (getCur == IntPtr.Zero) continue;
+            IntPtr p = Invoke(getCur, e.Ptr);
+            if (p != IntPtr.Zero) { pos = p; posSrc = $"动物 guid={e.Guid} 的 CurPoint"; break; }
         }
         if (pos == IntPtr.Zero)
         {
-            for (int i = 0; i < count; i++)
-            {
-                IntPtr p = Invoke(getLandPoint, areaMap);
-                if (p != IntPtr.Zero) { pos = p; break; }
-            }
+            pos = Invoke(getLandPoint, areaMap);
+            posSrc = "全图随机陆地";
         }
         if (pos == IntPtr.Zero)
-            throw new InvalidOperationException("取不到召唤位置（地图上没有任何带坐标的实体）");
+            throw new InvalidOperationException("取不到召唤位置");
+        Plugin.LogInfo($"[AnimalService] Spawn {count} 只 stuffId={stuffId}，位置来源：{posSrc}");
 
         for (int i = 0; i < count; i++)
         {
