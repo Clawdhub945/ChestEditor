@@ -55,24 +55,87 @@ internal static class EntityScan
     /// <summary>
     /// 统一扫描：实体扫描(stuff_id) + NPC查找(类名含Npc)，按ptrHash去重
     /// </summary>
-    internal static void ScanAll(GameObject[]? source = null)
+    /// <param name="source">测试用：直接给定 GameObject 列表，跳过 FindObjectsOfTypeAll。</param>
+    /// <param name="forceFieldRefresh">
+    /// 是否清空并重建"类指针 → 字段表"缓存。默认 <c>false</c>。
+    /// <para>⚠ 千万别改回"每次扫描都清"：缓存是按类指针存的，一清就意味着下面每个组件都要
+    /// 重新枚举整条类链的字段（含逐字段的指针→字符串编组）。实测这是全量扫描耗时的大头
+    /// （清缓存时 3.5~4s，保留缓存后 ~0.2s），而列表每刷新一次就要扫一次。</para>
+    /// <para>IL2CPP 的类布局是编译期常量，不会随存档切换/场景加载变化，进程内可一直复用。</para>
+    /// </param>
+    internal static void ScanAll(GameObject[]? source = null, bool forceFieldRefresh = false)
     {
+        // BeginScan 返回 false = 已经有一次分片扫描在跑；这里直接把剩下的走完，
+        // 调用方拿到的仍是完整结果（StepScan 不依赖帧循环，所以在主线程调用也不会死锁）。
+        BeginScan(source, forceFieldRefresh);
+        while (StepScan(int.MaxValue)) { }
+    }
+
+    /// <summary>一次扫描的运行状态（分片用：跨帧保留进度）</summary>
+    private sealed class ScanRun
+    {
+        public GameObject[] Gos = Array.Empty<GameObject>();
+        public int Index;
+        public readonly HashSet<int> Seen = new();
+        public int Found, GoCount, SceneGoCount;
+        public long FindMs;
+        public readonly System.Diagnostics.Stopwatch Total = System.Diagnostics.Stopwatch.StartNew();
+        public readonly System.Diagnostics.Stopwatch Loop = new();
+    }
+
+    private static ScanRun? _run;
+    private static readonly object ScanLock = new();
+
+    /// <summary>
+    /// 开始一次扫描：清空结果 + 枚举场景对象；真正的遍历交给 <see cref="StepScan"/> 分片推进。
+    /// </summary>
+    /// <returns>已在扫描中（且未强制）时返回 false。</returns>
+    internal static bool BeginScan(GameObject[]? source = null, bool forceFieldRefresh = false, bool force = false)
+    {
+        if (_run != null && !force) return false;
         _byPtrHash.Clear();
-        try { _entities.Clear(); } catch (Exception ex) { Plugin.LogError($"[EntityEditor] Clear error: {ex.Message}"); return; }
-        Il2CppApi.ClearClassFieldCache();
-        try
+        try { _entities.Clear(); } catch (Exception ex) { Plugin.LogError($"[EntityEditor] Clear error: {ex.Message}"); return false; }
+        if (forceFieldRefresh) Il2CppApi.ClearClassFieldCache();
+
+        var run = new ScanRun();
+        var swFind = System.Diagnostics.Stopwatch.StartNew();
+        try { run.Gos = source ?? Resources.FindObjectsOfTypeAll<GameObject>(); }
+        catch (Exception ex) { Plugin.LogError($"[EntityEditor] FindObjectsOfTypeAll error: {ex.Message}"); return false; }
+        swFind.Stop(); run.FindMs = swFind.ElapsedMilliseconds;
+        run.Loop.Start();
+        _run = run;
+        return true;
+    }
+
+    /// <summary>
+    /// 推进当前扫描：最多处理 <paramref name="maxObjects"/> 个 GameObject。
+    /// <para>分片的意义：全量扫描实测要几秒，单帧做完就是几秒的卡死；摊到多帧只是帧率略降。</para>
+    /// </summary>
+    /// <returns>true = 还没扫完（下帧继续）；false = 已结束。</returns>
+    internal static bool StepScan(int maxObjects)
+    {
+        lock (ScanLock)
         {
-            GameObject[] allGOs;
-            try { allGOs = source ?? Resources.FindObjectsOfTypeAll<GameObject>(); }
-            catch (Exception ex) { Plugin.LogError($"[EntityEditor] FindObjectsOfTypeAll error: {ex.Message}"); return; }
+        var run = _run;
+        if (run == null) return false;
 
-            var seenPtrHash = new HashSet<int>();
-            int found = 0;
-
-            foreach (var go in allGOs)
+        int processed = 0;
+        while (run.Index < run.Gos.Length && processed < maxObjects)
+        {
+            var go = run.Gos[run.Index++];
+            processed++;
+            run.GoCount++;
+            try
             {
-                try
-                {
+                    // 只扫**场景里**的对象：Resources.FindObjectsOfTypeAll 会把预制体/资源包里的
+                    // GameObject 也一并返回，它们不属于任何场景（scene.IsValid() == false），
+                    // 不可能是在场实体。加这个过滤能省掉大量 GetComponents 编组。
+                    // 拿不到 scene 信息时按"在场景里"处理，退化成不过滤而不是漏扫。
+                    bool inScene = true;
+                    try { inScene = go.scene.IsValid(); } catch { }
+                    if (!inScene) continue;
+                    run.SceneGoCount++;
+
                     var components = go.GetComponents<Component>();
                     foreach (var comp in components)
                     {
@@ -81,7 +144,7 @@ internal static class EntityScan
                         if (compPtr == IntPtr.Zero) continue;
 
                         int ptrHash = compPtr.GetHashCode();
-                        if (seenPtrHash.Contains(ptrHash)) continue;
+                        if (run.Seen.Contains(ptrHash)) continue;
 
                         IntPtr compClass = IntPtr.Zero;
                         try { compClass = Il2CppApi.GetClass(compPtr); }
@@ -155,7 +218,7 @@ internal static class EntityScan
                         if (fieldMap.TryGetValue("kingdom_id", out var kFe) && !kFe.IsString && !kFe.IsPointer)
                             try { kingdomId = ReadIl2CppInt(compPtr, kFe.Offset); } catch { }
 
-                        seenPtrHash.Add(ptrHash);
+                        run.Seen.Add(ptrHash);
 
                         var entity = new EditorEntity
                         {
@@ -194,22 +257,32 @@ internal static class EntityScan
 
                         _entities.Add(entity);
                         _byPtrHash[entity.PtrHash] = entity;
-                        found++;
+                        run.Found++;
                         break; // 每个 GO 只取第一个匹配组件
                     }
                 }
                 catch { }
-            }
-
-            // 按 className 排序
-            _entities.Sort((a, b) =>
-            {
-                int cmp = string.Compare(a.ClassName, b.ClassName, StringComparison.Ordinal);
-                return cmp != 0 ? cmp : a.StuffId.CompareTo(b.StuffId);
-            });
         }
-        catch (Exception ex) { Plugin.LogError($"[EntityEditor] 异常: {ex.Message}\n{ex.StackTrace}"); }
+
+        // 还没扫完 → 下帧继续（不在这里收尾，避免中途把半成品当成最终结果）
+        if (run.Index < run.Gos.Length) return true;
+
+        run.Loop.Stop();
+        _entities.Sort((a, b) =>
+        {
+            int cmp = string.Compare(a.ClassName, b.ClassName, StringComparison.Ordinal);
+            return cmp != 0 ? cmp : a.StuffId.CompareTo(b.StuffId);
+        });
+        run.Total.Stop();
+        Plugin.LogInfo($"[EntityEditor] ScanAll: 实体 {run.Found} 条 / GO {run.GoCount} 个（场景内 {run.SceneGoCount}）；"
+            + $"FindObjects {run.FindMs}ms，遍历 {run.Loop.ElapsedMilliseconds}ms，合计 {run.Total.ElapsedMilliseconds}ms");
+        _run = null;
+        return false;
+        }
     }
+
+    /// <summary>取消进行中的分片扫描（如组件卸载时）。</summary>
+    internal static void AbortScan() => _run = null;
 
 
     /// <summary>

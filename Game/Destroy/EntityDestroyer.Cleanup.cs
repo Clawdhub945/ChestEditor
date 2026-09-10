@@ -21,7 +21,7 @@ internal static partial class EntityDestroyer
         {
             IntPtr listClass = Il2CppApi.GetClass(listPtr);
             int size = ReadIntFieldSafe(listPtr, listClass, "_size", 0);
-            Plugin.LogInfo($"[EntityEditor] RemoveFromListByPtr: _size={size}, target={targetPtr.ToInt64():X}");
+            Plugin.LogVerbose($"[EntityEditor] RemoveFromListByPtr: _size={size}, target={targetPtr.ToInt64():X}");
 
             if (size <= 0) return false;
 
@@ -29,7 +29,7 @@ internal static partial class EntityDestroyer
             IntPtr itemsPtr = ReadFieldSafe(listPtr, listClass, "_items");
             if (itemsPtr == IntPtr.Zero)
             {
-                Plugin.LogInfo($"[EntityEditor] RemoveFromListByPtr: _items is null");
+                Plugin.LogVerbose($"[EntityEditor] RemoveFromListByPtr: _items is null");
                 return false;
             }
 
@@ -37,7 +37,7 @@ internal static partial class EntityDestroyer
             // _items 是 System.Object[]，每个元素是 IntPtr 大小
             IntPtr itemsClass = Il2CppApi.GetClass(itemsPtr);
             int arrLen = ReadIntFieldSafe(itemsPtr, itemsClass, "_length", 0);
-            Plugin.LogInfo($"[EntityEditor] RemoveFromListByPtr: _items._length={arrLen}");
+            Plugin.LogVerbose($"[EntityEditor] RemoveFromListByPtr: _items._length={arrLen}");
 
             int matchIdx = -1;
             unsafe
@@ -57,17 +57,17 @@ internal static partial class EntityDestroyer
 
             if (matchIdx < 0)
             {
-                Plugin.LogInfo($"[EntityEditor] RemoveFromListByPtr: target not found in list");
+                Plugin.LogVerbose($"[EntityEditor] RemoveFromListByPtr: target not found in list");
                 return false;
             }
 
-            Plugin.LogInfo($"[EntityEditor] RemoveFromListByPtr: found at index={matchIdx}, calling RemoveAt...");
+            Plugin.LogVerbose($"[EntityEditor] RemoveFromListByPtr: found at index={matchIdx}, calling RemoveAt...");
 
             // 调用 RemoveAt(index)
             IntPtr removeAtMth = Il2CppApi.GetMethodFromName(listClass, "RemoveAt", 1);
             if (removeAtMth == IntPtr.Zero)
             {
-                Plugin.LogInfo($"[EntityEditor] RemoveFromListByPtr: RemoveAt method not found");
+                Plugin.LogVerbose($"[EntityEditor] RemoveFromListByPtr: RemoveAt method not found");
                 return false;
             }
 
@@ -81,12 +81,12 @@ internal static partial class EntityDestroyer
             }
 
             int newSize = ReadIntFieldSafe(listPtr, listClass, "_size", -1);
-            Plugin.LogInfo($"[EntityEditor] RemoveFromListByPtr: RemoveAt({matchIdx}) done, _size now={newSize}, ex={exRemove != IntPtr.Zero}");
+            Plugin.LogVerbose($"[EntityEditor] RemoveFromListByPtr: RemoveAt({matchIdx}) done, _size now={newSize}, ex={exRemove != IntPtr.Zero}");
             return newSize == size - 1;
         }
         catch (Exception ex)
         {
-            Plugin.LogInfo($"[EntityEditor] RemoveFromListByPtr error: {ex.Message}");
+            Plugin.LogVerbose($"[EntityEditor] RemoveFromListByPtr error: {ex.Message}");
             return false;
         }
     }
@@ -107,7 +107,7 @@ internal static partial class EntityDestroyer
                 IntPtr mgrInst = GameChainLocator.FindClassInstance(mgrClass);
                 if (mgrInst == IntPtr.Zero) continue;
 
-                Plugin.LogInfo($"[EntityEditor] Found manager {mgrName}, scanning for entity references...");
+                Plugin.LogVerbose($"[EntityEditor] Found manager {mgrName}, scanning for entity references...");
 
                 // 遍历管理器的所有字段，查找 List/Dictionary/数组
                 IntPtr fi = IntPtr.Zero;
@@ -152,16 +152,16 @@ internal static partial class EntityDestroyer
                                             Il2CppApi.RuntimeInvoke(removeMth, listPtr, (void**)ap, ref ex);
                                         }
                                     }
-                                    Plugin.LogInfo($"[EntityEditor] Removed from {mgrName}.{fn} (List), ex={ex != IntPtr.Zero}");
+                                    Plugin.LogVerbose($"[EntityEditor] Removed from {mgrName}.{fn} (List), ex={ex != IntPtr.Zero}");
                                 }
-                                catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] Remove from {mgrName}.{fn} failed: {ex.Message}"); }
+                                catch (Exception ex) { Plugin.LogVerbose($"[EntityEditor] Remove from {mgrName}.{fn} failed: {ex.Message}"); }
                             }
 
                             // 也尝试 RemoveAll(Predicate)
                             IntPtr removeAllMth = Il2CppApi.GetMethodFromName(listClass, "RemoveAll", 1);
                             if (removeAllMth != IntPtr.Zero)
                             {
-                                Plugin.LogInfo($"[EntityEditor] {mgrName}.{fn} has RemoveAll(1p)");
+                                Plugin.LogVerbose($"[EntityEditor] {mgrName}.{fn} has RemoveAll(1p)");
                             }
                         }
                     }
@@ -181,7 +181,7 @@ internal static partial class EntityDestroyer
 
                             if (containsKeyMth != IntPtr.Zero && removeMth != IntPtr.Zero)
                             {
-                                Plugin.LogInfo($"[EntityEditor] {mgrName}.{fn} is Dictionary, has ContainsKey+Remove");
+                                Plugin.LogVerbose($"[EntityEditor] {mgrName}.{fn} is Dictionary, has ContainsKey+Remove");
                             }
                         }
                     }
@@ -192,7 +192,7 @@ internal static partial class EntityDestroyer
             // 遍历场景中所有 GameObject 的组件，查找引用了该实体的字段
             CleanupReferencesInScene(entityPtr, className);
         }
-        catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] RemoveFromManagers error: {ex.Message}"); }
+        catch (Exception ex) { Plugin.LogVerbose($"[EntityEditor] RemoveFromManagers error: {ex.Message}"); }
     }
 
 
@@ -260,7 +260,7 @@ internal static partial class EntityDestroyer
                                                     Il2CppApi.RuntimeInvoke(removeMth, listPtr, (void**)ap, ref ex);
                                                 }
                                             }
-                                            Plugin.LogInfo($"[EntityEditor] Cleaned {cn}.{fn} (List), ex={ex != IntPtr.Zero}");
+                                            Plugin.LogVerbose($"[EntityEditor] Cleaned {cn}.{fn} (List), ex={ex != IntPtr.Zero}");
                                         }
                                         catch { }
                                     }
@@ -272,6 +272,6 @@ internal static partial class EntityDestroyer
                 catch { }
             }
         }
-        catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] CleanupReferencesInScene error: {ex.Message}"); }
+        catch (Exception ex) { Plugin.LogVerbose($"[EntityEditor] CleanupReferencesInScene error: {ex.Message}"); }
     }
 }

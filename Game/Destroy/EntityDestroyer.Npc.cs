@@ -36,18 +36,18 @@ internal static partial class EntityDestroyer
                         if (mName == target)
                         {
                             uint pCount = Il2CppApi.GetMethodParamCountRaw(mth);
-                            Plugin.LogInfo($"[EntityEditor] [NPC] Found {mName}({pCount}p) at depth={depth} cls={clsName}");
+                            Plugin.LogVerbose($"[EntityEditor] [NPC] Found {mName}({pCount}p) at depth={depth} cls={clsName}");
                             try
                             {
                                 if (Il2CppInvoke.InvokeWithDefaults(mth, e.Ptr, (int)pCount))
                                 {
-                                    Plugin.LogInfo($"[EntityEditor] ✓ Called {mName}() on {name} (depth={depth})");
+                                    Plugin.LogVerbose($"[EntityEditor] ✓ Called {mName}() on {name} (depth={depth})");
                                     called = true;
                                     break;
                                 }
-                                Plugin.LogInfo($"[EntityEditor] {mName}() exception on {name}");
+                                Plugin.LogVerbose($"[EntityEditor] {mName}() exception on {name}");
                             }
-                            catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] {mName}() CRASH: {ex.Message}"); }
+                            catch (Exception ex) { Plugin.LogVerbose($"[EntityEditor] {mName}() CRASH: {ex.Message}"); }
                         }
                     }
                     if (called) break;

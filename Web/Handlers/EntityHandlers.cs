@@ -6,15 +6,22 @@ namespace ChestEditor.Web;
 /// <summary>统一实体编辑器接口：扫描、字段读写、销毁、定位、方法枚举</summary>
 internal static class EntityHandlers
 {
+    /// <summary>扫描每帧处理的 GameObject 个数（分片：全量扫描要几秒，单帧做完会明显卡死）</summary>
+    private const int ScanObjectsPerFrame = 150;
+
     internal static void Register()
     {
+        // 全量扫描：分片推进（每帧一批），扫完再在主线程上应用待写入的修改
         Router.Add("POST", "/api/editor/scan", _ =>
-            MainThread.Run(() =>
+        {
+            EntityScan.BeginScan();
+            MainThread.RunPaced(() => EntityScan.StepScan(ScanObjectsPerFrame), 120000);
+            return MainThread.Run(() =>
             {
-                EntityScan.ScanAll();
                 ModificationStore.ApplyPendingModifications();
                 return JsonBuilder.Ok();
-            }, 30000));
+            }, 30000);
+        });
 
         Router.Add("GET", "/api/editor/entities", _ =>
             MainThread.Run(() => EntityScan.GetAllJson(), 10000));
@@ -56,13 +63,14 @@ internal static class EntityHandlers
                 if (n != null) hashes.Add(n.GetValue<int>());
             return MainThread.Run(() =>
             {
+                var sw = System.Diagnostics.Stopwatch.StartNew();
                 int ok = 0, fail = 0;
                 foreach (var ph in hashes)
                 {
                     var result = EntityDestroyer.DestroyEntity(ph);
                     if (result == "ok") ok++; else fail++;
                 }
-                Plugin.LogInfo($"[EntityDestroyer] 批量销毁完成: {ok} 成功 / {fail} 失败");
+                Plugin.LogInfo($"[EntityDestroyer] 批量销毁: {ok} 成功 / {fail} 失败 / 共 {hashes.Count} 个, 耗时 {sw.ElapsedMilliseconds}ms（本帧主线程占用）");
                 return JsonBuilder.Object(w => { w.WriteBoolean("ok", true); w.WriteNumber("destroyed", ok); w.WriteNumber("failed", fail); });
             }, 120000);
         });
@@ -79,13 +87,14 @@ internal static class EntityHandlers
                 if (n != null) hashes.Add(n.GetValue<int>());
             return MainThread.Run(() =>
             {
+                var sw = System.Diagnostics.Stopwatch.StartNew();
                 int entities = 0, fields = 0;
                 foreach (var ph in hashes)
                 {
                     int n = EntityScan.ScaleCombatStats(ph, factor);
                     if (n > 0) { entities++; fields += n; }
                 }
-                Plugin.LogInfo($"[EntityEditor] 战斗力缩放 x{factor}: {entities}/{hashes.Count} 个实体, {fields} 个字段");
+                Plugin.LogInfo($"[EntityEditor] 战斗力缩放 x{factor}: {entities}/{hashes.Count} 个实体, {fields} 个字段, 耗时 {sw.ElapsedMilliseconds}ms（本帧主线程占用）");
                 return JsonBuilder.Object(w =>
                 {
                     w.WriteBoolean("ok", true);

@@ -19,7 +19,7 @@ internal static partial class EntityDestroyer
         bool called = false;
         if (!called)
         {
-            Plugin.LogInfo($"[EntityEditor] No game destroy method worked, trying fallback...");
+            Plugin.LogVerbose($"[EntityEditor] No game destroy method worked, trying fallback...");
 
             // Step 1: BeforeDestroy 清理
             {
@@ -34,7 +34,7 @@ internal static partial class EntityDestroyer
                         {
                             IntPtr exBd = IntPtr.Zero;
                             unsafe { Il2CppApi.RuntimeInvoke(bdMth, e.Ptr, null, ref exBd); }
-                            Plugin.LogInfo($"[EntityEditor] BeforeDestroy() at depth={bdDepth}");
+                            Plugin.LogVerbose($"[EntityEditor] BeforeDestroy() at depth={bdDepth}");
                         }
                         catch { }
                         break;
@@ -61,7 +61,7 @@ internal static partial class EntityDestroyer
                         try
                         {
                             Il2CppInvoke.InvokeWithArgs(hMth, e.Ptr, IntPtr.Zero); // false
-                            Plugin.LogInfo($"[EntityEditor] {hideName}(false) at depth={hDepth}");
+                            Plugin.LogVerbose($"[EntityEditor] {hideName}(false) at depth={hDepth}");
                         }
                         catch { }
                         break;
@@ -96,10 +96,10 @@ internal static partial class EntityDestroyer
             {
                 e.GoRef!.SetActive(false);
                 UnityEngine.Object.DestroyImmediate(e.GoRef);
-                Plugin.LogInfo($"[EntityEditor] DestroyImmediate GO: {name}");
+                Plugin.LogVerbose($"[EntityEditor] DestroyImmediate GO: {name}");
                 called = true;
             }
-            catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] DestroyImmediate failed: {ex.Message}"); }
+            catch (Exception ex) { Plugin.LogVerbose($"[EntityEditor] DestroyImmediate failed: {ex.Message}"); }
         }
         return called;
     }

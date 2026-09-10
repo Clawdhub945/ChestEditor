@@ -38,17 +38,17 @@ internal static partial class EntityDestroyer
         if (TryFindFieldOffset(classPtr, "skip_show_dead_anim", out int skipOffset) && skipOffset > 0)
         {
             try { WriteIl2CppByte(e.Ptr, skipOffset, 1); }
-            catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] [Monster] set skip_show_dead_anim failed: {ex.Message}"); }
+            catch (Exception ex) { Plugin.LogVerbose($"[EntityEditor] [Monster] set skip_show_dead_anim failed: {ex.Message}"); }
         }
         else
-            Plugin.LogInfo($"[EntityEditor] [Monster] skip_show_dead_anim field not found on {className}");
+            Plugin.LogVerbose($"[EntityEditor] [Monster] skip_show_dead_anim field not found on {className}");
 
         // 2) DeadOnBattle(null, false)：沿继承链取**最派生**的重载（Monster 覆写了它）
         IntPtr dead = FindMethodMostDerived(classPtr, "DeadOnBattle", 2, 15);
         if (dead != IntPtr.Zero)
         {
             bool ok = InvokeWithArgs(dead, e.Ptr, IntPtr.Zero, IntPtr.Zero);
-            Plugin.LogInfo($"[EntityEditor] [Monster] DeadOnBattle(null,false) on {name} ex={(ok ? "none" : "yes")}");
+            Plugin.LogVerbose($"[EntityEditor] [Monster] DeadOnBattle(null,false) on {name} ex={(ok ? "none" : "yes")}");
             return true;
         }
 
@@ -57,11 +57,11 @@ internal static partial class EntityDestroyer
         if (drn != IntPtr.Zero)
         {
             bool ok = InvokeWithDefaults(drn, e.Ptr, 0);
-            Plugin.LogInfo($"[EntityEditor] [Monster] DestroyRightNow() fallback on {name} ex={(ok ? "none" : "yes")}");
+            Plugin.LogVerbose($"[EntityEditor] [Monster] DestroyRightNow() fallback on {name} ex={(ok ? "none" : "yes")}");
             return true;
         }
 
-        Plugin.LogInfo($"[EntityEditor] [Monster] no silent destroy method on {className}");
+        Plugin.LogVerbose($"[EntityEditor] [Monster] no silent destroy method on {className}");
         return false;
     }
 

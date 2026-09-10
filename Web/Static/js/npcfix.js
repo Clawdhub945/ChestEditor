@@ -795,19 +795,22 @@ async function renderNpcfixBox2(forceScan) {
       null, npcfixBoxBtns() + npcfixBoxClearBtn('monster', 'enemy') + npcfixBoxScaleBtn('monster', 'enemy', 0.1));
   }
 
-  // ===== 船：只列战舰，区分敌我（货船/商船不计） =====
-  // 我方舰队 → 战斗力×10；敌方舰队 → 一键清除 + 战斗力÷10
-  if (c.shipsOurs.length > 0 || Object.keys(c.shipsEnemy).length > 0) {
-    let inner = '<div class="npcfix-box-body">';
-    if (c.shipsOurs.length > 0)
-      inner += npcfixEntityGroupCard('我方舰队', GREEN, '&#x1F6A2;', c.shipsOurs, {},
-        npcfixScaleBtn('ship', 1, 10));
-    inner += npcfixKingdomGroups(c.shipsEnemy, '#3498db', '&#x1F6A2;',
-      kid => npcfixClearBtn('ship', kid) + npcfixScaleBtn('ship', kid, 0.1));
-    inner += '</div>';
-    const n = c.shipsOurs.length + npcfixSumKinds(c.shipsEnemy);
-    enemyHtml += htmlDetailsGroup('船 · 战舰 (' + n + ')', '#3498db', '&#x1F6A2;', n + ' 个', inner, null,
-      npcfixBoxBtns() + npcfixBoxClearBtn('ship', 'all') + npcfixBoxScaleBtn('ship', 'all', 0.1));
+  // ===== 舰船：**我方舰队独立成一个盒子**，放进「我方单位」区（与敌方舰队彻底分开） =====
+  if (c.shipsOurs.length > 0)
+    oursHtml += htmlDetailsGroup('我方舰队 (' + c.shipsOurs.length + ')', GREEN, '&#x1F6A2;',
+      c.shipsOurs.length + ' 个',
+      '<div class="npcfix-box-body">' + npcfixEntityGrid(c.shipsOurs, {}) + '</div>',
+      null, npcfixBoxBtns() + npcfixBoxScaleBtn('ship', 1, 10));
+
+  // ===== 敌方舰队：留在「敌方单位」区，按阵营二级分组；一级/二级都有一键清除 + 战斗力÷10 =====
+  // ⚠ 一级按钮的 scope 用 'enemy'（不再用 'all'）：盒子现在只含敌方舰队，
+  //   操作范围必须等于显示范围，不然会连我方舰队一起清掉。
+  if (Object.keys(c.shipsEnemy).length > 0) {
+    const n = npcfixSumKinds(c.shipsEnemy);
+    enemyHtml += htmlDetailsGroup('敌方舰队 (' + n + ')', '#3498db', '&#x1F6A2;', n + ' 个',
+      '<div class="npcfix-box-body">' + npcfixKingdomGroups(c.shipsEnemy, '#3498db', '&#x1F6A2;',
+        kid => npcfixClearBtn('ship', kid) + npcfixScaleBtn('ship', kid, 0.1)) + '</div>',
+      null, npcfixBoxBtns() + npcfixBoxClearBtn('ship', 'enemy') + npcfixBoxScaleBtn('ship', 'enemy', 0.1));
   }
 
   // ===== 组装：两条分区线**一直显示**（没有单位也要在），右侧挂分区级按钮 =====
@@ -882,6 +885,12 @@ async function npcfixKillInChunks(hashes) {
   return { destroyed: destroyed, failed: failed };
 }
 
+// 清完/改完把面板刷新一下：否则界面上还挂着已经销毁的卡片，用户得再点一次
+// 「重新扫描」才能看到结果 —— 那又多扫一遍全量。
+function npcfixRefreshView() {
+  if (npcfixView === 'box2') renderNpcfixBox2(false);
+}
+
 // 一键清除（spec 见 npcfixParseSpec）：
 // 按范围收集 → 分批销毁 → 等1秒 → 重扫 → 再清一遍（覆盖分裂怪）→ 舰船落岸船员收尾。
 // 后端对 Monster* 走"静默移除"（skip_show_dead_anim + DeadOnBattle(null,false)），不播死亡动画、不掉东西。
@@ -930,6 +939,7 @@ async function npcfixClear(spec) {
 
   toast('清除完成: 首轮' + (d1.destroyed || 0) + ' + 二轮' + (d2.destroyed || 0)
     + (sailor.destroyed > 0 ? ' + 落岸船员' + sailor.destroyed : ''));
+  npcfixRefreshView();
 }
 
 // 战斗力缩放（spec 见 npcfixParseSpec；factor=10 → ×10，factor=0.1 → ÷10）

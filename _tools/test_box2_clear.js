@@ -136,8 +136,9 @@ ok(scopeFilter('monster', 'enemy').length === sumKinds(classify.monstersEnemy),
   'monster:enemy (' + scopeFilter('monster', 'enemy').length + ') == 敌方-怪物盒 (' + sumKinds(classify.monstersEnemy) + ')');
 ok(scopeFilter('monster', 1).length === classify.monstersOurs.length, 'monster:1 == 我方-怪物盒');
 ok(scopeFilter('ship', 1).length === classify.shipsOurs.length, 'ship:1 == 我方舰队');
+ok(scopeFilter('ship', 'enemy').length === sumKinds(classify.shipsEnemy), 'ship:enemy == 敌方舰队盒');
 ok(scopeFilter('ship', 'all').length === classify.shipsOurs.length + sumKinds(classify.shipsEnemy),
-  'ship:all == 船盒（货船不计）');
+  'ship:all == 我方 + 敌方全部舰队（货船不计）');
 
 let bad = 0;
 for (const key of ['humanoids', 'monstersEnemy', 'shipsEnemy']) {
@@ -171,19 +172,22 @@ console.log('\n== 5) renderNpcfixBox2 产出 ==');
     const i = H.indexOf(label);
     return i < 0 ? null : H.slice(i, H.indexOf('</summary>', i));
   };
-  for (const label of ['我方战斗单位', '我方-怪物', '敌方-小人', '敌方-怪物', '船 · 战舰']) {
+  for (const label of ['我方战斗单位', '我方-怪物', '我方舰队', '敌方-小人', '敌方-怪物', '敌方舰队']) {
     const seg = segment(label);
     if (seg === null) { ok(false, '缺少盒子 ' + label); continue; }
-    console.log('  ' + label + ' 标题栏: ' + seg.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 90));
+    console.log('  ' + label + ' 标题栏: ' + seg.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 95));
   }
 
   const iOurs = H.indexOf('>我方单位<');
   const iEnemy = H.indexOf('>敌方单位<');
   const iOursMon = H.indexOf('我方-怪物 (');
+  const iOursFleet = H.indexOf('我方舰队 (');
   const iEnemyMan = H.indexOf('敌方-小人 (');
-  console.log('  下标: 我方单位=' + iOurs + ' 我方-怪物=' + iOursMon + ' 敌方单位=' + iEnemy + ' 敌方-小人=' + iEnemyMan);
+  console.log('  下标: 我方单位=' + iOurs + ' 我方-怪物=' + iOursMon + ' 我方舰队=' + iOursFleet
+    + ' 敌方单位=' + iEnemy + ' 敌方-小人=' + iEnemyMan);
   ok(iOurs >= 0 && iEnemy >= 0, '「我方单位」「敌方单位」两条分区标题都在');
   ok(iOurs < iOursMon && iOursMon < iEnemy, '我方-怪物 已上移到「我方单位」区');
+  ok(iOursFleet > iOurs && iOursFleet < iEnemy, '我方舰队 在「我方单位」区（已与敌方舰队分开）');
   ok(iEnemy < iEnemyMan, '「敌方单位」在敌方小人之前（已隔开）');
   ok(/毁灭吧！！！/.test(H), '「敌方单位」后面有「毁灭吧！！！」');
   ok(/npcfixClear\('enemyAll:enemy'\)/.test(H), '毁灭吧 的 spec = enemyAll:enemy');
@@ -192,10 +196,11 @@ console.log('\n== 5) renderNpcfixBox2 产出 ==');
   ok(/#27ae60/.test(monSeg), '我方-怪物 盒子是绿色');
   ok(!/e67e22|--warning/.test(monSeg), '我方-怪物 盒子里没有残留橙色');
 
-  for (const [label, kind, scope] of [['敌方-小人', 'humanoid', 'enemy'], ['敌方-怪物', 'monster', 'enemy'],
-    ['船 · 战舰', 'ship', 'all']]) {
+  // 一级菜单按钮
+  for (const [label, spec] of [['敌方-小人', "npcfixClear('humanoid:enemy')"],
+    ['敌方-怪物', "npcfixClear('monster:enemy')"], ['敌方舰队', "npcfixClear('ship:enemy')"]]) {
     const seg = segment(label);
-    ok(seg && seg.indexOf("npcfixClear('" + kind + ":" + scope + "')") >= 0, label + ' 一级菜单有一键清除');
+    ok(seg && seg.indexOf(spec) >= 0, label + ' 一级菜单有一键清除');
   }
   ok(segment('敌方-怪物').indexOf("npcfixClear('monster:") >= 0, '敌方-怪物 二级菜单有一键清除');
   ok(/npcfixKillMonsters/.test(H) === false, '没有旧函数残留');
@@ -247,8 +252,8 @@ console.log('\n== 5) renderNpcfixBox2 产出 ==');
   ok(/npcfixScale\('monster:1',10\)/.test(H), '我方-怪物 一级: 战斗力×10');
   ok(/npcfixScale\('humanoid:enemy',0\.1\)/.test(H), '敌方-小人 一级: 战斗力÷10');
   ok(/npcfixScale\('monster:enemy',0\.1\)/.test(H), '敌方-怪物 一级: 战斗力÷10');
-  ok(/npcfixScale\('ship:all',0\.1\)/.test(H), '船 · 战舰 一级: 战斗力÷10');
-  ok(/npcfixScale\('ship:1',10\)/.test(H), '我方舰队 二级: 战斗力×10');
+  ok(/npcfixScale\('ship:1',10\)/.test(H), '我方舰队 一级: 战斗力×10');
+  ok(/npcfixScale\('ship:enemy',0\.1\)/.test(H), '敌方舰队 一级: 战斗力÷10');
   ok(/npcfixScale\('ship:100',0\.1\)/.test(H), '敌方舰队 二级: 战斗力÷10');
   ok(/npcfixScale\('humanoid:89',0\.1\)/.test(H), '敌方-小人 二级: 战斗力÷10');
   ok(/npcfixScale\('ourCombat:1:g=/.test(H), '我方战斗单位 二级带 :g=兵种');

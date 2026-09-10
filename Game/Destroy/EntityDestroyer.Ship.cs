@@ -42,13 +42,13 @@ internal static partial class EntityDestroyer
         bool called = false;
         if (!called && IsShipEntity(e, className))
         {
-            Plugin.LogInfo($"[EntityEditor] [Ship] Ship destroy start...");
+            Plugin.LogVerbose($"[EntityEditor] [Ship] Ship destroy start...");
             bool shipDestroyed = false;
 
             int guid = 0;
             if (e.FieldMeta.TryGetValue("guid", out var guidFe))
                 try { guid = ReadIl2CppInt(e.Ptr, guidFe.Offset); } catch { }
-            Plugin.LogInfo($"[EntityEditor] [Ship] entity guid={guid}");
+            Plugin.LogVerbose($"[EntityEditor] [Ship] entity guid={guid}");
 
             // 从船对象自身读取 territory 字段（Ship 继承自 MyMonoBehaviour，有 territory 引用）
             IntPtr shipTerritoryPtr = ReadFieldSafe(e.Ptr, classPtr, "territory");
@@ -82,19 +82,19 @@ internal static partial class EntityDestroyer
             {
                 IntPtr shipTerritoryClass = Il2CppApi.GetClass(shipTerritoryPtr);
                 string? territoryName = Il2CppApi.PtrToString(Il2CppApi.ClassGetName(shipTerritoryClass));
-                Plugin.LogInfo($"[EntityEditor] [Ship] Ship's territory class={territoryName}, ptr={shipTerritoryPtr.ToInt64():X}");
+                Plugin.LogVerbose($"[EntityEditor] [Ship] Ship's territory class={territoryName}, ptr={shipTerritoryPtr.ToInt64():X}");
 
                 // 从船的所属 territory 读取 ship_list 和 ship_dic
                 IntPtr shipListPtr = ReadFieldSafe(shipTerritoryPtr, shipTerritoryClass, "ship_list");
                 IntPtr shipDicPtr = ReadFieldSafe(shipTerritoryPtr, shipTerritoryClass, "ship_dic");
-                Plugin.LogInfo($"[EntityEditor] [Ship] ship_list={shipListPtr.ToInt64():X}, ship_dic={shipDicPtr.ToInt64():X}");
+                Plugin.LogVerbose($"[EntityEditor] [Ship] ship_list={shipListPtr.ToInt64():X}, ship_dic={shipDicPtr.ToInt64():X}");
 
                 // 按指针从 ship_list 中找到并移除
                 if (shipListPtr != IntPtr.Zero)
                 {
-                    Plugin.LogInfo($"[EntityEditor] [Ship] Removing from ship_list by pointer match...");
+                    Plugin.LogVerbose($"[EntityEditor] [Ship] Removing from ship_list by pointer match...");
                     shipDestroyed = RemoveFromListByPtr(shipListPtr, e.Ptr);
-                    Plugin.LogInfo($"[EntityEditor] [Ship] RemoveFromListByPtr result={shipDestroyed}");
+                    Plugin.LogVerbose($"[EntityEditor] [Ship] RemoveFromListByPtr result={shipDestroyed}");
                 }
 
                 // 从 ship_dic 按 guid 移除
@@ -114,9 +114,9 @@ internal static partial class EntityDestroyer
                                 rmArgs[0] = (IntPtr)(&guidArg);
                                 Il2CppApi.RuntimeInvoke(removeMth, shipDicPtr, (void**)rmArgs, ref exRm);
                             }
-                            Plugin.LogInfo($"[EntityEditor] [Ship] ship_dic.Remove({guid}) ex={exRm != IntPtr.Zero}");
+                            Plugin.LogVerbose($"[EntityEditor] [Ship] ship_dic.Remove({guid}) ex={exRm != IntPtr.Zero}");
                         }
-                        catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] [Ship] ship_dic.Remove failed: {ex.Message}"); }
+                        catch (Exception ex) { Plugin.LogVerbose($"[EntityEditor] [Ship] ship_dic.Remove failed: {ex.Message}"); }
                     }
                 }
 
@@ -148,9 +148,9 @@ internal static partial class EntityDestroyer
                                 destroyArgs[1] = (IntPtr)(&boolArg);
                                 Il2CppApi.RuntimeInvoke(destroyShipMth, shipHelperPtr, (void**)destroyArgs, ref exDestroy);
                             }
-                            Plugin.LogInfo($"[EntityEditor] [Ship] DestroyShip call ex={exDestroy != IntPtr.Zero}");
+                            Plugin.LogVerbose($"[EntityEditor] [Ship] DestroyShip call ex={exDestroy != IntPtr.Zero}");
                         }
-                        catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] [Ship] DestroyShip failed: {ex.Message}"); }
+                        catch (Exception ex) { Plugin.LogVerbose($"[EntityEditor] [Ship] DestroyShip failed: {ex.Message}"); }
                     }
                     else
                     {
@@ -171,12 +171,12 @@ internal static partial class EntityDestroyer
                 {
                     IntPtr listClass = Il2CppApi.GetClass(shipListPtr);
                     int finalSize = ReadIntFieldSafe(shipListPtr, listClass, "_size", -1);
-                    Plugin.LogInfo($"[EntityEditor] [Ship] Final: ship_list._size={finalSize}");
+                    Plugin.LogVerbose($"[EntityEditor] [Ship] Final: ship_list._size={finalSize}");
                 }
             }
             else
             {
-                Plugin.LogInfo($"[EntityEditor] [Ship] Could not find territory field on ship, trying FindTerritory fallback...");
+                Plugin.LogVerbose($"[EntityEditor] [Ship] Could not find territory field on ship, trying FindTerritory fallback...");
                 // 回退到 FindTerritory
                 IntPtr territoryPtr = GameChainLocator.GetTerritory();
                 if (territoryPtr != IntPtr.Zero)
@@ -192,7 +192,7 @@ internal static partial class EntityDestroyer
             // 兜底清理
             if (!shipDestroyed)
             {
-                Plugin.LogInfo($"[EntityEditor] [Ship] Fallback cleanup...");
+                Plugin.LogVerbose($"[EntityEditor] [Ship] Fallback cleanup...");
                 CallVoidMethod(classPtr, e.Ptr, "UnIndexUnitByPos", 0);
                 CallVoidMethod(classPtr, e.Ptr, "BeforeDestroy", 0);
                 // is_dead

@@ -34,13 +34,13 @@ internal static partial class EntityDestroyer
     {
         try
         {
-            Plugin.LogInfo($"[EntityEditor] DestroyEntity called, ptrHash={ptrHash}, entities.Count={EntityScan.Entities.Count}");
+            Plugin.LogVerbose($"[EntityEditor] DestroyEntity called, ptrHash={ptrHash}, entities.Count={EntityScan.Entities.Count}");
             for (int i = 0; i < EntityScan.Entities.Count; i++)
             {
                 var e = EntityScan.Entities[i];
                 if (e.PtrHash != ptrHash) continue;
 
-                Plugin.LogInfo($"[EntityEditor] Matched entity: {e.GoName} class={e.ClassName} ptrHash={e.PtrHash}");
+                Plugin.LogVerbose($"[EntityEditor] Matched entity: {e.GoName} class={e.ClassName} ptrHash={e.PtrHash}");
 
                 if (e.GoRef == null)
                     return "GameObject reference lost (rescan needed)";
@@ -48,7 +48,7 @@ internal static partial class EntityDestroyer
                 string name = e.GoRef.name;
                 IntPtr classPtr = Il2CppApi.GetClass(e.Ptr);
                 string className = Il2CppApi.PtrToString(Il2CppApi.ClassGetName(classPtr)) ?? "?";
-                Plugin.LogInfo($"[EntityEditor] === DestroyEntity START: {name} class={className} ptrHash={ptrHash} ===");
+                Plugin.LogVerbose($"[EntityEditor] === DestroyEntity START: {name} class={className} ptrHash={ptrHash} ===");
 
                 // === 第一优先：NPC 类型用 LeaveMapAndDestroy（虚方法，需在类链上枚举）===
                 bool called = TryDestroyNpc(e, classPtr, className, name);
@@ -71,7 +71,7 @@ internal static partial class EntityDestroyer
                 // === 兜底：BeforeDestroy + 从管理器移除 + 隐藏视觉 + DestroyImmediate ===
                 if (!called) called = FallbackDestroy(e, classPtr, className, name);
 
-                Plugin.LogInfo($"[EntityEditor] === DestroyEntity END: {name} called={called} ===");
+                Plugin.LogVerbose($"[EntityEditor] === DestroyEntity END: {name} called={called} ===");
                 EntityScan.Entities.RemoveAt(i);
                 return "ok";
             }
@@ -111,15 +111,15 @@ internal static partial class EntityDestroyer
                     {
                         IntPtr ex = IntPtr.Zero;
                         unsafe { Il2CppApi.RuntimeInvoke(m, objPtr, null, ref ex); }
-                        Plugin.LogInfo($"[EntityEditor] {methodName}() ex={ex != IntPtr.Zero}");
+                        Plugin.LogVerbose($"[EntityEditor] {methodName}() ex={ex != IntPtr.Zero}");
                     }
-                    catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] {methodName}() failed: {ex.Message}"); }
+                    catch (Exception ex) { Plugin.LogVerbose($"[EntityEditor] {methodName}() failed: {ex.Message}"); }
                     return;
                 }
             }
             cls = Il2CppApi.GetParent(cls);
             d++;
         }
-        Plugin.LogInfo($"[EntityEditor] {methodName}() not found");
+        Plugin.LogVerbose($"[EntityEditor] {methodName}() not found");
     }
 }

@@ -48,9 +48,9 @@ internal static partial class EntityDestroyer
                 depth++;
             }
 
-            Plugin.LogInfo($"[EntityEditor] [Generic] {className}: found {foundMethods.Count} target methods in class hierarchy");
+            Plugin.LogVerbose($"[EntityEditor] [Generic] {className}: found {foundMethods.Count} target methods in class hierarchy");
             foreach (var fm in foundMethods)
-                Plugin.LogInfo($"[EntityEditor] [Generic]   {fm.cls}.{fm.name}({fm.paramCount}p) depth={fm.d}");
+                Plugin.LogVerbose($"[EntityEditor] [Generic]   {fm.cls}.{fm.name}({fm.paramCount}p) depth={fm.d}");
 
             // 尝试调用找到的方法（优先 0 参数的）
             foreach (var fm in foundMethods.OrderBy(f => f.paramCount))
@@ -60,19 +60,19 @@ internal static partial class EntityDestroyer
                 {
                     if (Il2CppInvoke.InvokeWithDefaults(fm.methodPtr, e.Ptr, (int)fm.paramCount))
                     {
-                        Plugin.LogInfo($"[EntityEditor] ✓ Called {fm.name}() on {name} (depth={fm.d})");
+                        Plugin.LogVerbose($"[EntityEditor] ✓ Called {fm.name}() on {name} (depth={fm.d})");
                         called = true;
                     }
                     else
-                        Plugin.LogInfo($"[EntityEditor] {fm.name}() exception on {name}");
+                        Plugin.LogVerbose($"[EntityEditor] {fm.name}() exception on {name}");
                 }
-                catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] {fm.name}() CRASH: {ex.Message}"); }
+                catch (Exception ex) { Plugin.LogVerbose($"[EntityEditor] {fm.name}() CRASH: {ex.Message}"); }
             }
 
             // 3b: 如果自身类没有找到，列出所有方法（0-2参数）用于调试
             if (!called)
             {
-                Plugin.LogInfo($"[EntityEditor] [Generic] Listing ALL methods (0-2p) on {className} hierarchy for debugging:");
+                Plugin.LogVerbose($"[EntityEditor] [Generic] Listing ALL methods (0-2p) on {className} hierarchy for debugging:");
                 IntPtr debugCls = classPtr;
                 int debugDepth = 0;
                 int methodCount = 0;
@@ -91,7 +91,7 @@ internal static partial class EntityDestroyer
                             uint dIflags = 0;
                             uint dFlags = Il2CppApi.MethodGetFlags(dMth, ref dIflags);
                             bool dStatic = (dFlags & 0x10) != 0;
-                            Plugin.LogInfo($"[EntityEditor] [Generic]   {dClsName}.{dName}({dPc}p) static={dStatic} depth={debugDepth}");
+                            Plugin.LogVerbose($"[EntityEditor] [Generic]   {dClsName}.{dName}({dPc}p) static={dStatic} depth={debugDepth}");
                             methodCount++;
                             if (methodCount >= 80) break;
                         }
@@ -100,19 +100,19 @@ internal static partial class EntityDestroyer
                     debugCls = Il2CppApi.GetParent(debugCls);
                     debugDepth++;
                 }
-                Plugin.LogInfo($"[EntityEditor] [Generic] Total: {methodCount} methods listed");
+                Plugin.LogVerbose($"[EntityEditor] [Generic] Total: {methodCount} methods listed");
 
                 // 3c: StuffOnMap 专用：手动执行完整删除流程
                 if (!called && (className.Contains("StuffOnMap") || className.Contains("DropItem")))
                 {
-                    Plugin.LogInfo($"[EntityEditor] [StuffOnMap] Manual destroy (field enumeration)...");
+                    Plugin.LogVerbose($"[EntityEditor] [StuffOnMap] Manual destroy (field enumeration)...");
                     IntPtr mapStuffHelper = GameChainLocator.GetMapStuffHelper();
                     bool dicRemoved = false;
                     if (mapStuffHelper != IntPtr.Zero)
                     {
                         IntPtr mshClass = Il2CppApi.GetClass(mapStuffHelper);
                         IntPtr mshAreaMap = ReadFieldSafe(mapStuffHelper, mshClass, "area_map");
-                        Plugin.LogInfo($"[EntityEditor] [StuffOnMap] MapStuffHelper.area_map={mshAreaMap.ToInt64():X}");
+                        Plugin.LogVerbose($"[EntityEditor] [StuffOnMap] MapStuffHelper.area_map={mshAreaMap.ToInt64():X}");
                         if (mshAreaMap != IntPtr.Zero)
                         {
                             IntPtr areaMapClass = Il2CppApi.GetClass(mshAreaMap);
@@ -121,7 +121,7 @@ internal static partial class EntityDestroyer
                             int guid = 0;
                             if (e.FieldMeta.TryGetValue("guid", out var guidFe))
                                 try { guid = ReadIl2CppInt(e.Ptr, guidFe.Offset); } catch { }
-                            Plugin.LogInfo($"[EntityEditor] [StuffOnMap] entity guid={guid}");
+                            Plugin.LogVerbose($"[EntityEditor] [StuffOnMap] entity guid={guid}");
 
                             // Step A: 从 stuff_on_map_dic 移除
                             IntPtr dicPtr = ReadFieldSafe(mshAreaMap, areaMapClass, "stuff_on_map_dic");
@@ -141,16 +141,16 @@ internal static partial class EntityDestroyer
                                             rmArgs[0] = (IntPtr)(&guidArg);
                                             Il2CppApi.RuntimeInvoke(removeMth, dicPtr, (void**)rmArgs, ref exRm);
                                         }
-                                        Plugin.LogInfo($"[EntityEditor] [StuffOnMap] dic.Remove({guid}) ex={exRm != IntPtr.Zero}");
+                                        Plugin.LogVerbose($"[EntityEditor] [StuffOnMap] dic.Remove({guid}) ex={exRm != IntPtr.Zero}");
                                     }
-                                    catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] [StuffOnMap] dic.Remove failed: {ex.Message}"); }
+                                    catch (Exception ex) { Plugin.LogVerbose($"[EntityEditor] [StuffOnMap] dic.Remove failed: {ex.Message}"); }
                                 }
                             }
 
                             // Step B: 从 stuff_on_map_dic_by_pos 移除
                             // 通过 IL2CPP 字段枚举找到 _pos_point 字段（在父类 Item3dClickable 上）
                             IntPtr dicByPosPtr = ReadFieldSafe(mshAreaMap, areaMapClass, "stuff_on_map_dic_by_pos");
-                            Plugin.LogInfo($"[EntityEditor] [StuffOnMap] stuff_on_map_dic_by_pos={dicByPosPtr.ToInt64():X}");
+                            Plugin.LogVerbose($"[EntityEditor] [StuffOnMap] stuff_on_map_dic_by_pos={dicByPosPtr.ToInt64():X}");
                             if (dicByPosPtr != IntPtr.Zero)
                             {
                                 int posPointOffset = -1;
@@ -169,7 +169,7 @@ internal static partial class EntityDestroyer
                                             if (offset >= 0x10 && offset < 0x10000)
                                             {
                                                 posPointOffset = offset;
-                                                Plugin.LogInfo($"[EntityEditor] [StuffOnMap] Found _pos_point at offset=0x{offset:X} on {Il2CppApi.PtrToString(Il2CppApi.ClassGetName(posSearchCls))}");
+                                                Plugin.LogVerbose($"[EntityEditor] [StuffOnMap] Found _pos_point at offset=0x{offset:X} on {Il2CppApi.PtrToString(Il2CppApi.ClassGetName(posSearchCls))}");
                                             }
                                             break;
                                         }
@@ -187,7 +187,7 @@ internal static partial class EntityDestroyer
                                         px = *(int*)(e.Ptr + posPointOffset);
                                         py = *(int*)(e.Ptr + posPointOffset + 4);
                                     }
-                                    Plugin.LogInfo($"[EntityEditor] [StuffOnMap] _pos_point=({px},{py})");
+                                    Plugin.LogVerbose($"[EntityEditor] [StuffOnMap] _pos_point=({px},{py})");
 
                                     // MyListDic.Remove(Point, item) — 枚举找虚方法
                                     IntPtr dicByPosClass = Il2CppApi.GetClass(dicByPosPtr);
@@ -217,16 +217,16 @@ internal static partial class EntityDestroyer
                                                 rmArgs[1] = e.Ptr;
                                                 Il2CppApi.RuntimeInvoke(removeMth, dicByPosPtr, (void**)rmArgs, ref exRm);
                                             }
-                                            Plugin.LogInfo($"[EntityEditor] [StuffOnMap] dic_by_pos.Remove(({px},{py}), entity) ex={exRm != IntPtr.Zero}");
+                                            Plugin.LogVerbose($"[EntityEditor] [StuffOnMap] dic_by_pos.Remove(({px},{py}), entity) ex={exRm != IntPtr.Zero}");
                                             dicRemoved = true;
                                         }
-                                        catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] [StuffOnMap] dic_by_pos.Remove failed: {ex.Message}"); }
+                                        catch (Exception ex) { Plugin.LogVerbose($"[EntityEditor] [StuffOnMap] dic_by_pos.Remove failed: {ex.Message}"); }
                                     }
                                     else
-                                        Plugin.LogInfo($"[EntityEditor] [StuffOnMap] MyListDic.Remove(2p) not found");
+                                        Plugin.LogVerbose($"[EntityEditor] [StuffOnMap] MyListDic.Remove(2p) not found");
                                 }
                                 else
-                                    Plugin.LogInfo($"[EntityEditor] [StuffOnMap] _pos_point field not found in class hierarchy");
+                                    Plugin.LogVerbose($"[EntityEditor] [StuffOnMap] _pos_point field not found in class hierarchy");
                             }
 
                             // Step C: 从 stuff_on_map_list 移除
@@ -246,9 +246,9 @@ internal static partial class EntityDestroyer
                                             rmArgs[0] = e.Ptr;
                                             Il2CppApi.RuntimeInvoke(removeMth, listPtr, (void**)rmArgs, ref exRm);
                                         }
-                                        Plugin.LogInfo($"[EntityEditor] [StuffOnMap] list.Remove(entity) ex={exRm != IntPtr.Zero}");
+                                        Plugin.LogVerbose($"[EntityEditor] [StuffOnMap] list.Remove(entity) ex={exRm != IntPtr.Zero}");
                                     }
-                                    catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] [StuffOnMap] list.Remove failed: {ex.Message}"); }
+                                    catch (Exception ex) { Plugin.LogVerbose($"[EntityEditor] [StuffOnMap] list.Remove failed: {ex.Message}"); }
                                 }
                             }
                         }
@@ -257,7 +257,7 @@ internal static partial class EntityDestroyer
                     // Step D: 设置 is_dead 标记
                     if (e.FieldMeta.TryGetValue("is_dead", out var isDeadFe))
                     {
-                        try { WriteIl2CppInt(e.Ptr, isDeadFe.Offset, 1); Plugin.LogInfo($"[EntityEditor] [StuffOnMap] Set is_dead=1"); } catch { }
+                        try { WriteIl2CppInt(e.Ptr, isDeadFe.Offset, 1); Plugin.LogVerbose($"[EntityEditor] [StuffOnMap] Set is_dead=1"); } catch { }
                     }
 
                     // Step E: 隐藏实体 — 优先用 RecycleToCache，但如果字典移除可能失败则用 GameObject.SetActive(false)
@@ -275,9 +275,9 @@ internal static partial class EntityDestroyer
                                 {
                                     IntPtr exRt = IntPtr.Zero;
                                     unsafe { Il2CppApi.RuntimeInvoke(rtMth, e.Ptr, null, ref exRt); }
-                                    Plugin.LogInfo($"[EntityEditor] [StuffOnMap] RecycleToCache() ex={exRt != IntPtr.Zero}");
+                                    Plugin.LogVerbose($"[EntityEditor] [StuffOnMap] RecycleToCache() ex={exRt != IntPtr.Zero}");
                                 }
-                                catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] [StuffOnMap] RecycleToCache failed: {ex.Message}"); }
+                                catch (Exception ex) { Plugin.LogVerbose($"[EntityEditor] [StuffOnMap] RecycleToCache failed: {ex.Message}"); }
                                 break;
                             }
                             rtCls = Il2CppApi.GetParent(rtCls);
@@ -290,7 +290,7 @@ internal static partial class EntityDestroyer
                         try
                         {
                             e.GoRef!.SetActive(false);
-                            Plugin.LogInfo($"[EntityEditor] [StuffOnMap] SetActive(false) — dic removal may have failed");
+                            Plugin.LogVerbose($"[EntityEditor] [StuffOnMap] SetActive(false) — dic removal may have failed");
                         }
                         catch { }
                     }
@@ -299,7 +299,7 @@ internal static partial class EntityDestroyer
 
                 // 3d: 尝试通过其他管理器类删除
                 if (!called)
-                    Plugin.LogInfo($"[EntityEditor] [Generic] No destroy method on {className}, trying manager classes...");
+                    Plugin.LogVerbose($"[EntityEditor] [Generic] No destroy method on {className}, trying manager classes...");
                 // 根据类名推断可能的管理器
                 string[] mgrCandidates;
                 if (className.Contains("Animal"))
@@ -317,16 +317,16 @@ internal static partial class EntityDestroyer
                     IntPtr mgrClass = FindClassByName(mgrName);
                     if (mgrClass == IntPtr.Zero)
                     {
-                        Plugin.LogInfo($"[EntityEditor] [Generic] Manager class {mgrName} not found");
+                        Plugin.LogVerbose($"[EntityEditor] [Generic] Manager class {mgrName} not found");
                         continue;
                     }
                     IntPtr mgrInst = GameChainLocator.FindClassInstance(mgrClass);
                     if (mgrInst == IntPtr.Zero)
                     {
-                        Plugin.LogInfo($"[EntityEditor] [Generic] Manager {mgrName} instance not found");
+                        Plugin.LogVerbose($"[EntityEditor] [Generic] Manager {mgrName} instance not found");
                         continue;
                     }
-                    Plugin.LogInfo($"[EntityEditor] [Generic] Found manager {mgrName}, searching remove methods...");
+                    Plugin.LogVerbose($"[EntityEditor] [Generic] Found manager {mgrName}, searching remove methods...");
 
                     // 枚举管理器的方法，查找包含 Remove/Despawn/Kill/Delete 的方法
                     string[] removeKeywords = { "Remove", "Despawn", "Delete", "Kill", "Destroy", "Clear", "Release", "Recycle" };
@@ -357,27 +357,27 @@ internal static partial class EntityDestroyer
                         uint iflags = 0;
                         uint methodFlags = Il2CppApi.MethodGetFlags(mMth, ref iflags);
                         bool isStatic = (methodFlags & 0x10) != 0;
-                        Plugin.LogInfo($"[EntityEditor] [Generic]   {mgrName}.{mName}({mPc}p) params=({paramInfo}) static={isStatic}");
+                        Plugin.LogVerbose($"[EntityEditor] [Generic]   {mgrName}.{mName}({mPc}p) params=({paramInfo}) static={isStatic}");
 
                         if (mPc != 1) continue; // 只尝试 1 参数的（传入实体指针）
 
                         // 获取参数类型名，检查是否兼容
                         IntPtr paramType = Il2CppApi.GetMethodParam(mMth, 0);
                         string? paramTypeName = paramType != IntPtr.Zero ? Il2CppApi.PtrToString(Il2CppApi.TypeGetName(paramType)) : null;
-                        Plugin.LogInfo($"[EntityEditor] [Generic]   param0 type={paramTypeName}, entity class={className}");
+                        Plugin.LogVerbose($"[EntityEditor] [Generic]   param0 type={paramTypeName}, entity class={className}");
 
                         try
                         {
                             // 静态方法不传 this，实例方法传实例；唯一参数是实体指针
                             if (Il2CppInvoke.InvokeWithArgs(mMth, isStatic ? IntPtr.Zero : mgrInst, e.Ptr))
                             {
-                                Plugin.LogInfo($"[EntityEditor] ✓ Called {mgrName}.{mName}(entity) on {name}");
+                                Plugin.LogVerbose($"[EntityEditor] ✓ Called {mgrName}.{mName}(entity) on {name}");
                                 called = true;
                             }
                             else
-                                Plugin.LogInfo($"[EntityEditor] {mgrName}.{mName}(entity) IL2CPP exception");
+                                Plugin.LogVerbose($"[EntityEditor] {mgrName}.{mName}(entity) IL2CPP exception");
                         }
-                        catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] {mgrName}.{mName}(entity) CRASH: {ex.Message}"); }
+                        catch (Exception ex) { Plugin.LogVerbose($"[EntityEditor] {mgrName}.{mName}(entity) CRASH: {ex.Message}"); }
                         if (called) break;
                     }
                 }

@@ -44,10 +44,10 @@ internal static class GameChainLocator
             IntPtr exception = IntPtr.Zero;
             IntPtr mainScene = IntPtr.Zero;
             try { unsafe { mainScene = (IntPtr)Il2CppApi.RuntimeInvoke(mth, IntPtr.Zero, null, ref exception); } }
-            catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] get_main_scene() CRASH: {ex.Message}"); }
+            catch (Exception ex) { Plugin.LogVerbose($"[EntityEditor] get_main_scene() CRASH: {ex.Message}"); }
             return mainScene;
         }
-        catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] GetMainScene error: {ex.Message}"); }
+        catch (Exception ex) { Plugin.LogVerbose($"[EntityEditor] GetMainScene error: {ex.Message}"); }
         return IntPtr.Zero;
     }
 
@@ -74,13 +74,13 @@ internal static class GameChainLocator
             {
                 if (!Il2CppApi.IsInstanceFieldName(fh.Name)) continue;
 
-                Plugin.LogInfo($"[EntityEditor] Found field {fh.Name} on {className}, isStatic={fh.IsStatic}, attrs=0x{Il2CppApi.FieldGetFlags(fh.Field):X}");
+                Plugin.LogVerbose($"[EntityEditor] Found field {fh.Name} on {className}, isStatic={fh.IsStatic}, attrs=0x{Il2CppApi.FieldGetFlags(fh.Field):X}");
                 if (!fh.IsStatic) continue;
 
                 try
                 {
                     IntPtr value = Il2CppApi.ReadStaticFieldValue(fh.Field);
-                    Plugin.LogInfo($"[EntityEditor] Static field {fh.Name} value={value.ToInt64():X}");
+                    Plugin.LogVerbose($"[EntityEditor] Static field {fh.Name} value={value.ToInt64():X}");
                     if (value == IntPtr.Zero) continue;
 
                     // 验证这个指针是否是一个有效的 IL2CPP 对象
@@ -88,10 +88,10 @@ internal static class GameChainLocator
                     if (objClass == IntPtr.Zero) continue;
 
                     string? objClassName = Il2CppApi.PtrToString(Il2CppApi.ClassGetName(objClass));
-                    Plugin.LogInfo($"[EntityEditor] ✓ Got instance from {fh.Name}, class={objClassName}");
+                    Plugin.LogVerbose($"[EntityEditor] ✓ Got instance from {fh.Name}, class={objClassName}");
                     return value;
                 }
-                catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] Read static field {fh.Name} error: {ex.Message}"); }
+                catch (Exception ex) { Plugin.LogVerbose($"[EntityEditor] Read static field {fh.Name} error: {ex.Message}"); }
             }
             // 方法2：通过 Resources.FindObjectsOfTypeAll 查找
             // 我们需要通过 IL2CPP 的类型系统来查找
@@ -99,14 +99,14 @@ internal static class GameChainLocator
             IntPtr findMethod = Il2CppApi.GetMethodFromName(classPtr, "get_Instance", 0);
             if (findMethod != IntPtr.Zero)
             {
-                Plugin.LogInfo($"[EntityEditor] Found get_Instance() on {className}");
+                Plugin.LogVerbose($"[EntityEditor] Found get_Instance() on {className}");
                 IntPtr exception = IntPtr.Zero;
                 unsafe
                 {
                     IntPtr result = (IntPtr)Il2CppApi.RuntimeInvoke(findMethod, IntPtr.Zero, null, ref exception);
                     if (exception == IntPtr.Zero && result != IntPtr.Zero)
                     {
-                        Plugin.LogInfo($"[EntityEditor] get_Instance() returned valid object");
+                        Plugin.LogVerbose($"[EntityEditor] get_Instance() returned valid object");
                         return result;
                     }
                 }
@@ -124,7 +124,7 @@ internal static class GameChainLocator
                         IntPtr compClass = Il2CppApi.GetClass(comp.Pointer);
                         if (compClass == classPtr)
                         {
-                            Plugin.LogInfo($"[EntityEditor] Found instance of {className} on GO: {go.name}");
+                            Plugin.LogVerbose($"[EntityEditor] Found instance of {className} on GO: {go.name}");
                             return comp.Pointer;
                         }
                     }
@@ -132,7 +132,7 @@ internal static class GameChainLocator
                 catch { }
             }
         }
-        catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] FindClassInstance error: {ex.Message}"); }
+        catch (Exception ex) { Plugin.LogVerbose($"[EntityEditor] FindClassInstance error: {ex.Message}"); }
         return IntPtr.Zero;
     }
 
@@ -177,11 +177,11 @@ internal static class GameChainLocator
             {
                 IntPtr tc = Il2CppApi.GetClass(territoryPtr);
                 string? tn = Il2CppApi.PtrToString(Il2CppApi.ClassGetName(tc));
-                Plugin.LogInfo($"[EntityEditor] ✓ Got Territory, class={tn}");
+                Plugin.LogVerbose($"[EntityEditor] ✓ Got Territory, class={tn}");
             }
             return territoryPtr;
         }
-        catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] GetTerritory error: {ex.Message}"); }
+        catch (Exception ex) { Plugin.LogVerbose($"[EntityEditor] GetTerritory error: {ex.Message}"); }
         return IntPtr.Zero;
     }
 
@@ -192,10 +192,10 @@ internal static class GameChainLocator
     {
         try
         {
-            Plugin.LogInfo($"[EntityEditor] Finding BuildHelper via Game chain...");
+            Plugin.LogVerbose($"[EntityEditor] Finding BuildHelper via Game chain...");
 
             IntPtr gameClass = Il2CppApi.FindClassByName("Game");
-            Plugin.LogInfo($"[EntityEditor] Game class={gameClass.ToInt64():X}");
+            Plugin.LogVerbose($"[EntityEditor] Game class={gameClass.ToInt64():X}");
             if (gameClass == IntPtr.Zero) return IntPtr.Zero;
 
             // 列出 Game 类的相关方法，便于排查
@@ -206,20 +206,20 @@ internal static class GameChainLocator
                 string? mName = Il2CppApi.PtrToString(Il2CppApi.MethodGetName(mth));
                 uint pc = Il2CppApi.GetMethodParamCountRaw(mth);
                 if (mName != null && (mName.Contains("main_scene") || mName.Contains("MainScene") || mName.Contains("instance") || mName.Contains("Instance")))
-                    Plugin.LogInfo($"[EntityEditor] Game.{mName}({pc}p)");
+                    Plugin.LogVerbose($"[EntityEditor] Game.{mName}({pc}p)");
             }
 
             IntPtr mainScene = GetMainScene();
             if (mainScene == IntPtr.Zero)
             {
-                Plugin.LogInfo($"[EntityEditor] Game.get_main_scene() not found / null");
+                Plugin.LogVerbose($"[EntityEditor] Game.get_main_scene() not found / null");
                 return IntPtr.Zero;
             }
-            Plugin.LogInfo($"[EntityEditor] main_scene={mainScene.ToInt64():X}");
+            Plugin.LogVerbose($"[EntityEditor] main_scene={mainScene.ToInt64():X}");
 
             // main_scene.area_map（列出相关字段便于排查）
             IntPtr mainSceneClass = Il2CppApi.GetClass(mainScene);
-            Plugin.LogInfo($"[EntityEditor] mainScene class={mainSceneClass.ToInt64():X}");
+            Plugin.LogVerbose($"[EntityEditor] mainScene class={mainSceneClass.ToInt64():X}");
             IntPtr fi2 = IntPtr.Zero;
             IntPtr f2;
             while ((f2 = Il2CppApi.ClassGetFields(mainSceneClass, ref fi2)) != IntPtr.Zero)
@@ -229,41 +229,41 @@ internal static class GameChainLocator
                 IntPtr ft = Il2CppApi.FieldGetType(f2);
                 string? ftn = ft != IntPtr.Zero ? Il2CppApi.PtrToString(Il2CppApi.TypeGetName(ft)) : "?";
                 if (fn != null && (fn.Contains("area") || fn.Contains("map") || fn.Contains("territory") || fn.Contains("build")))
-                    Plugin.LogInfo($"[EntityEditor] MainScene.{fn} offset={offset} type={ftn}");
+                    Plugin.LogVerbose($"[EntityEditor] MainScene.{fn} offset={offset} type={ftn}");
             }
 
             IntPtr areaMapPtr = Il2CppApi.ReadFieldSafe(mainScene, mainSceneClass, "area_map");
-            Plugin.LogInfo($"[EntityEditor] area_map={areaMapPtr.ToInt64():X}");
+            Plugin.LogVerbose($"[EntityEditor] area_map={areaMapPtr.ToInt64():X}");
             if (areaMapPtr == IntPtr.Zero)
             {
-                Plugin.LogInfo($"[EntityEditor] main_scene.area_map is null");
+                Plugin.LogVerbose($"[EntityEditor] main_scene.area_map is null");
                 return IntPtr.Zero;
             }
 
             IntPtr territoryPtr = GetTerritory();
             if (territoryPtr == IntPtr.Zero)
             {
-                Plugin.LogInfo($"[EntityEditor] Could not get Territory");
+                Plugin.LogVerbose($"[EntityEditor] Could not get Territory");
                 return IntPtr.Zero;
             }
 
             IntPtr territoryClass = Il2CppApi.GetClass(territoryPtr);
-            Plugin.LogInfo($"[EntityEditor] territory class={territoryClass.ToInt64():X}");
+            Plugin.LogVerbose($"[EntityEditor] territory class={territoryClass.ToInt64():X}");
 
             IntPtr buildHelperPtr = Il2CppApi.ReadFieldSafe(territoryPtr, territoryClass, "build_helper");
             if (buildHelperPtr == IntPtr.Zero)
                 buildHelperPtr = Il2CppApi.ReadFieldSafe(territoryPtr, territoryClass, "_build_helper");
-            Plugin.LogInfo($"[EntityEditor] territory.build_helper = {buildHelperPtr.ToInt64():X}");
+            Plugin.LogVerbose($"[EntityEditor] territory.build_helper = {buildHelperPtr.ToInt64():X}");
 
             if (buildHelperPtr != IntPtr.Zero)
             {
                 IntPtr bhClass = Il2CppApi.GetClass(buildHelperPtr);
                 string? bhClassName = Il2CppApi.PtrToString(Il2CppApi.ClassGetName(bhClass));
-                Plugin.LogInfo($"[EntityEditor] ✓ Got BuildHelper, class={bhClassName}");
+                Plugin.LogVerbose($"[EntityEditor] ✓ Got BuildHelper, class={bhClassName}");
             }
             return buildHelperPtr;
         }
-        catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] GetBuildHelper error: {ex.Message}"); }
+        catch (Exception ex) { Plugin.LogVerbose($"[EntityEditor] GetBuildHelper error: {ex.Message}"); }
         return IntPtr.Zero;
     }
 
@@ -274,7 +274,7 @@ internal static class GameChainLocator
     {
         try
         {
-            Plugin.LogInfo($"[EntityEditor] Finding MapStuffHelper via Game chain...");
+            Plugin.LogVerbose($"[EntityEditor] Finding MapStuffHelper via Game chain...");
 
             IntPtr areaMapPtr = GetAreaMap();
             if (areaMapPtr == IntPtr.Zero) return IntPtr.Zero;
@@ -285,13 +285,13 @@ internal static class GameChainLocator
             {
                 IntPtr mshClass = Il2CppApi.GetClass(mapStuffHelperPtr);
                 string? mshClassName = Il2CppApi.PtrToString(Il2CppApi.ClassGetName(mshClass));
-                Plugin.LogInfo($"[EntityEditor] ✓ Got MapStuffHelper, class={mshClassName}");
+                Plugin.LogVerbose($"[EntityEditor] ✓ Got MapStuffHelper, class={mshClassName}");
             }
             else
-                Plugin.LogInfo($"[EntityEditor] area_map.map_stuff_helper is null");
+                Plugin.LogVerbose($"[EntityEditor] area_map.map_stuff_helper is null");
             return mapStuffHelperPtr;
         }
-        catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] GetMapStuffHelper error: {ex.Message}"); }
+        catch (Exception ex) { Plugin.LogVerbose($"[EntityEditor] GetMapStuffHelper error: {ex.Message}"); }
         return IntPtr.Zero;
     }
 }

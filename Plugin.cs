@@ -59,4 +59,17 @@ public class Plugin : BasePlugin
 
     internal static void LogInfo(string msg) => Logger.LogInfo(msg);
     internal static void LogError(string msg) => Logger.LogError(msg);
+
+    /// <summary>
+    /// 逐实体的调试日志开关（默认关，可用环境变量 CHESTEDITOR_VERBOSE=1 打开）。
+    /// <para>批量销毁/扫描这类热路径上，每次操作会打出一堆"逐条"日志；一次清几百个就是几千行，
+    /// 既拖慢速度又把 LogOutput.log 撑爆。默认只保留"每批一行"的汇总。</para>
+    /// </summary>
+    internal static bool Verbose { get; set; } =
+        System.Environment.GetEnvironmentVariable("CHESTEDITOR_VERBOSE") == "1";
+
+    internal static void LogVerbose(string msg)
+    {
+        if (Verbose) Logger.LogInfo(msg);
+    }
 }

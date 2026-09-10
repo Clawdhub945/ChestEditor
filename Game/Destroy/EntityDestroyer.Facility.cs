@@ -19,11 +19,11 @@ internal static partial class EntityDestroyer
         bool called = false;
         if (!called && IsFacilityClass(className))
         {
-            Plugin.LogInfo($"[EntityEditor] [Facility] Looking for BuildHelper via Territory...");
+            Plugin.LogVerbose($"[EntityEditor] [Facility] Looking for BuildHelper via Territory...");
             // IDA: territory->fields.build_helper -> BuildHelper__RemoveFacility(buildHelper, facility)
             // build_helper 不是单例，是 Territory 的实例字段
             IntPtr buildHelperInst = GameChainLocator.GetBuildHelper();
-            Plugin.LogInfo($"[EntityEditor] BuildHelper instance={buildHelperInst.ToInt64():X}");
+            Plugin.LogVerbose($"[EntityEditor] BuildHelper instance={buildHelperInst.ToInt64():X}");
             if (buildHelperInst != IntPtr.Zero)
             {
                 // 手动执行 Dismantle 的关键步骤（避免直接调用 Dismantle 导致崩溃）
@@ -50,9 +50,9 @@ internal static partial class EntityDestroyer
                         {
                             IntPtr ex = IntPtr.Zero;
                             unsafe { Il2CppApi.RuntimeInvoke(closeWindowMth, e.Ptr, null, ref ex); }
-                            Plugin.LogInfo($"[EntityEditor] Facility.CloseWindow() done, ex={ex != IntPtr.Zero}");
+                            Plugin.LogVerbose($"[EntityEditor] Facility.CloseWindow() done, ex={ex != IntPtr.Zero}");
                         }
-                        catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] CloseWindow failed: {ex.Message}"); }
+                        catch (Exception ex) { Plugin.LogVerbose($"[EntityEditor] CloseWindow failed: {ex.Message}"); }
                     }
                 }
 
@@ -72,13 +72,13 @@ internal static partial class EntityDestroyer
                     }
                     if (disMth != IntPtr.Zero)
                     {
-                        Plugin.LogInfo($"[EntityEditor] Found Facility.Dismantle(6p), calling...");
+                        Plugin.LogVerbose($"[EntityEditor] Found Facility.Dismantle(6p), calling...");
                         try
                         {
                             bool ok = Il2CppInvoke.InvokeWithDefaults(disMth, e.Ptr, 6);
-                            Plugin.LogInfo($"[EntityEditor] Facility.Dismantle(6p) done, exception={!ok}");
+                            Plugin.LogVerbose($"[EntityEditor] Facility.Dismantle(6p) done, exception={!ok}");
                         }
-                        catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] Facility.Dismantle(6p) failed: {ex.Message}"); }
+                        catch (Exception ex) { Plugin.LogVerbose($"[EntityEditor] Facility.Dismantle(6p) failed: {ex.Message}"); }
                     }
                 }
 
@@ -122,9 +122,9 @@ internal static partial class EntityDestroyer
                                         }
                                     }
                                 }
-                                Plugin.LogInfo($"[EntityEditor] BH.{fn}.Remove(facility) done, ex={ex != IntPtr.Zero}");
+                                Plugin.LogVerbose($"[EntityEditor] BH.{fn}.Remove(facility) done, ex={ex != IntPtr.Zero}");
                             }
-                            catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] BH.{fn}.Remove failed: {ex.Message}"); }
+                            catch (Exception ex) { Plugin.LogVerbose($"[EntityEditor] BH.{fn}.Remove failed: {ex.Message}"); }
                         }
                     }
                 }
@@ -142,9 +142,9 @@ internal static partial class EntityDestroyer
                             {
                                 IntPtr ex = IntPtr.Zero;
                                 unsafe { Il2CppApi.RuntimeInvoke(rMth, e.Ptr, null, ref ex); }
-                                Plugin.LogInfo($"[EntityEditor] RecycleMySp() done, ex={ex != IntPtr.Zero}");
+                                Plugin.LogVerbose($"[EntityEditor] RecycleMySp() done, ex={ex != IntPtr.Zero}");
                             }
-                            catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] RecycleMySp failed: {ex.Message}"); }
+                            catch (Exception ex) { Plugin.LogVerbose($"[EntityEditor] RecycleMySp failed: {ex.Message}"); }
                             break;
                         }
                         rCls = Il2CppApi.GetParent(rCls);
@@ -157,15 +157,15 @@ internal static partial class EntityDestroyer
                 {
                     e.GoRef!.SetActive(false);
                     UnityEngine.Object.DestroyImmediate(e.GoRef);
-                    Plugin.LogInfo($"[EntityEditor] DestroyImmediate done");
+                    Plugin.LogVerbose($"[EntityEditor] DestroyImmediate done");
                 }
-                catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] DestroyImmediate failed: {ex.Message}"); }
+                catch (Exception ex) { Plugin.LogVerbose($"[EntityEditor] DestroyImmediate failed: {ex.Message}"); }
 
-                Plugin.LogInfo($"[EntityEditor] Manual dismantle steps completed");
+                Plugin.LogVerbose($"[EntityEditor] Manual dismantle steps completed");
                 called = true;
             }
                 else
-                    Plugin.LogInfo($"[EntityEditor] Could not get BuildHelper instance");
+                    Plugin.LogVerbose($"[EntityEditor] Could not get BuildHelper instance");
             }
         return called;
     }
@@ -176,7 +176,7 @@ internal static partial class EntityDestroyer
         bool called = false;
         if (!called && IsFacilityClass(className))
         {
-            Plugin.LogInfo($"[EntityEditor] [Facility] Trying other manager classes...");
+            Plugin.LogVerbose($"[EntityEditor] [Facility] Trying other manager classes...");
             string[] managerClassNames = { "Territory", "AreaMap", "FacilityManager", "FacilityCtrl", "GameCtrl", "MainScene" };
             foreach (var mgrName in managerClassNames)
             {
@@ -201,11 +201,11 @@ internal static partial class EntityDestroyer
                                     args[0] = e.Ptr;
                                     if (Il2CppInvoke.InvokeWithArgs(mth, inst, args))
                                     {
-                                        Plugin.LogInfo($"[EntityEditor] ✓ Called {mgrName}.{methodName}({pc}p)");
+                                        Plugin.LogVerbose($"[EntityEditor] ✓ Called {mgrName}.{methodName}({pc}p)");
                                         called = true;
                                     }
                                 }
-                                catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] {mgrName}.{methodName}({pc}p) CRASH: {ex.Message}"); }
+                                catch (Exception ex) { Plugin.LogVerbose($"[EntityEditor] {mgrName}.{methodName}({pc}p) CRASH: {ex.Message}"); }
                             }
                         }
                     }
