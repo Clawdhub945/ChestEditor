@@ -103,6 +103,14 @@ internal static class EntityScan
     /// <returns>已在扫描中（且未强制）时返回 false。</returns>
     internal static bool BeginScan(GameObject[]? source = null, bool forceFieldRefresh = false, bool force = false)
     {
+        if (!Threading.MainThread.IsMainThread)
+        {
+            // ⚠ 这里必须挡住：Resources.FindObjectsOfTypeAll 在非主线程调用会
+            // AccessViolationException → Fatal error → 游戏直接闪退（托管 try/catch 拦不住）。
+            // 所以宁可拒绝本次扫描，也不能放过去。
+            Plugin.LogError("[EntityScan] BeginScan 只能在主线程调用（Resources.FindObjectsOfTypeAll 非线程安全），已拒绝本次扫描");
+            return false;
+        }
         if (_run != null && !force) return false;
         // ⚠ 这里**不**清 _entities / _byPtrHash：新结果先攒在 run 里，扫完才整体替换。
         if (forceFieldRefresh) Il2CppApi.ClearClassFieldCache();

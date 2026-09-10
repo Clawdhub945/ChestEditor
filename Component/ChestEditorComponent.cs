@@ -44,6 +44,9 @@ public class ChestEditorComponent : MonoBehaviour
 
     private void Update()
     {
+        // 记录主线程 id：给 MainThread.IsMainThread 用（防止有调用点在 HTTP 线程上碰 Unity 对象）
+        MainThread.MarkMainThread();
+
         if (Input.GetKeyDown(KeyCode.F11))
         {
             try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("http://localhost:8765/") { UseShellExecute = true }); }

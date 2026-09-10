@@ -10,11 +10,17 @@ internal static class NpcHandlers
 
     internal static void Register()
     {
-        // 全量扫描：分片推进（每帧一批），扫完再在主线程上应用待写入的修改
+        // 全量扫描：分片推进（每帧一批），扫完再在主线程上应用待写入的修改。
+        // ⚠⚠ 开扫那一步（BeginScan → Resources.FindObjectsOfTypeAll）必须跑在主线程上，
+        // 详见 EntityHandlers 里的说明（放 HTTP 线程上会让游戏闪退）。
         Router.Add("POST", "/api/npc/scan", _ =>
         {
-            EntityScan.BeginScan();
-            MainThread.RunPaced(() => EntityScan.StepScan(ScanObjectsPerFrame), 120000);
+            bool begun = false;
+            MainThread.RunPaced(() =>
+            {
+                if (!begun) { begun = true; EntityScan.BeginScan(); }
+                return EntityScan.StepScan(ScanObjectsPerFrame);
+            }, 120000);
             return MainThread.Run(() =>
             {
                 ModificationStore.ApplyPendingModifications();

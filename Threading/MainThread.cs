@@ -16,6 +16,20 @@ public static class MainThread
     // 分片任务：需要跨多帧推进的工作（如全量场景扫描），每帧只推进一步，避免单帧长时间冻结
     private static readonly ConcurrentQueue<Func<bool>> PendingTickers = new();
     private static readonly List<Func<bool>> Tickers = new();
+    private static int _mainThreadId;
+
+    /// <summary>标记"当前线程是主线程"（组件 Update 里调用）。</summary>
+    internal static void MarkMainThread() => _mainThreadId = Environment.CurrentManagedThreadId;
+
+    /// <summary>
+    /// 当前是否在主线程。
+    /// <para>⚠⚠ Unity / IL2CPP 的对象操作 —— 尤其 <c>Resources.FindObjectsOfTypeAll</c>、
+    /// <c>GameObject.scene</c>、Instantiate / Destroy —— **只能在主线程调**。
+    /// 在 HTTP 线程（线程池线程）上调会直接 <c>AccessViolationException</c> 把游戏打闪退：
+    /// 那是 native 层的访问违例，托管层的 try/catch **拦不住**，只会看到 Fatal error。</para>
+    /// </summary>
+    internal static bool IsMainThread =>
+        _mainThreadId == 0 || _mainThreadId == Environment.CurrentManagedThreadId;
 
     internal static void Enqueue(Action job) => Queue.Enqueue(job);
 
