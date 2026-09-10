@@ -47,35 +47,59 @@ internal static class StuffOnMapService
     }
 
     /// <summary>
-    /// 拾取掉落物进国库（「国王宝箱」设施）。主线程调用，分片摊帧由 handler 负责。
+    /// 拾取掉落物进容器。主线程调用，分片摊帧由 handler 负责。
     /// <para>
     /// 流程（全部照抄游戏自己的路径，源码核实）：
-    ///   1. <c>Game.main_scene.GetKingdomTreasureBox()</c> 拿国库实例（没建宝箱 → 抛错）；
+    ///   1. 解析目标容器：'treasury' → <c>Game.main_scene.GetKingdomTreasureBox()</c>（游戏原生最稳）；
+    ///      数字 → 实体表里该 stuff_id 的第一个在场 Facility（王座/箱子/货架等，需 activeInHierarchy）。
     ///   2. 每个实体：读堆叠数 count（stuff_id 扫描已存）→
-    ///      <c>FacilityKingdomTreasureBox.AddStuff(stuff_id, count)</c> 入库（BagDic 字典制无容量上限）
+    ///      <c>Facility.AddStuff(stuff_id, count)</c> 入库（Facility 基类通用方法，BagDic 字典制无容量上限）
     ///      → <see cref="DestroyOne"/>（guid 从注册表移除，等价于被"捡走"）。
     /// </para>
-    /// <para>⚠ 先入库后删除：删了就读不到 count 了。AddStuff 失败/空堆不删。</para>
+    /// <para>⚠ 先入库后删除：删了就读不到 count 了。空堆/实体失效不删（skipped）。</para>
     /// </summary>
+    /// <param name="target">'treasury' 或目标容器的 stuff_id（十进制字符串，由前端下拉给出）</param>
     /// <returns>(picked = 成功入库并移除的堆数, skipped = 空堆/实体失效跳过数)</returns>
-    internal static (int picked, int skipped) PickUpToTreasury(List<int> ptrHashes)
+    internal static (int picked, int skipped, List<int> pickedHashes) PickUp(List<int> ptrHashes, string target)
     {
-        IntPtr mainScene = GameChainLocator.GetMainScene();
-        if (mainScene == IntPtr.Zero)
-            throw new InvalidOperationException("未进入存档，找不到主场景");
-        IntPtr getBox = FindMethodInHierarchy(GetClass(mainScene), "GetKingdomTreasureBox", 0);
-        if (getBox == IntPtr.Zero)
-            throw new InvalidOperationException("找不到 MainScene.GetKingdomTreasureBox()");
-        // runtime_invoke 对引用类型返回值直接给对象指针（与 InvokeString 同一约定），Zero = 没建宝箱
-        IntPtr box = Invoke(getBox, mainScene);
-        if (box == IntPtr.Zero)
-            throw new InvalidOperationException("未找到国库宝箱（FacilityKingdomTreasureBox 还没建？）");
-        IntPtr addStuff = FindMethodInHierarchy(GetClass(box), "AddStuff", 2);
+        IntPtr box, addStuff;
+        if (target == "treasury")
+        {
+            IntPtr mainScene = GameChainLocator.GetMainScene();
+            if (mainScene == IntPtr.Zero)
+                throw new InvalidOperationException("未进入存档，找不到主场景");
+            IntPtr getBox = FindMethodInHierarchy(GetClass(mainScene), "GetKingdomTreasureBox", 0);
+            if (getBox == IntPtr.Zero)
+                throw new InvalidOperationException("找不到 MainScene.GetKingdomTreasureBox()");
+            // runtime_invoke 对引用类型返回值直接给对象指针（与 InvokeString 同一约定），Zero = 没建宝箱
+            box = Invoke(getBox, mainScene);
+            if (box == IntPtr.Zero)
+                throw new InvalidOperationException("未找到国库宝箱（FacilityKingdomTreasureBox 还没建？）");
+            addStuff = FindMethodInHierarchy(GetClass(box), "AddStuff", 2);
+        }
+        else
+        {
+            if (!int.TryParse(target, out int targetStuffId) || targetStuffId <= 0)
+                throw new InvalidOperationException("无效的容器 target: " + target);
+            box = IntPtr.Zero;
+            foreach (var e in EntityScan.Snapshot())
+            {
+                if (e.ClassName == null || e.ClassName.IndexOf("Facility", StringComparison.Ordinal) != 0) continue;
+                if (e.StuffId != targetStuffId) continue;
+                // 池化/已拆除的容器 GO 可能已不在场，校验激活状态
+                try { if (e.GoRef != null && !e.GoRef.activeInHierarchy) continue; } catch { }
+                box = e.Ptr; break;
+            }
+            if (box == IntPtr.Zero)
+                throw new InvalidOperationException("地图上找不到该容器（stuff_id=" + targetStuffId + "），先建一个或重新扫描");
+            addStuff = FindMethodInHierarchy(GetClass(box), "AddStuff", 2);
+        }
         if (addStuff == IntPtr.Zero)
-            throw new InvalidOperationException("找不到国库 AddStuff(stuff_id, stuff_count)");
+            throw new InvalidOperationException("找不到容器 AddStuff(stuff_id, count)（基类 Facility 应有）");
         Resolve();
 
         int picked = 0, skipped = 0;
+        var pickedHashes = new List<int>();
         foreach (int ph in ptrHashes)
         {
             var e = EntityScan.FindByPtrHash(ph);
@@ -85,10 +109,15 @@ internal static class StuffOnMapService
             if (e.FieldMeta.TryGetValue("count", out var cf) && !cf.IsString && !cf.IsPointer)
                 try { count = ReadIl2CppInt(e.Ptr, cf.Offset); } catch { }
             if (count <= 0) { skipped++; continue; }   // 被捡剩 0 的空堆
-            Invoke(addStuff, box, e.StuffId, count);   // 入国库
-            if (DestroyOne(e.Guid)) picked++; else skipped++;
+            Invoke(addStuff, box, e.StuffId, count);   // 入容器
+            if (DestroyOne(e.Guid))
+            {
+                picked++;
+                pickedHashes.Add(ph);
+            }
+            else skipped++;
         }
-        return (picked, skipped);
+        return (picked, skipped, pickedHashes);
     }
 
     /// <summary>il2cpp 装箱 bool → 托管 bool。Il2CppObject 布局 = klass(8B) + monitor(8B) + data(1B)。</summary>

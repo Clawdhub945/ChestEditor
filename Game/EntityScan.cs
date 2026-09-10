@@ -549,4 +549,7 @@ internal static class EntityScan
     internal static EditorEntity? FindByPtrHash(int ptrHash)
         => _byPtrHash.TryGetValue(ptrHash, out var e) ? e : null;
 
+    /// <summary>当前实体名单的只读快照（分片扫描整体替换引用，遍历期间读到的都是完整名单）</summary>
+    internal static IReadOnlyList<EditorEntity> Snapshot() => _entities;
+
 }

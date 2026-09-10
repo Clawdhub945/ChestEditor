@@ -1279,9 +1279,21 @@ async function renderNpcfixBox5(forceScan) {
   html += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-shrink:0">';
   html += '<h2 style="color:var(--accent-light);margin:0;font-size:18px">&#x1F4B0; 掉落物</h2>';
   html += '<span style="color:var(--text-muted);font-size:13px">掉在地图上的物品堆 · 按物品名分组（大分组限量显示，用搜索框过滤）</span>';
-  html += npcfixBoxBtn('拾取进国库', NPCFIX_BIFF_COLOR, "npcfixPickup('stuff:all')")
+  html += npcfixBoxBtn('拾取', NPCFIX_BIFF_COLOR, "npcfixPickup('stuff:all')")
     + npcfixBoxClearBtn('stuff', 'all');
   html += '<button onclick="renderNpcfixBox5(true)" style="padding:6px 16px;background:var(--accent);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;font-size:13px;margin-left:auto">重新扫描</button>';
+  html += '</div>';
+  html += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-shrink:0;flex-wrap:wrap">';
+  html += '<button id="npcfixAutoPickBtn" onclick="npcfixAutoPickToggle()"'
+    + ' style="padding:5px 14px;background:var(--bg-input);color:var(--text-secondary);border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:13px;font-weight:700">'
+    + npcfixAutoPickBtnText() + '</button>';
+  html += '<span style="font-size:13px;color:var(--text-muted)">每隔</span>';
+  html += '<input type="number" min="' + NPCFIX_AUTO_PICK_MIN + '" max="' + NPCFIX_AUTO_PICK_MAX + '"'
+    + ' value="' + npcfixAutoPickGetInterval() + '" onchange="npcfixAutoPickIntervalChange(this)"'
+    + ' style="width:64px;padding:5px 8px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px">';
+  html += '<span style="font-size:13px;color:var(--text-muted)">秒拾取到</span>';
+  html += npcfixAutoPickTargetSelectHtml();
+  html += '<span style="font-size:11px;color:var(--text-muted)">间隔 5~60 秒 · 读取存档时自动关闭</span>';
   html += '</div>';
   html += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-shrink:0">';
   html += '<input id="npcfixBox5Search" value="' + esc(npcfixBox5Query) + '"'
@@ -1344,15 +1356,16 @@ function npcfixBox5RenderBody() {
   body.innerHTML = h || npcfixEmptyHint('没有匹配的掉落物（共 ' + total + ' 堆）');
 }
 
-// 拾取进国库（spec = 'stuff:all[:g=组名]'）：按范围收集 → 分批 入库+移除 → 重扫刷新。
-// 与一键清除的区别：物品先 AddStuff 进「国王宝箱」的 Bag 再从地图移除 —— 是入账，不是消失。
+// 拾取进容器（spec = 'stuff:all[:g=组名]'）：按范围收集 → 分批 入库+移除 → 重扫刷新。
+// 目标用自动拾取下拉的当前选择（手动/自动共用一个目标，避免两处状态不一致）。
 async function npcfixPickup(spec) {
   const p = npcfixParseSpec(spec);
   if (!p) return;
   const hashes = entityEditorData.filter(e => p.test(e)).map(e => e.ptrHash);
   if (hashes.length === 0) { toast('没有可拾取的掉落物', true); return; }
+  const targetName = npcfixAutoPickTargetLabel();
   const g = spec.indexOf(':g=') >= 0 ? '该物品' : '全部';
-  if (!confirm('确定把' + g + ' ' + hashes.length + ' 堆掉落物拾取进国库？')) return;
+  if (!confirm('确定把' + g + ' ' + hashes.length + ' 堆掉落物拾取进「' + targetName + '」？')) return;
   toast('拾取中...', false);
   let picked = 0, skipped = 0;
   for (let i = 0; i < hashes.length; i += NPCFIX_KILL_CHUNK) {
@@ -1361,14 +1374,163 @@ async function npcfixPickup(spec) {
       const r = await fetch('/api/editor/stuff/pickup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ptrHashes: part })
+        body: JSON.stringify({ ptrHashes: part, target: npcfixAutoPickGetTarget() })
       }).then(x => x.json());
       picked += (r && r.picked) || 0;
       skipped += (r && r.skipped) || 0;
     } catch (e) { skipped += part.length; }
     await new Promise(r => setTimeout(r, 60));
   }
-  toast('拾取完成: ' + picked + ' 堆入国库' + (skipped > 0 ? '（跳过 ' + skipped + ' 堆空堆/失效）' : ''));
+  toast('拾取完成: ' + picked + ' 堆入「' + targetName + '」' + (skipped > 0 ? '（跳过 ' + skipped + ' 堆空堆/失效）' : ''));
   await npcfixScan();
   npcfixRefreshView();
+}
+
+// ===== 自动拾取（盒子5）：每 N 秒把地上掉落物拾取进选定容器，读档/退出自动关 =====
+// 目标下拉：常用 4 项（国库/王座/最小箱子/货架）+「更多容器」分组（从实体扫描动态生成）。
+// 后端 target：'treasury' 走游戏原生 GetKingdomTreasureBox；数字 stuff_id 走实体表找在场实例。
+const NPCFIX_AUTO_PICK_MIN = 5;      // 间隔下限（秒）
+const NPCFIX_AUTO_PICK_MAX = 60;     // 间隔上限（秒）
+const NPCFIX_AUTO_PICK_DEFAULT = 10; // 默认间隔
+const NPCFIX_PICK_TARGETS = [        // 常用目标（stuff_id 实测：国库109005 / 王座106005 / 大箱子103001 / 货架103003）
+  { v: 'treasury', label: '🏛 国库' },
+  { v: '106005', label: '👑 王座' },
+  { v: '103001', label: '📦 大箱子（最小数值的箱子）' },
+  { v: '103003', label: '🗂 货架' },
+];
+let npcfixAutoPickOn = false;
+let npcfixAutoPickTimer = null;
+let npcfixAutoPickCount = 0;
+let npcfixAutoPickBusy = false;
+let npcfixAutoPickSaveLoads = -1;
+let npcfixAutoPickPicked = new Set(); // 本轮已拾 ptrHash（重扫前防重复入账——不然同一堆会被反复 AddStuff 刷资源）
+
+function npcfixAutoPickGetInterval() {
+  const v = parseInt(localStorage.getItem('chesteditor.autoPickInterval'), 10);
+  if (isNaN(v)) return NPCFIX_AUTO_PICK_DEFAULT;
+  return Math.min(NPCFIX_AUTO_PICK_MAX, Math.max(NPCFIX_AUTO_PICK_MIN, v));
+}
+function npcfixAutoPickIntervalChange(el) {
+  let v = parseInt(el.value, 10);
+  if (isNaN(v)) v = NPCFIX_AUTO_PICK_DEFAULT;
+  v = Math.min(NPCFIX_AUTO_PICK_MAX, Math.max(NPCFIX_AUTO_PICK_MIN, v));
+  el.value = v;
+  localStorage.setItem('chesteditor.autoPickInterval', String(v));
+  if (npcfixAutoPickOn) toast('自动拾取间隔已改为每 ' + v + ' 秒');
+}
+function npcfixAutoPickTargetChange(el) {
+  localStorage.setItem('chesteditor.autoPickTarget', el.value);
+  toast('拾取目标：' + (el.options[el.selectedIndex] ? el.options[el.selectedIndex].text : el.value));
+}
+function npcfixAutoPickGetTarget() { return localStorage.getItem('chesteditor.autoPickTarget') || 'treasury'; }
+function npcfixAutoPickTargetLabel() {
+  const v = npcfixAutoPickGetTarget();
+  const hit = NPCFIX_PICK_TARGETS.find(t => t.v === v);
+  if (hit) return hit.label;
+  // 动态"更多"目标：从当前下拉取显示名
+  const sel = document.getElementById('npcfixAutoPickTarget');
+  if (sel && sel.selectedIndex >= 0 && sel.options[sel.selectedIndex]) return sel.options[sel.selectedIndex].text;
+  return v;
+}
+
+// 目标下拉：常用 optgroup + 更多容器 optgroup（Facility 按 stuffId 去重，排除常用）
+function npcfixAutoPickTargetSelectHtml() {
+  const cur = npcfixAutoPickGetTarget();
+  const commonIds = new Set(NPCFIX_PICK_TARGETS.map(t => t.v).filter(v => v !== 'treasury').map(Number));
+  const seen = new Map();
+  for (const e of entityEditorData) {
+    if ((e.className || '').indexOf('Facility') !== 0) continue;
+    if (!e.stuffId || commonIds.has(e.stuffId) || seen.has(e.stuffId)) continue;
+    seen.set(e.stuffId, e.name || e.className);
+  }
+  let found = NPCFIX_PICK_TARGETS.some(t => t.v === cur) || seen.has(Number(cur));
+  let h = '<select id="npcfixAutoPickTarget" onchange="npcfixAutoPickTargetChange(this)"'
+    + ' style="padding:5px 8px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px">';
+  h += '<optgroup label="常用">';
+  for (const t of NPCFIX_PICK_TARGETS)
+    h += '<option value="' + t.v + '"' + (t.v === cur ? ' selected' : '') + '>' + t.label + '</option>';
+  h += '</optgroup>';
+  if (seen.size > 0) {
+    h += '<optgroup label="更多容器">';
+    for (const [sid, name] of [...seen.entries()].sort((a, b) => a[0] - b[0]))
+      h += '<option value="' + sid + '"' + (String(sid) === cur ? ' selected' : '') + '>' + esc(name) + '</option>';
+    h += '</optgroup>';
+  }
+  h += '</select>';
+  // 记忆的目标不在选项里（容器被拆/换存档）→ 存一份修正
+  if (!found) localStorage.setItem('chesteditor.autoPickTarget', 'treasury');
+  return h;
+}
+
+function npcfixAutoPickBtnText() {
+  return npcfixAutoPickOn ? ('自动拾取: 开（已拾 ' + npcfixAutoPickCount + '）') : '自动拾取: 关';
+}
+function npcfixAutoPickUpdateBtn() {
+  const b = document.getElementById('npcfixAutoPickBtn');
+  if (b) b.textContent = npcfixAutoPickBtnText();
+}
+function npcfixAutoPickForceOff(reason) {
+  npcfixAutoPickOn = false;
+  if (npcfixAutoPickTimer) { clearTimeout(npcfixAutoPickTimer); npcfixAutoPickTimer = null; }
+  toast(reason + '（本次累计拾取 ' + npcfixAutoPickCount + ' 堆）', true);
+  npcfixAutoPickUpdateBtn();
+}
+// 读档/退出自动关（与定期清理同规则，各自记 saveLoads 基线）
+function npcfixAutoPickCheckState(st) {
+  if (!st) return false;
+  if (st.loading || (typeof st.saveLoads === 'number' && st.saveLoads !== npcfixAutoPickSaveLoads)) {
+    npcfixAutoPickForceOff('检测到读取存档，自动拾取已自动关闭');
+    return true;
+  }
+  if (st.inSave === false) { npcfixAutoPickForceOff('已退出存档，自动拾取已自动关闭'); return true; }
+  return false;
+}
+async function npcfixAutoPickToggle() {
+  if (npcfixAutoPickOn) {
+    npcfixAutoPickOn = false;
+    if (npcfixAutoPickTimer) { clearTimeout(npcfixAutoPickTimer); npcfixAutoPickTimer = null; }
+    toast('自动拾取已关闭（累计拾取 ' + npcfixAutoPickCount + ' 堆）');
+    npcfixAutoPickUpdateBtn();
+    return;
+  }
+  // 开启前核对状态（与定期清理同款）
+  const st = await npcfixFetchState();
+  if (!st) { toast('开启失败：无法连接游戏接口', true); return; }
+  if (st.inSave === false) { toast('开启失败：未进入存档', true); return; }
+  if (st.loading) { toast('开启失败：正在读取存档', true); return; }
+  if (st.scanning) { toast('开启失败：正在扫描，请稍后再试', true); return; }
+  npcfixAutoPickSaveLoads = typeof st.saveLoads === 'number' ? st.saveLoads : -1;
+  npcfixAutoPickOn = true;
+  npcfixAutoPickCount = 0;
+  npcfixAutoPickPicked = new Set();
+  npcfixAutoPickBusy = false;
+  toast('自动拾取已开启：每 ' + npcfixAutoPickGetInterval() + ' 秒 → ' + npcfixAutoPickTargetLabel());
+  npcfixAutoPickUpdateBtn();
+  npcfixAutoPickTick();
+}
+// 一拍：核对状态 → 收集未拾的掉落物 → 分批入容器 → 记录成功名单（防重扫前重复入账）
+async function npcfixAutoPickTick() {
+  if (!npcfixAutoPickOn) return;
+  try {
+    if (npcfixAutoPickCheckState(await npcfixFetchState())) return;
+    if (!npcfixScanning && !npcfixAutoPickBusy) {
+      npcfixAutoPickBusy = true;
+      try {
+        const hashes = entityEditorData
+          .filter(e => npcfixIsStuffOnMapEntity(e) && !npcfixAutoPickPicked.has(e.ptrHash))
+          .map(e => e.ptrHash);
+        if (hashes.length > 0) {
+          const r = await fetch('/api/editor/stuff/pickup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ptrHashes: hashes, target: npcfixAutoPickGetTarget() })
+          }).then(x => x.json());
+          for (const h of (r && r.pickedHashes) || []) npcfixAutoPickPicked.add(h);
+          npcfixAutoPickCount += (r && r.picked) || 0;
+        }
+      } finally { npcfixAutoPickBusy = false; }
+    }
+  } catch (e) { /* 单拍失败不中断整个模式 */ }
+  npcfixAutoPickUpdateBtn();
+  if (npcfixAutoPickOn) npcfixAutoPickTimer = setTimeout(npcfixAutoPickTick, npcfixAutoPickGetInterval() * 1000);
 }

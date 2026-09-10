@@ -30,6 +30,7 @@ const SYNTH = [
   nx({ className: 'FacilityWall', hometownKingdomId: 1, territoryKingdomId: 1, stuffId: 102006, name: '铁墙', stuffNameWithIdIndex: '铁墙1' }),            // 我方建筑
   nx({ className: 'FacilityStorageBarn', hometownKingdomId: 1, territoryKingdomId: 1, stuffId: 103002, name: '大箱子', stuffNameWithIdIndex: '大箱子1' }), // 我方建筑·箱子（高危）
   nx({ className: 'FacilityCityWall', hometownKingdomId: 102, territoryKingdomId: 102, stuffId: 102008, name: '城墙', stuffNameWithIdIndex: '城墙1' }),    // 敌方建筑
+  nx({ className: 'StuffOnMap', hometownKingdomId: 1, territoryKingdomId: 1, stuffId: 304001, name: '白银', stuffNameWithIdIndex: '白银1' }),             // 掉落物（结构断言的稳定锚点，实机会被拾光）
 ];
 const DATA = LIVE.concat(SYNTH);
 
@@ -444,8 +445,8 @@ const src = fs.readFileSync(path.join(dir, 'npcfix.js'), 'utf8');
   // 实机守恒：全部 StuffOnMap* 都能分组（物品无阵营语义，全 0 的粪便也照常显示）
   const liveStuff = LIVE.filter(e => ctx.npcfixIsStuffOnMapEntity(e));
   const liveZeroStuff = liveStuff.filter(e => kidOf(e) === 0).length;
-  console.log('  实机掉落物', liveStuff.length, '堆（其中阵营字段全0的粪便', liveZeroStuff, '堆照常显示）');
-  ok(liveZeroStuff > 0, '实机有全0阵营的掉落物（验证"不做阵营0隐藏"是有意义的）');
+  console.log('  实机掉落物', liveStuff.length, '堆（其中阵营字段全0的粪便', liveZeroStuff, '堆照常显示；实机可能已被拾光，结构断言靠 SYNTH 的白银）');
+  ok(liveZeroStuff > 0 || liveStuff.length === 0, '实机有全0阵营的掉落物（或实机暂无掉落物）');
 
   setData(DATA);
   await ctx.renderNpcfixBox5(false);
@@ -499,10 +500,49 @@ const src = fs.readFileSync(path.join(dir, 'npcfix.js'), 'utf8');
   await ctx.npcfixPickup('stuff:all');
   ctx.fetch = origFetch;
   console.log('  [拾取确认] ' + String(cap6).replace(/\n/g, ' ⏎ '));
-  ok(/拾取进国库/.test(cap6) && /\d+ 堆/.test(cap6), '拾取确认框含数量与去向');
+  ok(/拾取进「/.test(cap6) && /\d+ 堆/.test(cap6), '拾取确认框含数量与目标容器');
   ok(calls2.some(u => u.indexOf('/api/editor/stuff/pickup') >= 0), '拾取请求走 /api/editor/stuff/pickup');
   ok(!calls2.some(u => u.indexOf('/api/editor/destroy/batch') >= 0) && !calls2.some(u => u.indexOf('/api/editor/stuff/batch') >= 0),
     '拾取不走销毁接口');
+
+  // ---------- 14) 自动拾取 ----------
+  console.log('\n== 14) 自动拾取 ==');
+  stateResp = { inSave: true, loading: false, saveLoads: 5 };   // 9) 组测过"读档自动关"，把状态还原
+  ok(ev('NPCFIX_AUTO_PICK_MIN') === 5 && ev('NPCFIX_AUTO_PICK_MAX') === 60, '间隔范围 5~60 秒');
+  // 间隔夹取：4→5 / 61→60 / 非法→10 / 正常保留
+  const clamp = v => vm.runInContext(`(function(){ var el={value:'${v}'}; npcfixAutoPickIntervalChange(el); return el.value; })()`, ctx);
+  console.log('  夹取: 4→' + clamp(4), '61→' + clamp(61), 'abc→' + clamp('abc'), '30→' + clamp(30));
+  ok(clamp(4) === 5 && clamp(61) === 60 && clamp('abc') === 10 && clamp(30) === 30, '间隔夹取 4→5 / 61→60 / 非法→10 / 30 不变');
+  // 目标下拉：常用 optgroup + 更多容器 optgroup（动态）
+  setData(DATA);
+  const selHtml = ev('npcfixAutoPickTargetSelectHtml()');
+  ok(selHtml.indexOf('optgroup label="常用"') >= 0, '下拉有「常用」分组');
+  ok(selHtml.indexOf('optgroup label="更多容器"') >= 0, '下拉有「更多容器」分组（动态生成）');
+  ok(selHtml.indexOf('value="treasury"') >= 0 && selHtml.indexOf('value="106005"') >= 0
+    && selHtml.indexOf('value="103001"') >= 0 && selHtml.indexOf('value="103003"') >= 0,
+    '常用 4 项：国库 / 王座 / 大箱子（最小）/ 货架');
+  ok(selHtml.indexOf('value="103002"') >= 0, '料堆等其他容器归进「更多容器」');
+  ok(ev('npcfixAutoPickGetTarget()') === 'treasury', '目标默认 = 国库（treasury）');
+  // 开关 + tick 路由
+  ok(ev('npcfixAutoPickBtnText()') === '自动拾取: 关', '初始状态「关」');
+  ctx.confirm = () => true;
+  setData(DATA.filter(e => ctx.npcfixIsStuffOnMapEntity(e)));   // 只留掉落物，拾取请求可预期
+  const calls3 = [];
+  ctx.fetch = (u, o) => { calls3.push([String(u), o && o.body]); return origFetch(u, o); };
+  await ctx.npcfixAutoPickToggle();   // 开启（第一拍立即执行）
+  ok(ev('npcfixAutoPickBtnText()').indexOf('自动拾取: 开') === 0, '点一下变「开」');
+  await new Promise(r => setTimeout(r, 30));   // 等 tick 的 fetch 微任务链跑完（tick 是 fire-and-forget）
+  await ctx.npcfixAutoPickToggle();   // 关闭（停掉定时器，进程能退出）
+  ok(ev('npcfixAutoPickBtnText()') === '自动拾取: 关', '再点变回「关」');
+  const pickCall = calls3.find(([u]) => u.indexOf('/api/editor/stuff/pickup') >= 0);
+  ok(!!pickCall, 'tick 发拾取请求');
+  if (pickCall && pickCall[1]) {
+    const sent = JSON.parse(pickCall[1]);
+    ok(sent.target === 'treasury', '请求带 target=当前下拉选择（treasury）');
+    ok(Array.isArray(sent.ptrHashes) && sent.ptrHashes.length === 1, '请求带未拾的掉落物 ptrHash（1 堆）');
+  }
+  ctx.fetch = origFetch;
+  ok(/读取存档时自动关闭|自动关闭/.test(els['content'].innerHTML), '自动拾取行有「读取存档时自动关闭」说明');
 
   console.log('\n' + (fails === 0 ? 'ALL PASS' : (fails + ' FAILED')));
   process.exit(fails === 0 ? 0 : 1);

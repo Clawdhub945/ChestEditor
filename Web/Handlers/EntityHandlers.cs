@@ -150,8 +150,9 @@ internal static class EntityHandlers
             });
         });
 
-        // 拾取掉落物进国库（盒子5）：读每堆的 stuff_id/count → 国库宝箱 AddStuff → 按游戏路径删除。
+        // 拾取掉落物进容器（盒子5）：读每堆的 stuff_id/count → 容器 AddStuff → 按游戏路径删除。
         // 传 ptrHashes（后端从实体表拿 StuffId/FieldMeta 读 count，内部再用 guid 删）。
+        // target = 'treasury'（游戏原生 GetKingdomTreasureBox）或容器 stuff_id（王座/箱子/货架…）。
         Router.Add("POST", "/api/editor/stuff/pickup", ctx =>
         {
             var arr = ctx.Json?["ptrHashes"] as System.Text.Json.Nodes.JsonArray;
@@ -159,8 +160,10 @@ internal static class EntityHandlers
             var hashes = new List<int>();
             foreach (var n in arr)
                 if (n != null) hashes.Add(n.GetValue<int>());
+            string target = ctx.Json?["target"]?.GetValue<string>() ?? "treasury";
 
             int picked = 0, skipped = 0, i = 0, frames = 0;
+            var pickedHashes = new List<int>();
             var swTotal = System.Diagnostics.Stopwatch.StartNew();
             MainThread.RunPaced(() =>
             {
@@ -170,19 +173,23 @@ internal static class EntityHandlers
                 {
                     int end = Math.Min(i + 64, hashes.Count);
                     var seg = hashes.GetRange(i, end - i);
-                    var (p, s) = StuffOnMapService.PickUpToTreasury(seg);
+                    var (p, s, okHashes) = StuffOnMapService.PickUp(seg, target);
                     picked += p; skipped += s;
+                    pickedHashes.AddRange(okHashes);
                     i = end;
                 }
                 return i < hashes.Count;
             }, 120000);
-            Plugin.LogInfo($"[EntityEditor] 掉落物拾取进国库: {picked} 堆入库 / {skipped} 跳过 / 共 {hashes.Count} 堆, "
+            Plugin.LogInfo($"[EntityEditor] 掉落物拾取(target={target}): {picked} 堆入库 / {skipped} 跳过 / 共 {hashes.Count} 堆, "
                 + $"分 {frames} 帧, 墙钟 {swTotal.ElapsedMilliseconds}ms");
             return JsonBuilder.Object(w =>
             {
                 w.WriteBoolean("ok", true);
                 w.WriteNumber("picked", picked);
                 w.WriteNumber("skipped", skipped);
+                w.WriteStartArray("pickedHashes");
+                foreach (var h in pickedHashes) w.WriteNumberValue(h);
+                w.WriteEndArray();
             });
         });
 
