@@ -568,9 +568,11 @@ async function renderNpcfixBox2(forceScan) {
 
   // ===== 我方-怪物（阵营1 地界刷出的怪物：蚁巢工蚁 / 龙…，按种类二级分组） =====
   if (c.monstersOurs.length > 0) {
+    // 分组名用中文：后端 name = DataTables.ItemName(stuff_id)，怪物就是「5级工蚁 / 5级骷髅战士 / 10级圣盾龙」；
+    // 类名（MonsterAntWorker / Monster3 / Monster23…）只是预制体名，用户看不懂，仅作兜底。
     const kinds = {};
     for (const e of c.monstersOurs) {
-      const k = e.className || '未知怪物';
+      const k = e.name || e.className || '未知怪物';
       (kinds[k] = kinds[k] || []).push(e);
     }
     const entries = Object.keys(kinds).sort((a, b) => kinds[b].length - kinds[a].length);
@@ -635,22 +637,41 @@ async function destroyBatch(hashes) {
   return r.json();
 }
 
-// 怪物一键清除：销毁 → 等1秒 → 重扫 → 再销毁一遍（覆盖分裂怪）→ 刷新
+// 一键清除的单批数量：分批提交，避免一帧内回收成百上千个单位（卡帧 + 资源峰值）
+const NPCFIX_KILL_CHUNK = 40;
+
+// 分批销毁：每批之间让出一帧；返回 { destroyed, failed }
+async function npcfixKillInChunks(hashes) {
+  let destroyed = 0, failed = 0;
+  for (let i = 0; i < hashes.length; i += NPCFIX_KILL_CHUNK) {
+    const part = hashes.slice(i, i + NPCFIX_KILL_CHUNK);
+    try {
+      const r = await destroyBatch(part);
+      destroyed += (r && r.destroyed) || 0;
+      failed += (r && r.failed) || 0;
+    } catch (e) { failed += part.length; }
+    await new Promise(r => setTimeout(r, 60));
+  }
+  return { destroyed: destroyed, failed: failed };
+}
+
+// 怪物一键清除：分批销毁 → 等1秒 → 重扫 → 再清一遍（覆盖分裂怪）→ 刷新
+// 后端对 Monster* 走"静默移除"（skip_show_dead_anim + DeadOnBattle(null,false)），不播死亡动画、不掉东西
 async function npcfixKillMonsters(kid) {
-  if (!confirm('确定清除该阵营全部怪物？（将执行2遍，覆盖分裂怪）')) return;
+  if (!confirm('确定清除该阵营全部怪物？（将分批执行2遍，覆盖分裂怪）')) return;
   toast('清除中...', false);
   const pick = () => entityEditorData
     .filter(e => (e.className || '').indexOf('Monster') === 0 && npcfixUnitKingdom(e) === kid)
     .map(e => e.ptrHash);
   const hashes = pick();
   if (hashes.length === 0) { toast('没有怪物', true); return; }
-  const d1 = await destroyBatch(hashes);
+  const d1 = await npcfixKillInChunks(hashes);
   await new Promise(r => setTimeout(r, 1000));
   // 重扫拿到分裂新生成的怪物，再清一遍
   await entityEditorScan();
   const hashes2 = pick();
   let d2 = { destroyed: 0 };
-  if (hashes2.length > 0) d2 = await destroyBatch(hashes2);
+  if (hashes2.length > 0) d2 = await npcfixKillInChunks(hashes2);
   await entityEditorScan();
   toast('清除完成: 首轮' + (d1.destroyed || 0) + ' + 二轮' + (d2.destroyed || 0));
 }

@@ -18,6 +18,7 @@ namespace ChestEditor.Game;
 ///   <item>NPC    —— <see cref="TryDestroyNpc"/></item>
 ///   <item>Facility —— <see cref="TryDestroyFacility"/></item>
 ///   <item>Ship   —— <see cref="TryDestroyShip"/></item>
+///   <item>Monster —— <see cref="TryDestroyMonster"/>（静默移除，跳过死亡动画）</item>
 ///   <item>通用（动物/掉落物等）—— <see cref="TryDestroyGeneric"/></item>
 ///   <item>Facility 管理器兜底 —— <see cref="TryDestroyFacilityViaManagers"/></item>
 ///   <item>最终兜底 —— <see cref="FallbackDestroy"/></item>
@@ -57,6 +58,9 @@ internal static partial class EntityDestroyer
 
                 // === Ship 专用处理 ===
                 if (!called) called = TryDestroyShip(e, classPtr, className, name);
+
+                // === Monster 专用处理（静默移除；必须早于通用兜底，否则会被 Leave() 挑走）===
+                if (!called) called = TryDestroyMonster(e, classPtr, className, name);
 
                 // === 第三优先：通用销毁方法（非 NPC / 非 Facility）===
                 if (!called) called = TryDestroyGeneric(e, classPtr, className, name);

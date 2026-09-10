@@ -13,11 +13,34 @@ namespace ChestEditor.Game;
 
 internal static partial class EntityDestroyer
 {
+    /// <summary>
+    /// 是否真的是"船"。
+    /// <para>⚠ 绝不能用 <c>Contains("Ship"/"BattleUnit"/"Soldier")</c> 这类"包含"匹配：</para>
+    /// <list type="bullet">
+    ///   <item><c>MonsterAntSoldier</c>（实机 581 只）含 "Soldier"</item>
+    ///   <item><c>BulletSoldier</c>（121）、<c>SoldierOrderlyItem</c>（14）同样含 "Soldier"</item>
+    /// </list>
+    /// <para>它们会被当成船丢进 <c>ShipHelper.DestroyShip</c>。该方法的参数是 <c>Ship</c>，
+    /// 却拿到了怪物的指针 —— 它会去读怪物内存里的 <c>ship_info</c>（读到垃圾指针/垃圾
+    /// <c>sailor_count</c>），然后按这个垃圾数量疯狂 <c>SoldierHelper.CreateSoldier</c>。</para>
+    /// <para>实测代价：一次误判即可让进程持续生成船员 NPC，每个 NPC 预制体带 AudioSource，
+    /// 把 FMOD 的声道组资源耗尽 —— Player.log 里刷屏的
+    /// <c>createChannelGroup("ASrcDryGroup"/"ASrcWetGroup") Not enough memory or resources</c>
+    /// 全部来自 <c>ShipHelper.DestroyShip → SoldierHelper.CreateSoldier → NpcHelper.CreateNpc</c>
+    /// 这一条栈（实机一次会话 55968 条，全是同一栈）。</para>
+    /// <para>判据改为：类名就是 Ship / 以 Ship 开头，或实体确实持有 <c>ship_info</c> 字段。</para>
+    /// </summary>
+    private static bool IsShipEntity(EntityScan.EditorEntity e, string className)
+    {
+        if (className == "Ship" || className.StartsWith("Ship", StringComparison.Ordinal)) return true;
+        return e.FieldMeta.ContainsKey("ship_info");
+    }
+
     /// <summary>Ship 策略：从船自身 territory 的 ship_list/ship_dic 移除，调用 ShipHelper.DestroyShip 或自身 DestroySelf</summary>
     private static bool TryDestroyShip(EntityScan.EditorEntity e, IntPtr classPtr, string className, string name)
     {
         bool called = false;
-        if (!called && (className.Contains("Ship") || className.Contains("BattleUnit") || className.Contains("Soldier")))
+        if (!called && IsShipEntity(e, className))
         {
             Plugin.LogInfo($"[EntityEditor] [Ship] Ship destroy start...");
             bool shipDestroyed = false;
