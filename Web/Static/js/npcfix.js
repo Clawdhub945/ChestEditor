@@ -1602,7 +1602,7 @@ async function renderNpcfixBox4(forceScan) {
     + ' style="width:60px;padding:5px 8px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px">';
   html += '<button onclick="npcfixBox4Spawn()"'
     + ' style="padding:5px 14px;background:var(--accent);color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:700">召唤</button>';
-  html += '<span style="font-size:11px;color:var(--text-muted)">数量 1~10 · 生成在地图随机陆地</span>';
+  html += '<span style="font-size:11px;color:var(--text-muted)">数量 1~10 · 家畜由游戏安置到族群区域 · 视角自动跟随</span>';
   html += '</div>';
   html += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-shrink:0">';
   html += '<input id="npcfixBox4Search" value="' + esc(npcfixBox4Query) + '"'
@@ -1710,7 +1710,7 @@ async function npcfixBox4Spawn() {
   if (isNaN(count)) count = 1;
   count = Math.min(10, Math.max(1, count));
   const name = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : ('#' + stuffId);
-  if (!confirm('确定召唤 ' + count + ' 只「' + name + '」？（生成在我方建筑旁）')) return;
+  if (!confirm('确定召唤 ' + count + ' 只「' + name + '」？\n家畜出生后由游戏安置到其族群/牧场区域（位置以实际为准，视角会自动跟过去）')) return;
   toast('召唤中...', false);
   // ⚠ 定位不用 guid：CreateAnimal 刚返回时游戏还没分配 guid（读到 0，会匹配到
   // 2266 个 guid=0 实体里的任意一个——实测相机飞到了不相干的 NPC 头上）。
@@ -1725,7 +1725,7 @@ async function npcfixBox4Spawn() {
     }).then(x => x.json());
   } catch (e) { toast('召唤失败: ' + esc(String((e && e.message) || e)), true); return; }
   const spawned = (r && r.spawned) || 0;
-  toast('召唤完成: ' + spawned + ' 只「' + name + '」已出现');
+  toast('召唤完成: ' + spawned + ' 只「' + name + '」（游戏安置到族群区域，视角跟随中）');
   await npcfixScan();
   const newborn = entityEditorData
     .filter(e => !beforeHashes.has(e.ptrHash) && (e.className || '') === 'Animal')[0];

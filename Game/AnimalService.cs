@@ -127,9 +127,9 @@ internal static class AnimalService
         IntPtr helper = GameChainLocator.GetAnimalHelper();
         if (helper == IntPtr.Zero)
             throw new InvalidOperationException("找不到 AnimalHelper（未进存档？）");
-        IntPtr createAnimal = FindMethodInHierarchy(GetClass(helper), "CreateAnimal", 3);
+        IntPtr createAnimal = FindMethodInHierarchy(GetClass(helper), "CreateAnimal", 2);
         if (createAnimal == IntPtr.Zero)
-            throw new InvalidOperationException("找不到 AnimalHelper.CreateAnimal(pos, stuff_id, count)");
+            throw new InvalidOperationException("找不到 AnimalHelper.CreateAnimal(pos, stuff_id)");
 
         // ⚠ 位置策略：全图随机会落在几屏幕外的未加载区块 → 幽灵动物（逻辑存在看不见），
         // 且删它们会崩。改为：**借在场实体的世界坐标反推格子**（必然在玩家领地/视野内）：
@@ -169,20 +169,22 @@ internal static class AnimalService
         var (rx, ry) = candidates[rnd.Next(candidates.Count)];
         int gx = (int)Math.Floor(rx - 0.5f) + rnd.Next(-2, 3);
         int gy = (int)Math.Floor(ry - 0.5f) + rnd.Next(-2, 3);
-        Plugin.LogInfo($"[AnimalService] Spawn {count} 只 stuffId={stuffId} 于格子({gx},{gy})（参考 {rx:F1},{ry:F1}）");
+        Plugin.LogInfo($"[AnimalService] Spawn {count} 只 stuffId={stuffId} 出生格子({gx},{gy})（参考 {rx:F1},{ry:F1}；实际落点由游戏安置到族群区域）");
 
         // ⚠⚠ Point 是 struct（值类型）：CreateAnimal 的 Point 参数槽里要放 {x,y} 8 字节数据本身
         //（x 低 32 位、y 高 32 位，小端）。传 il2cpp_object_new 的"对象指针"会把 klass 头
         // 读成坐标（实测 x=1.37e9 = klass 低 32 位），这就是"幽灵动物"的根因。
         IntPtr posSlot = new IntPtr(gx | (gy << 32));
+        // ⚠ 用 2 参重载（返回 Animal_o*）逐只创建：3 参重载返回 void，runtime_invoke
+        // 恒返回 Zero，没法计数。2 参内部按 AnimalInfo 默认成年年龄创建，与 3 参等价。
         int spawned = 0;
         for (int i = 0; i < count; i++)
         {
-            if (Invoke(createAnimal, helper, posSlot, stuffId, 1) != IntPtr.Zero) spawned++;
+            if (Invoke(createAnimal, helper, posSlot, stuffId) != IntPtr.Zero) spawned++;
         }
-        // ⚠ 不在这里读新动物的 guid：CreateAnimal 返回时 guid 还没分配（实测读到 0），
-        // 前端按 guid 找实体会匹配到 2266 个 guid=0 实体里的任意一个（相机飞错地方）。
-        // 前端定位改用 ptrHash 差集（召唤前快照 vs 重扫后）。
+        // ⚠ 位置由游戏决定：家畜创建后会被游戏的状态机送进同类族群/牧场区域
+        //（实测 4/4 次请求格不同、落点全部在族群带），CreateAnimal 的坐标只是出生点。
+        // 前端定位走 ptrHash 差集（召唤前快照 vs 重扫后），相机跟随实际位置。
         return (gx, gy, spawned);
     }
 }

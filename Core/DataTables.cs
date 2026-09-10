@@ -175,7 +175,8 @@ internal static class DataTables
 
     // ==================== 动物表 ====================
 
-    /// <summary>可召唤的陆地动物（animal_type=0 为水生如大鱼，召唤列表排除）</summary>
+    /// <summary>可召唤的家畜（animal_type=1）。⚠ 野生动物（type=2，鹿类）实测召唤后会被
+    /// 游戏的野生生态立即回收（实体表从不出现），水生（type=0）不上陆地——都排除。</summary>
     internal static (int Id, string Name)[] Animals
     {
         get
@@ -188,10 +189,10 @@ internal static class DataTables
                 if (doc != null)
                 {
                     foreach (var row in doc.RootElement.EnumerateArray())
-                        if (row[2].GetInt32() != 0)
+                        if (row[2].GetInt32() == 1)
                             list.Add((row[0].GetInt32(), row[1].GetString() ?? ""));
                 }
-                Plugin.LogInfo($"[DataTables] animals 载入 {list.Count} 种（已排除水生）");
+                Plugin.LogInfo($"[DataTables] animals 载入 {list.Count} 种家畜");
                 return _animals = list.ToArray();
             }
         }

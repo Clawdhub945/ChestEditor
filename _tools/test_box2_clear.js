@@ -70,8 +70,7 @@ const ctx = {
     else if (u.indexOf('/api/editor/entities') >= 0) body = [];
     else if (u.indexOf('/api/editor/animals') >= 0)
       body = { animals: [{ id: 501001, name: '鸡' }, { id: 501002, name: '羊' }, { id: 501003, name: '牛' },
-        { id: 501004, name: '马' }, { id: 501005, name: '猪' }, { id: 501006, name: '驯狼' },
-        { id: 502001, name: '鹿' }, { id: 502005, name: '白鹿' }, { id: 502006, name: '梅花鹿' }] };
+        { id: 501004, name: '马' }, { id: 501005, name: '猪' }, { id: 501006, name: '驯狼' }] };
     return Promise.resolve({ json: () => Promise.resolve(body) });
   },
   setTimeout, clearTimeout, Date, JSON, Math, Number, String, Object, Array, Promise, Set, Map,
@@ -596,8 +595,10 @@ const src = fs.readFileSync(path.join(dir, 'npcfix.js'), 'utf8');
   const selHtml4 = els['npcfixBox4SpawnAnimal'].innerHTML;
   console.log('  下拉选项:', selHtml4.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80));
   ok(selHtml4.indexOf('鸡') >= 0 && selHtml4.indexOf('猪') >= 0 && selHtml4.indexOf('驯狼') >= 0
-    && selHtml4.indexOf('梅花鹿') >= 0, '下拉含官方中文名（鸡/猪/驯狼/梅花鹿…）');
+    && selHtml4.indexOf('羊') >= 0, '下拉含家畜中文名（鸡/猪/驯狼/羊…）');
   ok(selHtml4.indexOf('大鱼') < 0, '水生动物（大鱼）不在召唤列表');
+  ok(selHtml4.indexOf('梅花鹿') < 0 && selHtml4.indexOf('鹿') < 0,
+    '野生动物（鹿类）不在召唤列表——实测召唤后会被野生生态回收');
   ok(ev('npcfixAnimalList.some(a => a.id === 501005)') === true
     && els['npcfixBox4SpawnAnimal'].value === '501005', '默认选中 = 猪（501005）');
   // 数量夹取：0→1 / 11→10 / 非法→1 / 5 不变
