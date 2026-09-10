@@ -36,7 +36,12 @@ Game/                    游戏业务服务（每个领域一个文件）
   TechTreeService.cs     科技树
   EntityScan.cs          统一实体扫描 + 字段读写（EditorEntity 模型）
   NpcEditor.cs           NPC 列表/字段修改 + speed/hp/hp_total 每帧持续覆盖
-  EntityDestroyer.cs     实体销毁（Npc/Facility/Ship/通用 四级策略）
+  Destroy/               实体销毁（partial 分文件，按策略拆分）
+    EntityDestroyer.cs   调度器 + 类判定 + 方法调用辅助
+    EntityDestroyer.Npc/Facility/Ship/Generic/Fallback.cs
+                         五类销毁策略：虚方法链 / 手动 Dismantle / 船移除 / 通用 / 兜底
+    EntityDestroyer.Cleanup.cs   容器与场景组件引用清理
+    GameChainLocator.cs  Game→MainScene→AreaMap→Territory/Helper 对象图定位
   Modifications/
     ModificationStore.cs 修改记录：内存 + 磁盘持久化（System.Text.Json，与旧格式兼容）+ 重应用
 
@@ -54,7 +59,7 @@ Web/                     HTTP 层
   Static/                前端（嵌入资源，零构建）
     index.html           页面骨架
     css/app.css          样式
-    js/                  按面板拆分：state(全局状态) ui(通用) api(请求) chest dragon npc tech entity main(入口)
+    js/                  按面板拆分：state(全局状态) ui(通用) api(请求) chest dragon npc npcfix tech entity main(入口)
     data/                前端数据表：npc_types / tech_tree / tech_info / tech_icon
 ```
 
@@ -122,10 +127,23 @@ return JsonBuilder.Error(ex);                  // {"error":"..."}
 
 ## 构建与部署
 
-1. `dotnet build`（需游戏本体的 BepInEx interop DLL，路径见 csproj 的 `$(GameDir)`）
-2. 构建产物自动复制到 `C:\TerritoryModTest`
+1. `dotnet build -c Release`（需游戏本体的 BepInEx interop DLL，路径由 csproj 的 `$(GameDir)` 决定）
+2. 构建产物自动复制到 `$(ModDir)`（默认 `C:\TerritoryModTest`）
 3. 将 DLL 拷入游戏 mod 目录：`BepInEx/plugins/1000/Assemblies/ChestEditor.dll`
 4. 启动游戏，按 **F11** 自动打开浏览器 `http://localhost:8765/`
+
+### 路径参数化（换机器无需改文件）
+
+```bash
+dotnet build -c Release -p:GameDir="D:\Steam\steamapps\common\Territory" -p:ModDir="C:\你的mod目录"
+```
+
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `GameDir` | `C:\Program Files (x86)\Steam\steamapps\common\Territory` | 游戏本体根目录（需含 `BepInEx\core` 与 `BepInEx\interop`） |
+| `ModDir` | `C:\TerritoryModTest` | 构建后自动复制 DLL 的目标目录；目录不存在时自动跳过复制 |
+
+> 数据表生成脚本同样支持环境变量：`CHESTEDITOR_GAME_DATA` 指定官方 `json_data` 目录（默认 `C:\AI\yuanma\json_data`）。
 
 ## 测试清单（每次改动后过一遍）
 

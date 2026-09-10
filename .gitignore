@@ -1,5 +1,16 @@
+# ===== 构建输出 =====
 bin/
 obj/
 .vs/
 *.user
 *.suo
+
+# ===== 扫描 / 调试临时产物（运行时生成，不入库）=====
+*_tmp.json
+ents_tmp.json
+scan_tmp.json
+sample_hashes.txt
+fields_-*.json
+
+# ===== 系统 / 驱动产生的垃圾目录 =====
+NVIDIA Corporation/
