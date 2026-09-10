@@ -13,7 +13,7 @@ internal static class EntityHandlers
             {
                 EntityScan.ScanAll();
                 ModificationStore.ApplyPendingModifications();
-                return "{\"ok\":true}";
+                return JsonBuilder.Ok();
             }, 30000));
 
         Router.Add("GET", "/api/editor/entities", _ =>
@@ -31,7 +31,7 @@ internal static class EntityHandlers
             return MainThread.Run(() =>
             {
                 string result = EntityScan.SetField(ptrHash, field, value);
-                return result == "ok" ? "{\"ok\":true}" : $"{{\"error\":\"{result}\"}}";
+                return result == "ok" ? JsonBuilder.Ok() : JsonBuilder.Error(result);
             });
         });
 
@@ -42,7 +42,7 @@ internal static class EntityHandlers
             return MainThread.Run(() =>
             {
                 string result = EntityDestroyer.DestroyEntity(ptrHash);
-                return result == "ok" ? "{\"ok\":true}" : $"{{\"error\":\"{result}\"}}";
+                return result == "ok" ? JsonBuilder.Ok() : JsonBuilder.Error(result);
             });
         });
 
@@ -63,7 +63,7 @@ internal static class EntityHandlers
                     if (result == "ok") ok++; else fail++;
                 }
                 Plugin.LogInfo($"[EntityDestroyer] 批量销毁完成: {ok} 成功 / {fail} 失败");
-                return $"{{\"ok\":true,\"destroyed\":{ok},\"failed\":{fail}}}";
+                return JsonBuilder.Object(w => { w.WriteBoolean("ok", true); w.WriteNumber("destroyed", ok); w.WriteNumber("failed", fail); });
             }, 120000);
         });
 
@@ -89,7 +89,7 @@ internal static class EntityHandlers
             if (!parsed) return posJson;
 
             MainThread.Run(() => ChestService.LocateFacility(px, py), 3000);
-            return $"{{\"ok\":true,\"x\":{px.ToString(System.Globalization.CultureInfo.InvariantCulture)},\"y\":{py.ToString(System.Globalization.CultureInfo.InvariantCulture)}}}";
+            return JsonBuilder.Object(w => { w.WriteBoolean("ok", true); w.WriteNumber("x", JsonBuilder.Safe(px)); w.WriteNumber("y", JsonBuilder.Safe(py)); });
         });
 
         Router.Add("POST", "/api/editor/listmethods", ctx =>
@@ -100,7 +100,7 @@ internal static class EntityHandlers
             {
                 string methods = EntityScan.ListMethods(ptrHash);
                 Plugin.LogInfo($"[EntityEditor] ListMethods ptrHash={ptrHash}:\n{methods}");
-                return $"{{\"methods\":\"{ChestEditor.Core.JsonUtil.Escape(methods)}\"}}";
+                return JsonBuilder.Object(w => w.WriteString("methods", methods));
             }, 10000);
         });
     }

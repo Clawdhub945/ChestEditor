@@ -3,8 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Text.Json;
 using UnityEngine;
-using static ChestEditor.Core.JsonUtil;
 using static ChestEditor.Interop.Il2CppApi;
 using static ChestEditor.Interop.Il2CppInvoke;
 using static ChestEditor.Interop.Il2CppMemory;
@@ -83,66 +83,58 @@ internal static class NpcEditor
 
     internal static string GetNpcListJson()
     {
-        var sb = new System.Text.StringBuilder();
-        sb.Append('[');
-        bool first = true;
-        foreach (var e in EntityScan.Entities)
+        CachedListJson = JsonBuilder.Build(jw =>
         {
-            // 只显示 NPC 类型（含 Soldier、BattleUnit 等敌兵类）
-            bool isNpcType = e.ClassName == "Npc" || e.ClassName.Contains("Soldier") || e.ClassName.Contains("BattleUnit");
-            if (!isNpcType) continue;
-
-            if (!first) sb.Append(',');
-            first = false;
-
-            sb.Append('{');
-            sb.Append($"\"ptrHash\":{e.PtrHash},");
-            sb.Append($"\"guid\":{e.Guid},");
-            sb.Append($"\"npcId\":{e.NpcId},");
-            sb.Append($"\"stuffId\":{e.StuffId},");
-            sb.Append($"\"npcName\":\"{Escape(e.NpcName)}\",");
-            sb.Append($"\"soldierTypeId\":{e.SoldierTypeId},");
-            sb.Append($"\"soldierTypeName\":\"{Escape(EntityScan.GetSoldierTypeName(e.SoldierTypeId))}\",");
-            sb.Append($"\"name\":\"{Escape(DataTables.ItemName(e.StuffId))}\",");
-
-            // 读取重点字段
-            int slimCount = 0;
-            int pointerCount = 0;
-            foreach (var kv in e.FieldMeta)
-                if (!kv.Value.IsPointer) slimCount++; else pointerCount++;
-            sb.Append($"\"fieldCount\":{slimCount},");
-
-            // speed, hp, hp_total
-            if (e.FieldMeta.TryGetValue("speed", out var speedFe) && speedFe.IsFloat)
-                sb.Append($"\"speed\":{ReadIl2CppFloat(e.Ptr, speedFe.Offset).ToString("G")},");
-            if (e.FieldMeta.TryGetValue("hp", out var hpFe) && hpFe.IsFloat)
-                sb.Append($"\"hp\":{ReadIl2CppFloat(e.Ptr, hpFe.Offset).ToString("G")},");
-            if (e.FieldMeta.TryGetValue("hp_total", out var hpTotalFe) && hpTotalFe.IsFloat)
-                sb.Append($"\"hpTotal\":{ReadIl2CppFloat(e.Ptr, hpTotalFe.Offset).ToString("G")},");
-
-            // 尝试读取 age（可能是 int 或 float）
-            if (e.FieldMeta.TryGetValue("age", out var ageFe))
+            jw.WriteStartArray();
+            foreach (var e in EntityScan.Entities)
             {
-                if (ageFe.IsFloat)
-                    sb.Append($"\"age\":{ReadIl2CppFloat(e.Ptr, ageFe.Offset).ToString("G")},");
-                else if (!ageFe.IsString && !ageFe.IsPointer)
-                    sb.Append($"\"age\":{ReadIl2CppInt(e.Ptr, ageFe.Offset)},");
+                // 只显示 NPC 类型（含 Soldier、BattleUnit 等敌兵类）
+                bool isNpcType = e.ClassName == "Npc" || e.ClassName.Contains("Soldier") || e.ClassName.Contains("BattleUnit");
+                if (!isNpcType) continue;
+
+                int slimCount = 0;
+                foreach (var kv in e.FieldMeta)
+                    if (!kv.Value.IsPointer) slimCount++;
+
+                jw.WriteStartObject();
+                jw.WriteNumber("ptrHash", e.PtrHash);
+                jw.WriteNumber("guid", e.Guid);
+                jw.WriteNumber("npcId", e.NpcId);
+                jw.WriteNumber("stuffId", e.StuffId);
+                jw.WriteString("npcName", e.NpcName);
+                jw.WriteNumber("soldierTypeId", e.SoldierTypeId);
+                jw.WriteString("soldierTypeName", EntityScan.GetSoldierTypeName(e.SoldierTypeId));
+                jw.WriteString("name", DataTables.ItemName(e.StuffId));
+                jw.WriteNumber("fieldCount", slimCount);
+
+                // speed, hp, hp_total
+                if (e.FieldMeta.TryGetValue("speed", out var speedFe) && speedFe.IsFloat)
+                    jw.WriteNumber("speed", JsonBuilder.Safe(ReadIl2CppFloat(e.Ptr, speedFe.Offset)));
+                if (e.FieldMeta.TryGetValue("hp", out var hpFe) && hpFe.IsFloat)
+                    jw.WriteNumber("hp", JsonBuilder.Safe(ReadIl2CppFloat(e.Ptr, hpFe.Offset)));
+                if (e.FieldMeta.TryGetValue("hp_total", out var hpTotalFe) && hpTotalFe.IsFloat)
+                    jw.WriteNumber("hpTotal", JsonBuilder.Safe(ReadIl2CppFloat(e.Ptr, hpTotalFe.Offset)));
+
+                // 尝试读取 age（可能是 int 或 float）
+                if (e.FieldMeta.TryGetValue("age", out var ageFe))
+                {
+                    if (ageFe.IsFloat)
+                        jw.WriteNumber("age", JsonBuilder.Safe(ReadIl2CppFloat(e.Ptr, ageFe.Offset)));
+                    else if (!ageFe.IsString && !ageFe.IsPointer)
+                        jw.WriteNumber("age", ReadIl2CppInt(e.Ptr, ageFe.Offset));
+                }
+
+                // 读取 _npc_type
+                if (e.FieldMeta.TryGetValue("_npc_type", out var npcTypeFe) && !npcTypeFe.IsString && !npcTypeFe.IsPointer)
+                    jw.WriteNumber("npcType", ReadIl2CppInt(e.Ptr, npcTypeFe.Offset));
+
+                // 阵营判断辅助字段
+                jw.WriteNumber("hometownKingdomId", e.HometownKingdomId);
+
+                jw.WriteEndObject();
             }
-
-            // 读取 _npc_type
-            if (e.FieldMeta.TryGetValue("_npc_type", out var npcTypeFe) && !npcTypeFe.IsString && !npcTypeFe.IsPointer)
-                sb.Append($"\"npcType\":{ReadIl2CppInt(e.Ptr, npcTypeFe.Offset)},");
-
-            // 阵营判断辅助字段
-            sb.Append($"\"hometownKingdomId\":{e.HometownKingdomId},");
-            sb.Append($"\"soldierTypeId\":{e.SoldierTypeId},");
-
-            // 去掉末尾多余逗号
-            if (sb[sb.Length - 1] == ',') sb.Length--;
-            sb.Append('}');
-        }
-        sb.Append(']');
-        CachedListJson = sb.ToString();
+            jw.WriteEndArray();
+        });
         return CachedListJson;
     }
 

@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
-using static ChestEditor.Core.JsonUtil;
+using System.Text.Json;
 using static ChestEditor.Interop.Il2CppApi;
 using static ChestEditor.Interop.Il2CppInvoke;
 using static ChestEditor.Interop.Il2CppMemory;
@@ -476,32 +476,58 @@ internal static class DragonService
     internal static readonly (int Id, string Name)[] DragonNatures = DataTables.DragonNatures;
 
 
-    internal static string GetDragonTypesJson()
+    internal static string GetDragonTypesJson() => JsonBuilder.Build(w =>
     {
-        var sb = new System.Text.StringBuilder();
-        sb.Append('[');
-        for (int i = 0; i < DragonTypes.Length; i++)
+        w.WriteStartArray();
+        foreach (var (name, cn, baseId) in DragonTypes)
         {
-            if (i > 0) sb.Append(',');
-            var (name, cn, baseId) = DragonTypes[i];
-            sb.Append($"{{\"name\":\"{name}\",\"cn\":\"{cn}\",\"baseId\":{baseId}}}");
+            w.WriteStartObject();
+            w.WriteString("name", name);
+            w.WriteString("cn", cn);
+            w.WriteNumber("baseId", baseId);
+            w.WriteEndObject();
         }
-        sb.Append(']');
-        return sb.ToString();
-    }
+        w.WriteEndArray();
+    });
 
 
-    internal static string GetDragonNaturesJson()
+    internal static string GetDragonNaturesJson() => JsonBuilder.Build(w =>
     {
-        var sb = new System.Text.StringBuilder();
-        sb.Append('[');
-        for (int i = 0; i < DragonNatures.Length; i++)
+        w.WriteStartArray();
+        foreach (var (id, name) in DragonNatures)
         {
-            if (i > 0) sb.Append(',');
-            sb.Append($"{{\"id\":{DragonNatures[i].Id},\"name\":\"{DragonNatures[i].Name}\"}}");
+            w.WriteStartObject();
+            w.WriteNumber("id", id);
+            w.WriteString("name", name);
+            w.WriteEndObject();
         }
-        sb.Append(']');
-        return sb.ToString();
+        w.WriteEndArray();
+    });
+
+
+    /// <summary>
+    /// 把反射读取到的任意值写成 JSON 值。
+    /// 旧实现用字符串拼接：字符串不转义、数字 ToString 未指定 InvariantCulture，
+    /// 现在统一交给 Utf8JsonWriter。
+    /// </summary>
+    private static void WriteJsonValue(Utf8JsonWriter w, object? value)
+    {
+        switch (value)
+        {
+            case null: w.WriteNullValue(); break;
+            case bool b: w.WriteBooleanValue(b); break;
+            case int i: w.WriteNumberValue(i); break;
+            case long l: w.WriteNumberValue(l); break;
+            case float f: w.WriteNumberValue(JsonBuilder.Safe(f)); break;
+            case double d: w.WriteNumberValue(double.IsFinite(d) ? d : 0d); break;
+            case string s: w.WriteStringValue(s); break;
+            case List<int> ints:
+                w.WriteStartArray();
+                foreach (var n in ints) w.WriteNumberValue(n);
+                w.WriteEndArray();
+                break;
+            default: w.WriteStringValue(value.GetType().Name); break;
+        }
     }
 
 
@@ -667,34 +693,21 @@ internal static class DragonService
         ApplySoulModifications(); // 读档自动恢复：直接遍历龙魂列表，无场景扫描，零卡顿
         var souls = ReadDragonSouls();
         if (souls == null) return "[]";
-        var sb = new System.Text.StringBuilder();
-        sb.Append('[');
-        for (int i = 0; i < souls.Count; i++)
+        return JsonBuilder.Build(w =>
         {
-            if (i > 0) sb.Append(',');
-            sb.Append('{');
-            bool first = true;
-            foreach (var kv in souls[i])
+            w.WriteStartArray();
+            foreach (var soul in souls)
             {
-                if (!first) sb.Append(',');
-                first = false;
-                string valStr;
-                if (kv.Value == null) valStr = "null";
-                else if (kv.Value is bool b) valStr = b ? "true" : "false";
-                else if (kv.Value is int or float or double or long)
-                    valStr = kv.Value.ToString()!;
-                else if (kv.Value is string s)
-                    valStr = $"\"{s.Replace("\"", "'")}\"";
-                else if (kv.Value is List<int> intList)
-                    valStr = $"[{string.Join(",", intList)}]";
-                else
-                    valStr = $"\"{kv.Value.GetType().Name}\"";
-                sb.Append($"\"{kv.Key}\":{valStr}");
+                w.WriteStartObject();
+                foreach (var kv in soul)
+                {
+                    w.WritePropertyName(kv.Key);
+                    WriteJsonValue(w, kv.Value);
+                }
+                w.WriteEndObject();
             }
-            sb.Append('}');
-        }
-        sb.Append(']');
-        return sb.ToString();
+            w.WriteEndArray();
+        });
     }
 
 
@@ -968,30 +981,21 @@ internal static class DragonService
     internal static string GetDragonEntitiesJson()
     {
         var entities = ReadDragonEntities();
-        var sb = new System.Text.StringBuilder();
-        sb.Append('[');
-        bool first = true;
-        foreach (var d in entities)
+        return JsonBuilder.Build(w =>
         {
-            if (!first) sb.Append(',');
-            first = false;
-            sb.Append('{');
-            bool f2 = true;
-            foreach (var kv in d)
+            w.WriteStartArray();
+            foreach (var d in entities)
             {
-                if (!f2) sb.Append(',');
-                f2 = false;
-                if (kv.Value is float fv)
-                    sb.Append($"\"{kv.Key}\":{fv:G}");
-                else if (kv.Value is string sv)
-                    sb.Append($"\"{kv.Key}\":\"{sv}\"");
-                else
-                    sb.Append($"\"{kv.Key}\":{kv.Value}");
+                w.WriteStartObject();
+                foreach (var kv in d)
+                {
+                    w.WritePropertyName(kv.Key);
+                    WriteJsonValue(w, kv.Value);
+                }
+                w.WriteEndObject();
             }
-            sb.Append('}');
-        }
-        sb.Append(']');
-        return sb.ToString();
+            w.WriteEndArray();
+        });
     }
 
 
@@ -1207,17 +1211,19 @@ internal static class DragonService
                 }
             }
 
-            var sb = new System.Text.StringBuilder();
-            sb.Append('[');
-            bool first = true;
-            foreach (var kv in merged.OrderByDescending(x => x.Value))
+            _bagJson = JsonBuilder.Build(w =>
             {
-                if (!first) sb.Append(',');
-                first = false;
-                sb.Append($"{{\"stuffId\":{kv.Key},\"name\":\"{Escape(DataTables.ItemName(kv.Key))}\",\"count\":{kv.Value}}}");
-            }
-            sb.Append(']');
-            _bagJson = sb.ToString();
+                w.WriteStartArray();
+                foreach (var kv in merged.OrderByDescending(x => x.Value))
+                {
+                    w.WriteStartObject();
+                    w.WriteNumber("stuffId", kv.Key);
+                    w.WriteString("name", DataTables.ItemName(kv.Key));
+                    w.WriteNumber("count", kv.Value);
+                    w.WriteEndObject();
+                }
+                w.WriteEndArray();
+            });
             _bagJsonAt = System.Environment.TickCount64;
         }
         catch { _bagJson = "[]"; }

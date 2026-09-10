@@ -18,7 +18,7 @@ internal static class ChestHandlers
             {
                 ChestService.RefreshChestList();
                 ChestService.InvalidateCaches();
-                return "{\"ok\":true}";
+                return JsonBuilder.Ok();
             }));
 
         Router.Add("POST", "/api/chest/{index}/add", ctx => ChestAction(ctx, true));
@@ -36,7 +36,7 @@ internal static class ChestHandlers
             {
                 ChestService.SetPlanStock(index, stuffId, count);
                 ChestService.InvalidateCaches();
-                return "{\"ok\":true}";
+                return JsonBuilder.Ok();
             });
         });
 
@@ -50,7 +50,7 @@ internal static class ChestHandlers
             {
                 ChestService.ToggleFilter(stuffId);
                 ChestService.InvalidateCaches();
-                return "{\"ok\":true}";
+                return JsonBuilder.Ok();
             });
         });
 
@@ -61,7 +61,7 @@ internal static class ChestHandlers
             {
                 ChestService.SetAllFilters(enabled);
                 ChestService.InvalidateCaches();
-                return "{\"ok\":true}";
+                return JsonBuilder.Ok();
             });
         });
     }

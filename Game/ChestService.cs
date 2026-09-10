@@ -2,9 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
-using System.Text;
+using System.Text.Json;
 using UnityEngine;
-using static ChestEditor.Core.JsonUtil;
 using static ChestEditor.Interop.Il2CppApi;
 using static ChestEditor.Interop.Il2CppInvoke;
 using static ChestEditor.Interop.Il2CppMemory;
@@ -538,34 +537,43 @@ internal static class ChestService
         try
         {
             var facility = FindTempleFacility();
-            if (facility == null) return "{\"found\":false,\"items\":[],\"plan\":[]}";
+            if (facility == null) return JsonBuilder.Object(w =>
+            {
+                w.WriteBoolean("found", false);
+                w.WriteStartArray("items"); w.WriteEndArray();
+                w.WriteStartArray("plan"); w.WriteEndArray();
+            });
+
             var items = ReadItemsFromBag(facility);
-            var sb = new System.Text.StringBuilder();
-            sb.Append("{\"found\":true,\"items\":[");
-            bool first = true;
-            foreach (var it in items)
+            var plan = ReadStuffPlanDic(facility); // 计划库存（永恒圣殿自带的功能）
+            return JsonBuilder.Object(w =>
             {
-                if (!first) sb.Append(',');
-                first = false;
-                sb.Append($"{{\"stuffId\":{it.StuffId},\"name\":\"{Escape(DataTables.ItemName(it.StuffId))}\",\"count\":{it.Count}}}");
-            }
-            // 计划库存（永恒圣殿自带的功能）
-            sb.Append("],\"plan\":[");
-            var plan = ReadStuffPlanDic(facility);
-            bool f2 = true;
-            if (plan != null)
-            {
-                foreach (var kv in plan)
+                w.WriteBoolean("found", true);
+                w.WriteStartArray("items");
+                foreach (var it in items)
                 {
-                    if (!f2) sb.Append(',');
-                    f2 = false;
-                    sb.Append($"{{\"stuffId\":{kv.Key},\"count\":{kv.Value}}}");
+                    w.WriteStartObject();
+                    w.WriteNumber("stuffId", it.StuffId);
+                    w.WriteString("name", DataTables.ItemName(it.StuffId));
+                    w.WriteNumber("count", it.Count);
+                    w.WriteEndObject();
                 }
-            }
-            sb.Append("]}");
-            return sb.ToString();
+                w.WriteEndArray();
+                w.WriteStartArray("plan");
+                if (plan != null)
+                {
+                    foreach (var kv in plan)
+                    {
+                        w.WriteStartObject();
+                        w.WriteNumber("stuffId", kv.Key);
+                        w.WriteNumber("count", kv.Value);
+                        w.WriteEndObject();
+                    }
+                }
+                w.WriteEndArray();
+            });
         }
-        catch (Exception ex) { return $"{{\"error\":\"{Escape(ex.Message)}\"}}"; }
+        catch (Exception ex) { return JsonBuilder.Error(ex); }
     }
 
     /// <summary>设置永恒神殿的计划库存数量（0 = 删除该计划）</summary>
@@ -574,12 +582,12 @@ internal static class ChestService
         try
         {
             var facility = FindTempleFacility();
-            if (facility == null) return "{\"error\":\"temple not found\"}";
+            if (facility == null) return JsonBuilder.Error("temple not found");
             SetStuffPlanValue(facility, stuffId, count);
             Plugin.LogInfo($"[Temple] 设置计划库存 {DataTables.ItemName(stuffId)}({stuffId}) = {count}");
             return GetTempleJson();
         }
-        catch (Exception ex) { return $"{{\"error\":\"{Escape(ex.Message)}\"}}"; }
+        catch (Exception ex) { return JsonBuilder.Error(ex); }
     }
 
     /// <summary>设置永恒神殿内某物品数量（清空原有数量后写入目标值）</summary>
@@ -588,9 +596,9 @@ internal static class ChestService
         try
         {
             var facility = FindTempleFacility();
-            if (facility == null) return "{\"error\":\"temple not found\"}";
+            if (facility == null) return JsonBuilder.Error("temple not found");
             object? bag = GetProp(facility, "bag");
-            if (bag == null) return "{\"error\":\"bag is null\"}";
+            if (bag == null) return JsonBuilder.Error("bag is null");
 
             CacheBagMethods(bag);
             var current = ReadItemsFromBag(facility).FirstOrDefault(x => x.StuffId == stuffId);
@@ -604,29 +612,28 @@ internal static class ChestService
                 else if (_addStuffMethod != null)
                     _addStuffMethod.Invoke(bag, new object[] { stuffId, count, false });
                 else
-                    return "{\"error\":\"AddStuff not found\"}";
+                    return JsonBuilder.Error("AddStuff not found");
             }
 
             Plugin.LogInfo($"[Temple] 设置 {DataTables.ItemName(stuffId)}({stuffId}) = {count}");
             return GetTempleJson();
         }
-        catch (Exception ex) { return $"{{\"error\":\"{Escape(ex.Message)}\"}}"; }
+        catch (Exception ex) { return JsonBuilder.Error(ex); }
     }
 
-    internal static string GetFiltersJson()
+    internal static string GetFiltersJson() => JsonBuilder.Build(w =>
     {
-        var sb = new StringBuilder();
-        sb.Append('[');
-        bool first = true;
+        w.WriteStartArray();
         foreach (var kvp in _filterItems)
         {
-            if (!first) sb.Append(',');
-            first = false;
-            sb.Append($"{{\"stuffId\":{kvp.Key},\"name\":\"{Escape(kvp.Value.Name)}\",\"enabled\":{(kvp.Value.Enabled ? "true" : "false")}}}");
+            w.WriteStartObject();
+            w.WriteNumber("stuffId", kvp.Key);
+            w.WriteString("name", kvp.Value.Name);
+            w.WriteBoolean("enabled", kvp.Value.Enabled);
+            w.WriteEndObject();
         }
-        sb.Append(']');
-        return sb.ToString();
-    }
+        w.WriteEndArray();
+    });
 
 
     internal static List<KeyValuePair<int, int>>? ReadStuffPlanDic(object facility)
@@ -736,10 +743,10 @@ internal static class ChestService
     internal static string LocateChest(int chestIndex)
     {
         if (chestIndex < 0 || chestIndex >= _chests.Count)
-            return "{\"error\":\"chest not found\"}";
+            return JsonBuilder.Error("chest not found");
         var c = _chests[chestIndex];
         LocateFacility(c.PosX, c.PosY);
-        return $"{{\"ok\":true,\"posX\":{c.PosX.ToString(System.Globalization.CultureInfo.InvariantCulture)},\"posY\":{c.PosY.ToString(System.Globalization.CultureInfo.InvariantCulture)}}}";
+        return JsonBuilder.Object(w => { w.WriteBoolean("ok", true); w.WriteNumber("posX", JsonBuilder.Safe(c.PosX)); w.WriteNumber("posY", JsonBuilder.Safe(c.PosY)); });
     }
 
     // ====== JSON 构建（带 500ms TTL 缓存，操作后 Invalidate） ======
@@ -758,15 +765,13 @@ internal static class ChestService
     internal static string GetChestsJson()
     {
         if (System.Environment.TickCount64 - _chestsJsonAt < 500) return _chestsJson;
-        var sb = new System.Text.StringBuilder();
-        sb.Append('[');
-        for (int i = 0; i < _chests.Count; i++)
+        _chestsJson = JsonBuilder.Build(w =>
         {
-            if (i > 0) sb.Append(',');
-            AppendChestJson(sb, i, _chests[i]);
-        }
-        sb.Append(']');
-        _chestsJson = sb.ToString();
+            w.WriteStartArray();
+            for (int i = 0; i < _chests.Count; i++)
+                AppendChestJson(w, i, _chests[i]);
+            w.WriteEndArray();
+        });
         _chestsJsonAt = System.Environment.TickCount64;
         return _chestsJson;
     }
@@ -776,17 +781,18 @@ internal static class ChestService
         if (System.Environment.TickCount64 - _itemsJsonAt < 500) return _itemsJson;
         if (_allItems == null)
             _allItems = DataTables.AllItems().ToList();
-        var sb = new System.Text.StringBuilder();
-        sb.Append('[');
-        bool first = true;
-        foreach (var kvp in _allItems)
+        _itemsJson = JsonBuilder.Build(w =>
         {
-            if (!first) sb.Append(',');
-            first = false;
-            sb.Append($"{{\"stuffId\":{kvp.Key},\"name\":\"{Escape(kvp.Value)}\"}}");
-        }
-        sb.Append(']');
-        _itemsJson = sb.ToString();
+            w.WriteStartArray();
+            foreach (var kvp in _allItems)
+            {
+                w.WriteStartObject();
+                w.WriteNumber("stuffId", kvp.Key);
+                w.WriteString("name", kvp.Value);
+                w.WriteEndObject();
+            }
+            w.WriteEndArray();
+        });
         _itemsJsonAt = System.Environment.TickCount64;
         return _itemsJson;
     }
@@ -795,32 +801,48 @@ internal static class ChestService
     internal static string BuildChestJson(int chestIndex)
     {
         if (chestIndex < 0 || chestIndex >= _chests.Count)
-            return "{\"error\":\"chest not found\"}";
-        var sb = new System.Text.StringBuilder();
-        AppendChestJson(sb, chestIndex, _chests[chestIndex]);
-        return sb.ToString();
+            return JsonBuilder.Error("chest not found");
+        return JsonBuilder.Build(w => AppendChestJson(w, chestIndex, _chests[chestIndex]));
     }
 
-    private static void AppendChestJson(System.Text.StringBuilder sb, int index, ChestInfo c)
+    private static void AppendChestJson(Utf8JsonWriter w, int index, ChestInfo c)
     {
-        sb.Append($"{{\"index\":{index},\"guid\":{c.Guid},\"stuffId\":{c.StuffId},\"name\":\"{Escape(c.Name)}\",\"maxCap\":{c.MaxCap},\"usedCap\":{c.UsedCap},\"posX\":{c.PosX.ToString(System.Globalization.CultureInfo.InvariantCulture)},\"posY\":{c.PosY.ToString(System.Globalization.CultureInfo.InvariantCulture)},\"items\":[");
-        for (int j = 0; j < c.Items.Count; j++)
+        w.WriteStartObject();
+        w.WriteNumber("index", index);
+        w.WriteNumber("guid", c.Guid);
+        w.WriteNumber("stuffId", c.StuffId);
+        w.WriteString("name", c.Name);
+        w.WriteNumber("maxCap", c.MaxCap);
+        w.WriteNumber("usedCap", c.UsedCap);
+        w.WriteNumber("posX", JsonBuilder.Safe(c.PosX));
+        w.WriteNumber("posY", JsonBuilder.Safe(c.PosY));
+
+        w.WriteStartArray("items");
+        foreach (var item in c.Items)
         {
-            var item = c.Items[j];
-            if (j > 0) sb.Append(',');
-            sb.Append($"{{\"stuffId\":{item.StuffId},\"name\":\"{Escape(DataTables.ItemName(item.StuffId))}\",\"count\":{item.Count}}}");
+            w.WriteStartObject();
+            w.WriteNumber("stuffId", item.StuffId);
+            w.WriteString("name", DataTables.ItemName(item.StuffId));
+            w.WriteNumber("count", item.Count);
+            w.WriteEndObject();
         }
-        sb.Append("],\"planStock\":[");
+        w.WriteEndArray();
+
+        w.WriteStartArray("planStock");
         if (c.PlanStock != null)
         {
-            for (int j = 0; j < c.PlanStock.Count; j++)
+            foreach (var ps in c.PlanStock)
             {
-                if (j > 0) sb.Append(',');
-                var ps = c.PlanStock[j];
-                sb.Append($"{{\"stuffId\":{ps.StuffId},\"name\":\"{Escape(DataTables.ItemName(ps.StuffId))}\",\"count\":{ps.Count}}}");
+                w.WriteStartObject();
+                w.WriteNumber("stuffId", ps.StuffId);
+                w.WriteString("name", DataTables.ItemName(ps.StuffId));
+                w.WriteNumber("count", ps.Count);
+                w.WriteEndObject();
             }
         }
-        sb.Append("]}");
+        w.WriteEndArray();
+
+        w.WriteEndObject();
     }
 
 }

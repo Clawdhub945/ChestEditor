@@ -4,7 +4,6 @@ using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using UnityEngine;
-using static ChestEditor.Core.JsonUtil;
 using static ChestEditor.Interop.Il2CppApi;
 using static ChestEditor.Interop.Il2CppInvoke;
 using static ChestEditor.Interop.Il2CppMemory;

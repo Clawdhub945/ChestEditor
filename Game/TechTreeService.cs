@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
-using static ChestEditor.Core.JsonUtil;
+using System.Text.Json;
 using static ChestEditor.Interop.Il2CppApi;
 using static ChestEditor.Interop.Il2CppInvoke;
 using static ChestEditor.Interop.Il2CppMemory;
@@ -21,66 +21,56 @@ internal static class TechTreeService
         try
         {
             var w = GameContext.GetGame();
-            if (w == null) return "{\"error\":\"Game.w is null\"}";
+            if (w == null) return JsonBuilder.Error("Game.w is null");
 
             // 科技树存储在 Game.w 的多个字段中
-            var sb = new System.Text.StringBuilder();
-            sb.Append('{');
+            return JsonBuilder.Object(jw =>
+            {
+                jw.WritePropertyName("unlock_tech_list");
+                WriteList(jw, GetProp(w, "unlock_tech_list"));
 
-            // 读取 unlock_tech_list
-            var unlockList = GetProp(w, "unlock_tech_list");
-            sb.Append("\"unlock_tech_list\":");
-            sb.Append(SerializeList(unlockList));
+                jw.WritePropertyName("tech_has_paid");
+                WriteList(jw, GetProp(w, "tech_has_paid"));
 
-            // 读取 tech_has_paid
-            var paidList = GetProp(w, "tech_has_paid");
-            sb.Append(",\"tech_has_paid\":");
-            sb.Append(SerializeList(paidList));
+                jw.WritePropertyName("research_queue_list");
+                WriteList(jw, GetProp(w, "research_queue_list"));
 
-            // 读取 research_queue_list
-            var queueList = GetProp(w, "research_queue_list");
-            sb.Append(",\"research_queue_list\":");
-            sb.Append(SerializeList(queueList));
+                jw.WriteNumber("cur_research_tech", GetInt(w, "cur_research_tech"));
+                jw.WriteNumber("cur_research_progress", JsonBuilder.Safe(GetFloat(w, "cur_research_progress")));
+                jw.WriteBoolean("is_unlock_tech_inspiration", GetBool(w, "is_unlock_tech_inspiration"));
 
-            // 读取简单字段
-            sb.Append(",\"cur_research_tech\":").Append(GetInt(w, "cur_research_tech"));
-            sb.Append(",\"cur_research_progress\":").Append(GetFloat(w, "cur_research_progress").ToString(System.Globalization.CultureInfo.InvariantCulture));
-            sb.Append(",\"is_unlock_tech_inspiration\":").Append(GetBool(w, "is_unlock_tech_inspiration") ? "true" : "false");
-
-            // 读取 unlock_facility_list
-            var facilityList = GetProp(w, "unlock_facility_list");
-            sb.Append(",\"unlock_facility_list\":");
-            sb.Append(SerializeList(facilityList));
-
-            sb.Append('}');
-            return sb.ToString();
+                jw.WritePropertyName("unlock_facility_list");
+                WriteList(jw, GetProp(w, "unlock_facility_list"));
+            });
         }
         catch (Exception ex)
         {
-            return $"{{\"error\":\"{Escape(ex.Message)}\"}}";
+            return JsonBuilder.Error(ex);
         }
     }
 
 
 
-    private static string SerializeList(object? list)
+    /// <summary>
+    /// 把游戏侧的 List 写成 JSON 数组。
+    /// 先尝试 IList 直接访问；IL2CPP List&lt;T&gt; 无法直接转换，退回反射读 Count + get_Item。
+    /// </summary>
+    private static void WriteList(Utf8JsonWriter jw, object? list)
     {
-        if (list == null) return "[]";
-        var sb = new System.Text.StringBuilder();
-        sb.Append('[');
+        jw.WriteStartArray();
+        if (list == null)
+        {
+            jw.WriteEndArray();
+            return;
+        }
 
-        // 先尝试直接 IList cast
         if (list is System.Collections.IList ilist)
         {
             for (int i = 0; i < ilist.Count; i++)
-            {
-                if (i > 0) sb.Append(',');
-                AppendValue(sb, ilist[i]);
-            }
+                WriteValue(jw, ilist[i]);
         }
         else
         {
-            // IL2CPP List<T> 不能直接 cast，用反射读取 Count + get_Item
             var listType = list.GetType();
             var countProp = listType.GetProperty("Count", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
             var getItem = listType.GetMethod("get_Item", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
@@ -89,35 +79,33 @@ internal static class TechTreeService
                 int count = Convert.ToInt32(countProp.GetValue(list) ?? 0);
                 for (int i = 0; i < count; i++)
                 {
-                    if (i > 0) sb.Append(',');
-                    try
-                    {
-                        var item = getItem.Invoke(list, new object[] { i });
-                        AppendValue(sb, item);
-                    }
-                    catch { sb.Append("null"); }
+                    object? item;
+                    try { item = getItem.Invoke(list, new object[] { i }); }
+                    catch { item = null; }
+                    WriteValue(jw, item);
                 }
             }
         }
 
-        sb.Append(']');
-        return sb.ToString();
+        jw.WriteEndArray();
     }
 
 
-    private static void AppendValue(System.Text.StringBuilder sb, object? val)
+    /// <summary>把反射读到的任意值写成 JSON 值（数字/布尔原样，其余转字符串）</summary>
+    private static void WriteValue(Utf8JsonWriter jw, object? val)
     {
-        if (val == null) { sb.Append("null"); return; }
-        if (val is int || val is long || val is short || val is byte)
-            sb.Append(val);
-        else if (val is bool b)
-            sb.Append(b ? "true" : "false");
-        else if (val is float f)
-            sb.Append(f.ToString(System.Globalization.CultureInfo.InvariantCulture));
-        else if (val is double d)
-            sb.Append(d.ToString(System.Globalization.CultureInfo.InvariantCulture));
-        else
-            sb.Append('"').Append(Escape(val.ToString() ?? "")).Append('"');
+        switch (val)
+        {
+            case null: jw.WriteNullValue(); break;
+            case int i: jw.WriteNumberValue(i); break;
+            case long l: jw.WriteNumberValue(l); break;
+            case short s: jw.WriteNumberValue(s); break;
+            case byte b: jw.WriteNumberValue(b); break;
+            case bool bo: jw.WriteBooleanValue(bo); break;
+            case float f: jw.WriteNumberValue(JsonBuilder.Safe(f)); break;
+            case double d: jw.WriteNumberValue(double.IsFinite(d) ? d : 0d); break;
+            default: jw.WriteStringValue(val.ToString() ?? ""); break;
+        }
     }
 
 
@@ -128,48 +116,40 @@ internal static class TechTreeService
             var w = GameContext.GetGame();
             if (w == null) return "{}";
 
-            var sb = new System.Text.StringBuilder();
-            sb.Append('{');
+            return JsonBuilder.Object(jw =>
+            {
+                // 已解锁科技列表
+                jw.WritePropertyName("unlockTechList");
+                WriteList(jw, GetProp(w, "unlock_tech_list"));
 
-            // 已解锁科技列表
-            var unlockList = GetProp(w, "unlock_tech_list");
-            sb.Append("\"unlockTechList\":");
-            sb.Append(SerializeList(unlockList));
+                // 已付费科技列表
+                jw.WritePropertyName("techHasPaid");
+                WriteList(jw, GetProp(w, "tech_has_paid"));
 
-            // 已付费科技列表
-            var paidList = GetProp(w, "tech_has_paid");
-            sb.Append(",\"techHasPaid\":");
-            sb.Append(SerializeList(paidList));
+                // 研究队列
+                jw.WritePropertyName("researchQueue");
+                WriteList(jw, GetProp(w, "research_queue_list"));
 
-            // 研究队列
-            var queueList = GetProp(w, "research_queue_list");
-            sb.Append(",\"researchQueue\":");
-            sb.Append(SerializeList(queueList));
+                // 当前研究
+                jw.WriteNumber("curResearchTech", GetInt(w, "cur_research_tech"));
+                jw.WriteNumber("curResearchProgress", JsonBuilder.Safe(GetFloat(w, "cur_research_progress")));
 
-            // 当前研究
-            sb.Append(",\"curResearchTech\":").Append(GetInt(w, "cur_research_tech"));
-            sb.Append(",\"curResearchProgress\":").Append(GetFloat(w, "cur_research_progress").ToString(System.Globalization.CultureInfo.InvariantCulture));
-
-            // 灵感解锁
-            sb.Append(",\"isUnlockTechInspiration\":").Append(GetBool(w, "is_unlock_tech_inspiration") ? "true" : "false");
-
-            // 其他相关解锁状态
-            sb.Append(",\"isUnlockFreeLove\":").Append(GetBool(w, "is_unlock_free_love") ? "true" : "false");
-            sb.Append(",\"isUnlockCourage\":").Append(GetBool(w, "is_unlock_courage") ? "true" : "false");
-            sb.Append(",\"isUnlockPenaltySystem\":").Append(GetBool(w, "is_unlock_penalty_system") ? "true" : "false");
-            sb.Append(",\"isUnlockRewardsSystem\":").Append(GetBool(w, "is_unlock_rewards_system") ? "true" : "false");
-            sb.Append(",\"isUnlockPersonalAwareness\":").Append(GetBool(w, "is_unlock_personal_awareness") ? "true" : "false");
-            sb.Append(",\"isUnlockHearken\":").Append(GetBool(w, "is_unlock_hearken") ? "true" : "false");
-            sb.Append(",\"isUnlockSocialSupport\":").Append(GetBool(w, "is_unlock_social_support") ? "true" : "false");
-            sb.Append(",\"isUnlockEfficientStorage\":").Append(GetBool(w, "is_unlock_efficient_storage") ? "true" : "false");
-            sb.Append(",\"isUnlockEncyclopedia\":").Append(GetBool(w, "is_unlock_encyclopedia") ? "true" : "false");
-
-            sb.Append('}');
-            return sb.ToString();
+                // 灵感解锁 + 其他相关解锁状态
+                jw.WriteBoolean("isUnlockTechInspiration", GetBool(w, "is_unlock_tech_inspiration"));
+                jw.WriteBoolean("isUnlockFreeLove", GetBool(w, "is_unlock_free_love"));
+                jw.WriteBoolean("isUnlockCourage", GetBool(w, "is_unlock_courage"));
+                jw.WriteBoolean("isUnlockPenaltySystem", GetBool(w, "is_unlock_penalty_system"));
+                jw.WriteBoolean("isUnlockRewardsSystem", GetBool(w, "is_unlock_rewards_system"));
+                jw.WriteBoolean("isUnlockPersonalAwareness", GetBool(w, "is_unlock_personal_awareness"));
+                jw.WriteBoolean("isUnlockHearken", GetBool(w, "is_unlock_hearken"));
+                jw.WriteBoolean("isUnlockSocialSupport", GetBool(w, "is_unlock_social_support"));
+                jw.WriteBoolean("isUnlockEfficientStorage", GetBool(w, "is_unlock_efficient_storage"));
+                jw.WriteBoolean("isUnlockEncyclopedia", GetBool(w, "is_unlock_encyclopedia"));
+            });
         }
         catch (Exception ex)
         {
-            return $"{{\"error\":\"{Escape(ex.Message)}\"}}";
+            return JsonBuilder.Error(ex);
         }
     }
 
@@ -183,40 +163,40 @@ internal static class TechTreeService
             if (unlock)
             {
                 var helper = GameContext.GetTechHelper();
-                if (helper == null) return "{\"error\":\"tech_helper is null\"}";
+                if (helper == null) return JsonBuilder.Error("tech_helper is null");
                 IntPtr helperPtr = GetIl2CppPtr(helper);
                 IntPtr cls = helperPtr != IntPtr.Zero ? GetClass(helperPtr) : IntPtr.Zero;
                 IntPtr m = cls != IntPtr.Zero ? FindMethodInHierarchy(cls, "UnlockNewTech", 2) : IntPtr.Zero;
-                if (m == IntPtr.Zero) return "{\"error\":\"UnlockNewTech method not found\"}";
+                if (m == IntPtr.Zero) return JsonBuilder.Error("UnlockNewTech method not found");
                 Invoke(m, helperPtr, techId, false);
-                return "{\"ok\":true,\"action\":\"added\"}";
+                return JsonBuilder.Ok("action", "added");
             }
 
             // 锁定：游戏没有对应入口，手动从 unlock_tech_list 移除
             var w = GameContext.GetGame();
-            if (w == null) return "{\"error\":\"Game.w is null\"}";
+            if (w == null) return JsonBuilder.Error("Game.w is null");
 
             var unlockList = GetProp(w, "unlock_tech_list");
-            if (unlockList == null) return "{\"error\":\"unlock_tech_list is null\"}";
+            if (unlockList == null) return JsonBuilder.Error("unlock_tech_list is null");
 
             var listType = unlockList.GetType();
             var containsMethod = listType.GetMethod("Contains", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
             var removeMethod = listType.GetMethod("Remove", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
 
             if (containsMethod == null || removeMethod == null)
-                return "{\"error\":\"List methods not found\"}";
+                return JsonBuilder.Error("List methods not found");
 
             bool contains = Convert.ToBoolean(containsMethod.Invoke(unlockList, new object[] { techId }));
             if (contains)
             {
                 removeMethod.Invoke(unlockList, new object[] { techId });
-                return "{\"ok\":true,\"action\":\"removed\"}";
+                return JsonBuilder.Ok("action", "removed");
             }
-            return "{\"ok\":true,\"action\":\"unchanged\"}";
+            return JsonBuilder.Ok("action", "unchanged");
         }
         catch (Exception ex)
         {
-            return $"{{\"error\":\"{Escape(ex.Message)}\"}}";
+            return JsonBuilder.Error(ex);
         }
     }
 
@@ -231,21 +211,21 @@ internal static class TechTreeService
         try
         {
             var helper = GameContext.GetTechHelper();
-            if (helper == null) return "{\"error\":\"tech_helper is null (需先读档进入游戏)\"}";
+            if (helper == null) return JsonBuilder.Error("tech_helper is null (需先读档进入游戏)");
 
             IntPtr helperPtr = GetIl2CppPtr(helper);
-            if (helperPtr == IntPtr.Zero) return "{\"error\":\"tech_helper pointer invalid\"}";
+            if (helperPtr == IntPtr.Zero) return JsonBuilder.Error("tech_helper pointer invalid");
 
             IntPtr cls = GetClass(helperPtr);
             IntPtr m = FindMethodInHierarchy(cls, "UnlockAllTech", 1);
-            if (m == IntPtr.Zero) return "{\"error\":\"UnlockAllTech method not found\"}";
+            if (m == IntPtr.Zero) return JsonBuilder.Error("UnlockAllTech method not found");
 
             Invoke(m, helperPtr, false); // except_equip=false：连装备类科技一起解锁
-            return "{\"ok\":true}";
+            return JsonBuilder.Ok();
         }
         catch (Exception ex)
         {
-            return $"{{\"error\":\"{Escape(ex.Message)}\"}}";
+            return JsonBuilder.Error(ex);
         }
     }
 
@@ -255,26 +235,26 @@ internal static class TechTreeService
         try
         {
             var w = GameContext.GetGame();
-            if (w == null) return "{\"error\":\"Game.w is null\"}";
+            if (w == null) return JsonBuilder.Error("Game.w is null");
 
             var wType = w.GetType();
             var prop = wType.GetProperty("cur_research_tech", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.FlattenHierarchy);
             if (prop != null && prop.CanWrite)
             {
                 prop.SetValue(w, techId);
-                return "{\"ok\":true}";
+                return JsonBuilder.Ok();
             }
             var field = wType.GetField("cur_research_tech", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.FlattenHierarchy);
             if (field != null)
             {
                 field.SetValue(w, techId);
-                return "{\"ok\":true}";
+                return JsonBuilder.Ok();
             }
-            return "{\"error\":\"cur_research_tech not writable\"}";
+            return JsonBuilder.Error("cur_research_tech not writable");
         }
         catch (Exception ex)
         {
-            return $"{{\"error\":\"{Escape(ex.Message)}\"}}";
+            return JsonBuilder.Error(ex);
         }
     }
 }

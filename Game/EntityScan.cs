@@ -3,8 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Text.Json;
 using UnityEngine;
-using static ChestEditor.Core.JsonUtil;
 using static ChestEditor.Interop.Il2CppApi;
 using static ChestEditor.Interop.Il2CppInvoke;
 using static ChestEditor.Interop.Il2CppMemory;
@@ -206,40 +206,34 @@ internal static class EntityScan
     /// <summary>
     /// 返回实体列表 JSON（精简字段数）
     /// </summary>
-    internal static string GetAllJson()
+    internal static string GetAllJson() => JsonBuilder.Build(jw =>
     {
-        var sb = new System.Text.StringBuilder();
-        sb.Append('[');
-        bool first = true;
+        jw.WriteStartArray();
         foreach (var e in _entities)
         {
-            if (!first) sb.Append(',');
-            first = false;
-
             // 计算精简字段数（排除pointer）
             int slimCount = 0;
             foreach (var kv in e.FieldMeta)
                 if (!kv.Value.IsPointer) slimCount++;
 
-            sb.Append('{');
-            sb.Append($"\"goName\":\"{Escape(e.GoName)}\",");
-            sb.Append($"\"className\":\"{Escape(e.ClassName)}\",");
-            sb.Append($"\"npcName\":\"{Escape(e.NpcName)}\",");
-            sb.Append($"\"stuffNameWithIdIndex\":\"{Escape(e.StuffNameWithIdIndex)}\",");
-            sb.Append($"\"soldierTypeId\":{e.SoldierTypeId},");
-            sb.Append($"\"soldierTypeName\":\"{Escape(GetSoldierTypeName(e.SoldierTypeId))}\",");
-            sb.Append($"\"hometownKingdomId\":{e.HometownKingdomId},");
-            sb.Append($"\"territoryKingdomId\":{e.TerritoryKingdomId},");
-            sb.Append($"\"ptrHash\":{e.PtrHash},");
-            sb.Append($"\"guid\":{e.Guid},");
-            sb.Append($"\"stuffId\":{e.StuffId},");
-            sb.Append($"\"name\":\"{Escape(DataTables.ItemName(e.StuffId))}\",");
-            sb.Append($"\"fieldCount\":{slimCount}");
-            sb.Append('}');
+            jw.WriteStartObject();
+            jw.WriteString("goName", e.GoName);
+            jw.WriteString("className", e.ClassName);
+            jw.WriteString("npcName", e.NpcName);
+            jw.WriteString("stuffNameWithIdIndex", e.StuffNameWithIdIndex);
+            jw.WriteNumber("soldierTypeId", e.SoldierTypeId);
+            jw.WriteString("soldierTypeName", GetSoldierTypeName(e.SoldierTypeId));
+            jw.WriteNumber("hometownKingdomId", e.HometownKingdomId);
+            jw.WriteNumber("territoryKingdomId", e.TerritoryKingdomId);
+            jw.WriteNumber("ptrHash", e.PtrHash);
+            jw.WriteNumber("guid", e.Guid);
+            jw.WriteNumber("stuffId", e.StuffId);
+            jw.WriteString("name", DataTables.ItemName(e.StuffId));
+            jw.WriteNumber("fieldCount", slimCount);
+            jw.WriteEndObject();
         }
-        sb.Append(']');
-        return sb.ToString();
-    }
+        jw.WriteEndArray();
+    });
 
 
     /// <summary>
@@ -251,46 +245,38 @@ internal static class EntityScan
         {
             if (e.PtrHash != ptrHash) continue;
 
-            var sb = new System.Text.StringBuilder();
-            sb.Append('{');
-            bool first = true;
-            foreach (var kv in e.FieldMeta)
+            return JsonBuilder.Object(jw =>
             {
-                if (kv.Value.IsPointer) continue; // 跳过pointer字段
-
-                if (!first) sb.Append(',');
-                first = false;
-                sb.Append($"\"{Escape(kv.Key)}\":{{");
-                sb.Append($"\"isFloat\":{(kv.Value.IsFloat ? "true" : "false")},");
-                sb.Append($"\"isString\":{(kv.Value.IsString ? "true" : "false")},");
-                sb.Append($"\"typeName\":\"{Escape(kv.Value.TypeName)}\",");
-                sb.Append("\"value\":");
-                try
+                foreach (var kv in e.FieldMeta)
                 {
-                    if (kv.Value.IsString)
+                    if (kv.Value.IsPointer) continue; // 跳过pointer字段
+
+                    jw.WritePropertyName(kv.Key);
+                    jw.WriteStartObject();
+                    jw.WriteBoolean("isFloat", kv.Value.IsFloat);
+                    jw.WriteBoolean("isString", kv.Value.IsString);
+                    jw.WriteString("typeName", kv.Value.TypeName);
+                    jw.WritePropertyName("value");
+                    try
                     {
-                        string? sv = ReadIl2CppString(e.Ptr, kv.Value.Offset);
-                        sb.Append($"\"{Escape(sv ?? "")}\"");
+                        if (kv.Value.IsString)
+                            jw.WriteStringValue(ReadIl2CppString(e.Ptr, kv.Value.Offset) ?? "");
+                        else if (kv.Value.IsFloat)
+                            jw.WriteNumberValue(JsonBuilder.Safe(ReadIl2CppFloat(e.Ptr, kv.Value.Offset)));
+                        else
+                            jw.WriteNumberValue(ReadIl2CppInt(e.Ptr, kv.Value.Offset));
                     }
-                    else if (kv.Value.IsFloat)
+                    catch
                     {
-                        float v = ReadIl2CppFloat(e.Ptr, kv.Value.Offset);
-                        sb.Append(v.ToString("G"));
+                        // 保持旧实现的降级行为：字符串写 ""，数字写 0
+                        if (kv.Value.IsString) jw.WriteStringValue("");
+                        else jw.WriteNumberValue(0);
                     }
-                    else
-                    {
-                        int v = ReadIl2CppInt(e.Ptr, kv.Value.Offset);
-                        sb.Append(v);
-                    }
+                    jw.WriteEndObject();
                 }
-                catch { sb.Append(kv.Value.IsString ? "\"\"" : "0"); }
-                sb.Append("}");
-            }
-            sb.Append('}');
-            var result = sb.ToString();
-            return result;
+            });
         }
-        return "{\"error\":\"not found\"}";
+        return JsonBuilder.Error("not found");
     }
 
 
@@ -302,15 +288,19 @@ internal static class EntityScan
         foreach (var e in _entities)
         {
             if (e.PtrHash != ptrHash) continue;
-            if (e.GoRef == null) return "{\"error\":\"no GameObject\"}";
+            if (e.GoRef == null) return JsonBuilder.Error("no GameObject");
             try
             {
                 var pos = e.GoRef.transform.position;
-                return $"{{\"x\":{pos.x},\"y\":{pos.y}}}";
+                return JsonBuilder.Object(jw =>
+                {
+                    jw.WriteNumber("x", JsonBuilder.Safe(pos.x));
+                    jw.WriteNumber("y", JsonBuilder.Safe(pos.y));
+                });
             }
-            catch (Exception ex) { return $"{{\"error\":\"{Escape(ex.Message)}\"}}"; }
+            catch (Exception ex) { return JsonBuilder.Error(ex); }
         }
-        return "{\"error\":\"entity not found\"}";
+        return JsonBuilder.Error("entity not found");
     }
 
 

@@ -76,7 +76,7 @@ internal class HttpServer
             if (!Router.Dispatch(context.Request, resp))
             {
                 resp.StatusCode = 404;
-                HttpUtil.SendJson(resp, "{\"error\":\"not found\"}");
+                HttpUtil.SendJson(resp, JsonBuilder.Error("not found"));
             }
         }
         catch (Exception ex)
@@ -84,7 +84,7 @@ internal class HttpServer
             try
             {
                 resp.StatusCode = 500;
-                HttpUtil.SendJson(resp, $"{{\"error\":\"{ex.Message.Replace("\"", "'")}\"}}");
+                HttpUtil.SendJson(resp, JsonBuilder.Error(ex));
             }
             catch { }
         }

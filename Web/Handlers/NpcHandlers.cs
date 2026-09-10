@@ -29,7 +29,7 @@ internal static class NpcHandlers
             return MainThread.Run(() =>
             {
                 string result = NpcEditor.SetNpcField(ptrHash, field, value);
-                return result == "ok" ? "{\"ok\":true}" : $"{{\"error\":\"{result}\"}}";
+                return result == "ok" ? JsonBuilder.Ok() : JsonBuilder.Error(result);
             }, 10000);
         });
 

@@ -129,9 +129,5 @@ internal static class Router
         return false;
     }
 
-    private static string ErrorJson(string msg)
-    {
-        var safe = msg.Replace("\\", "\\\\").Replace("\"", "'");
-        return $"{{\"error\":\"{safe}\"}}";
-    }
+    private static string ErrorJson(string msg) => JsonBuilder.Error(msg);
 }

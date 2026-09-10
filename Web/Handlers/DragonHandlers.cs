@@ -54,7 +54,7 @@ internal static class DragonHandlers
             return MainThread.Run(() =>
             {
                 string result = DragonService.SummonDragon(dragonStuffId, natures.Count > 0 ? natures.ToArray() : null);
-                return $"{{\"result\":\"{ChestEditor.Core.JsonUtil.Escape(result)}\"}}";
+                return JsonBuilder.Object(w => w.WriteString("result", result));
             });
         });
 
@@ -75,7 +75,7 @@ internal static class DragonHandlers
             return MainThread.Run(() =>
             {
                 string result = DragonService.SetDragonSoulProperty(index, prop, value);
-                return result == "ok" ? "{\"ok\":true}" : $"{{\"error\":\"{result}\"}}";
+                return result == "ok" ? JsonBuilder.Ok() : JsonBuilder.Error(result);
             });
         });
 
@@ -83,7 +83,7 @@ internal static class DragonHandlers
             MainThread.Run(() =>
             {
                 DragonService.SearchMapDragonEntities();
-                return "{\"ok\":true}";
+                return JsonBuilder.Ok();
             }, 10000));
 
         Router.Add("GET", "/api/dragon/entities", _ =>
@@ -98,7 +98,7 @@ internal static class DragonHandlers
             return MainThread.Run(() =>
             {
                 string result = DragonService.SetDragonEntityField(guid, field, value);
-                return result == "ok" ? "{\"ok\":true}" : $"{{\"error\":\"{result}\"}}";
+                return result == "ok" ? JsonBuilder.Ok() : JsonBuilder.Error(result);
             });
         });
     }

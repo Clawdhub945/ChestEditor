@@ -4,7 +4,6 @@ using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using UnityEngine;
-using static ChestEditor.Core.JsonUtil;
 using static ChestEditor.Interop.Il2CppApi;
 using static ChestEditor.Interop.Il2CppInvoke;
 using static ChestEditor.Interop.Il2CppMemory;
@@ -129,10 +128,10 @@ internal static class ModificationStore
     internal static string ReapplyModifications()
     {
         if (_pendingModifications.Count == 0)
-            return "{\"ok\":true,\"applied\":0}";
+            return JsonBuilder.Object(w => { w.WriteBoolean("ok", true); w.WriteNumber("applied", 0); });
         EntityScan.ScanAll();
         ApplyPendingModifications();
-        return "{\"ok\":true}";
+        return JsonBuilder.Ok();
     }
 
     private static string GetSavePath()

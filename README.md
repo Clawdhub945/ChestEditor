@@ -11,7 +11,7 @@ SaveLoadPatches.cs       Harmony 补丁（读档后重放修改、速度覆盖�
 GlobalUsings.cs          全局命名空间导入
 
 Core/                    基础层
-  JsonUtil.cs            手拼 JSON 的统一转义与片段工具
+  JsonBuilder.cs         JSON 输出统一入口（System.Text.Json / Utf8JsonWriter）
   EmbeddedResources.cs   嵌入资源统一读取（带缓存）
   DataTables.cs          游戏数据表加载：物品 / 士兵类型 / 箱子筛选 / 龙类型 / 龙天性
 
@@ -64,6 +64,24 @@ Web/                     HTTP 层
 - **主线程**（`MainThread.Pump`）：所有触碰游戏对象/IL2CPP 内存的读写都在这里执行，
   HTTP 线程通过 `MainThread.Run(() => Service.Xxx(), timeout)` 同步等待结果。
 - 只读 JSON（箱子列表/物品表/龙背包）带 500ms TTL 缓存，替代旧的每帧全量重建。
+
+## JSON 输出约定
+
+**全项目禁止手工拼接 JSON 字符串**（`StringBuilder` + 插值 + 自行转义），一律走 `Core/JsonBuilder`：
+
+```csharp
+return JsonBuilder.Object(w => { w.WriteNumber("stuffId", id); w.WriteString("name", name); });
+return JsonBuilder.Build(w => { w.WriteStartArray(); /* ... */ w.WriteEndArray(); });
+return JsonBuilder.Ok();                       // {"ok":true}
+return JsonBuilder.Ok("action", "added");      // {"ok":true,"action":"added"}
+return JsonBuilder.Error(ex);                  // {"error":"..."}
+```
+
+- 转义、逗号、数字/布尔字面量全部由 `System.Text.Json` 的 `Utf8JsonWriter` 负责。
+- 编码器用 `JavaScriptEncoder.Create(UnicodeRanges.All)`：中文原样输出（不膨胀成 `\uXXXX`），
+  同时仍转义 `< > & '` 等 HTML 敏感字符。
+- 来自游戏内存的浮点写出口一律套 `JsonBuilder.Safe(...)`：NaN/±Infinity 降级为 `0`，
+  避免一个坏字段让整份响应变成非法 JSON。
 
 ## 持久化
 
