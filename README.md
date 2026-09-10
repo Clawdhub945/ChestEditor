@@ -12,10 +12,19 @@ GlobalUsings.cs          全局命名空间导入
 
 Core/                    基础层
   JsonUtil.cs            手拼 JSON 的统一转义与片段工具
-  ItemCatalog.cs         统一物品名称表（1840条）+ 可入箱规则
+  EmbeddedResources.cs   嵌入资源统一读取（带缓存）
+  DataTables.cs          游戏数据表加载：物品 / 士兵类型 / 箱子筛选 / 龙类型 / 龙天性
+
+Data/                    游戏数据表（嵌入资源，由 _tools/generate_data_tables.py 生成）
+  items.json             [[id,name,stuff_type]]   1840 条，源自 stuff.json + stuff2.json
+  soldier_types.json     [[id,name]]              45 条，源自 soldier_equip.json + 名称表
+  chest_filters.json     [[id,name,enabled]]      34 条箱子设施筛选（显示名以原代码为准）
+  dragon_types.json      [[name,cn,baseId]]       16 条龙类型
+  dragon_natures.json    [[id,name]]              18 条，源自 dragon_nature.json
 
 Interop/                 IL2CPP 互操作层（全项目唯一定义处，禁止私拷）
-  Il2CppApi.cs           原生 API：指针提取、类名、字段枚举（沿父类链+缓存）、安全字段读取
+  Il2CppApi.cs           原生 API 唯一切入口/门面：指针提取、类/字段/方法枚举、安全字段读取、静态字段
+                         （业务层一律经此访问，不得直接调用 Il2CppInterop.Runtime.IL2CPP.*）
   Il2CppMemory.cs        unsafe 内存直读直写（int/float/string/List<int>）
   Il2CppInvoke.cs        方法查找 + il2cpp_runtime_invoke 参数编组
   ManagedReflect.cs      对 IL2CPP 代理对象的 C# 反射读写（MemberInfo 缓存）
@@ -80,12 +89,17 @@ Web/                     HTTP 层
 
 游戏官方配置位于 `C:\AI\yuanma\json_data\`（游戏导出），以下文件由此生成：
 
+统一由 `_tools/generate_data_tables.py` 生成（`--check` 只校验不写文件；`--verify` 额外与现有 C# 表逐条比对）：
+
 | 本项目文件 | 来源 | 说明 |
 |---|---|---|
-| `Core/ItemCatalog.cs` | stuff.json + stuff2.json | 1840 条物品名+官方 stuff_type；可入箱=type∈{3,4,6} |
+| `Data/items.json` | stuff.json + stuff2.json | 1840 条，与重构前 ItemCatalog 逐条一致（`--verify` 已校验） |
+| `Data/soldier_types.json` | soldier_equip.json + 名称表 | 44 条 + 特例 `0=市民`，与原硬编码表逐条一致 |
+| `Data/chest_filters.json` | ChestService 原表 | 显示名以原代码为准：4 条与官方不同（属有意为之，脚本会打印告警） |
+| `Data/dragon_types.json` | DragonService 原表 | 无官方对应表，故以代码现值为准 |
+| `Data/dragon_natures.json` | dragon_nature.json | 18 条，与原硬编码表逐条一致 |
 | `Web/Static/data/npc_types.json` | career.json | npc_type → npc_type_name_zh-CN（78 条） |
 | `Web/Static/data/tech_tree.json` | tech_tree.json | 已确认与官方 152 条一致（含手工注释 t 字段，故未自动再生成） |
-| `Game/DragonService.cs` 内表 | dragon_nature.json / dragon_upgrade.json | 已人工核对一致；如版本更新可再生成 |
 
 
 ## 构建与部署

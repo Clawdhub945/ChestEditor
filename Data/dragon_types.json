@@ -1,0 +1,18 @@
+[
+  ["MonsterDragon1Rock","岩龙",201401],
+  ["MonsterDragon2Molten","熔岩龙",201411],
+  ["MonsterDragon3Ironthorn","铁棘龙",201421],
+  ["MonsterDragon4Void","虚空龙",201431],
+  ["MonsterDragon5Fire","火龙",201441],
+  ["MonsterDragon6Thunder","电龙",201451],
+  ["MonsterDragon7Wind","疾风龙",201461],
+  ["MonsterDragon8Nether","幽冥龙",201471],
+  ["MonsterDragon9Ice","冰龙",201481],
+  ["MonsterDragon10Poison","毒龙",201491],
+  ["MonsterDragon11Storm","风暴龙",201501],
+  ["MonsterDragon12Mirage","幻心龙",201511],
+  ["MonsterDragon13SacredShield","圣盾龙",201521],
+  ["MonsterDragon14Arcane","奥术龙",201531],
+  ["MonsterDragon15Tidal","潮汐龙",201541],
+  ["MonsterDragon16AncientTree","远古树龙",201551]
+]

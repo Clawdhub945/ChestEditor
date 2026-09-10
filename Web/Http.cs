@@ -181,22 +181,6 @@ internal static class HttpUtil
         resp.OutputStream.Write(bytes, 0, bytes.Length);
     }
 
-    private static readonly Dictionary<string, byte[]> ResourceCache = new();
-
-    /// <summary>读取嵌入资源（带缓存）</summary>
-    internal static byte[]? GetEmbeddedResource(string name)
-    {
-        lock (ResourceCache)
-        {
-            if (ResourceCache.TryGetValue(name, out var cached)) return cached;
-            var asm = typeof(HttpUtil).Assembly;
-            using var stream = asm.GetManifestResourceStream(name);
-            if (stream == null) return null;
-            using var ms = new System.IO.MemoryStream();
-            stream.CopyTo(ms);
-            var bytes = ms.ToArray();
-            ResourceCache[name] = bytes;
-            return bytes;
-        }
-    }
+    /// <summary>读取嵌入资源（带缓存）；统一走 Core.EmbeddedResources</summary>
+    internal static byte[]? GetEmbeddedResource(string name) => EmbeddedResources.Get(name);
 }

@@ -34,6 +34,8 @@
     <EmbeddedResource Include="Web\Static\css\*.css" LogicalName="ChestEditor.Static.css.%(Filename)%(Extension)" />
     <EmbeddedResource Include="Web\Static\js\*.js" LogicalName="ChestEditor.Static.js.%(Filename)%(Extension)" />
     <EmbeddedResource Include="Web\Static\data\*.json" LogicalName="ChestEditor.Static.data.%(Filename)%(Extension)" />
+    <!-- 游戏数据表：由 _tools/generate_data_tables.py 生成 -->
+    <EmbeddedResource Include="Data\*.json" LogicalName="ChestEditor.Data.%(Filename)%(Extension)" />
   </ItemGroup>
 
   <Target Name="PostBuild" AfterTargets="PostBuildEvent">

@@ -182,7 +182,7 @@ internal static class DragonService
             }
             if (twoParamMethod != null)
             {
-                foreach (var kvp in ItemCatalog.GetAllItems())
+                foreach (var kvp in DataTables.AllItems())
                 {
                     try
                     {
@@ -212,7 +212,7 @@ internal static class DragonService
             }
             if (singleParamMethod != null)
             {
-                foreach (var kvp in ItemCatalog.GetAllItems())
+                foreach (var kvp in DataTables.AllItems())
                 {
                     try
                     {
@@ -296,7 +296,7 @@ internal static class DragonService
             // 用 GetStuffCount 遍历所有已知物品
             if (getStuffCountMethod != null)
             {
-                foreach (var kvp in ItemCatalog.GetAllItems())
+                foreach (var kvp in DataTables.AllItems())
                 {
                     try
                     {
@@ -458,7 +458,7 @@ internal static class DragonService
 
             // 更新本地缓存
             UpdateDragonCache(stuffId, newCount);
-            Plugin.LogInfo($"龙素材设置: {ItemCatalog.GetName(stuffId)}({stuffId}) -> {newCount}");
+            Plugin.LogInfo($"龙素材设置: {DataTables.ItemName(stuffId)}({stuffId}) -> {newCount}");
         }
         catch (Exception ex) { Plugin.LogError($"SetDragonItemQuantity 出错: {ex.Message}"); }
     }
@@ -468,33 +468,12 @@ internal static class DragonService
     private static MethodInfo? _addDragonSoulMethod;
 
 
-    internal static readonly (string Name, string ChineseName, int BaseId)[] DragonTypes = new[]
-    {
-        ("MonsterDragon1Rock",        "岩龙",     201401),
-        ("MonsterDragon2Molten",      "熔岩龙",   201411),
-        ("MonsterDragon3Ironthorn",   "铁棘龙",   201421),
-        ("MonsterDragon4Void",        "虚空龙",   201431),
-        ("MonsterDragon5Fire",        "火龙",     201441),
-        ("MonsterDragon6Thunder",     "电龙",     201451),
-        ("MonsterDragon7Wind",        "疾风龙",   201461),
-        ("MonsterDragon8Nether",      "幽冥龙",   201471),
-        ("MonsterDragon9Ice",         "冰龙",     201481),
-        ("MonsterDragon10Poison",     "毒龙",     201491),
-        ("MonsterDragon11Storm",      "风暴龙",   201501),
-        ("MonsterDragon12Mirage",     "幻心龙",   201511),
-        ("MonsterDragon13SacredShield","圣盾龙",  201521),
-        ("MonsterDragon14Arcane",     "奥术龙",   201531),
-        ("MonsterDragon15Tidal",      "潮汐龙",   201541),
-        ("MonsterDragon16AncientTree", "远古树龙", 201551),
-    };
+    /// <summary>龙类型表（数据见 Data/dragon_types.json）</summary>
+    internal static readonly (string Name, string ChineseName, int BaseId)[] DragonTypes = DataTables.DragonTypes;
 
 
-    internal static readonly (int Id, string Name)[] DragonNatures = new[]
-    {
-        (1, "坚韧"), (2, "洞察"), (3, "再生"), (4, "反震"), (5, "迅捷"), (6, "穿透"),
-        (7, "蓄能"), (8, "破防"), (9, "护盾"), (10, "警觉"), (11, "刚毅"), (12, "沉稳"),
-        (13, "狂怒"), (14, "重创"), (15, "牵制"), (16, "反制"), (17, "冷血"), (18, "血誓"),
-    };
+    /// <summary>龙天性表（数据见 Data/dragon_natures.json，源自官方 dragon_nature.json）</summary>
+    internal static readonly (int Id, string Name)[] DragonNatures = DataTables.DragonNatures;
 
 
     internal static string GetDragonTypesJson()
@@ -1235,7 +1214,7 @@ internal static class DragonService
             {
                 if (!first) sb.Append(',');
                 first = false;
-                sb.Append($"{{\"stuffId\":{kv.Key},\"name\":\"{Escape(ItemCatalog.GetName(kv.Key))}\",\"count\":{kv.Value}}}");
+                sb.Append($"{{\"stuffId\":{kv.Key},\"name\":\"{Escape(DataTables.ItemName(kv.Key))}\",\"count\":{kv.Value}}}");
             }
             sb.Append(']');
             _bagJson = sb.ToString();

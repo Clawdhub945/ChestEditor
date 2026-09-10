@@ -26,44 +26,9 @@ internal static class ChestService
     internal static IReadOnlyList<ChestInfo> Chests => _chests;
 
 
-    // 筛选
-    private static readonly Dictionary<int, (string Name, bool Enabled)> _filterItems = new()
-    {
-        { 103001, ("大箱子", true) },
-        { 103002, ("料堆", true) },
-        { 103003, ("货架", true) },
-        { 106005, ("王座", true) },
-        { 103004, ("交易台", false) },
-        { 103005, ("通商口岸", false) },
-        { 103008, ("周转箱", false) },
-        { 103009, ("冰窖", false) },
-        { 103012, ("马车站", false) },
-        { 104002, ("讲台", false) },
-        { 104004, ("布道台", false) },
-        { 104007, ("诊断台", false) },
-        { 104016, ("餐桌", false) },
-        { 104019, ("接待台", false) },
-        { 104020, ("宴会桌", false) },
-        { 104026, ("幸运轮盘", false) },
-        { 105026, ("码头", false) },
-        { 105031, ("资源搜集点", false) },
-        { 106001, ("军营", false) },
-        { 106002, ("牢房", false) },
-        { 106004, ("野营", false) },
-        { 106008, ("训练场", false) },
-        { 107004, ("强盗营地", false) },
-        { 107005, ("蛮族军营", false) },
-        { 108012, ("永恒圣殿", false) },
-        { 109005, ("国库", false) },
-        { 111002, ("泰坦之手", false) },
-        { 105003, ("牧场", false) },
-        { 103013, ("喂食器", false) },
-        { 108008, ("蚁穴", false) },
-        { 108011, ("红蚁穴", false) },
-        { 111003, ("光明祭坛", false) },
-        { 111004, ("黑暗祭坛", false) },
-        { 111005, ("永恒圣殿", false) },
-    };
+    // 箱子设施筛选表：数据见 Data/chest_filters.json
+    // 注：运行时会就地切换 enabled，所以取的是数据表的一份独立副本，而非共享缓存。
+    private static readonly Dictionary<int, (string Name, bool Enabled)> _filterItems = DataTables.ChestFilters();
 
 
     private static List<KeyValuePair<int, string>>? _allItems;
@@ -154,7 +119,7 @@ internal static class ChestService
             if (_removeStuffMethod != null)
             {
                 _removeStuffMethod.Invoke(bag, new object[] { stuffId, count, false });
-                Plugin.LogInfo($"删除成功: {ItemCatalog.GetName(stuffId)}({stuffId}) x{count}");
+                Plugin.LogInfo($"删除成功: {DataTables.ItemName(stuffId)}({stuffId}) x{count}");
 
                 // 只更新当前箱子的物品数据
                 UpdateChestItems(chestIndex);
@@ -191,12 +156,12 @@ internal static class ChestService
             if (_addStuffNoNotifyMethod != null)
             {
                 _addStuffNoNotifyMethod.Invoke(bag, new object[] { stuffId, count });
-                Plugin.LogInfo($"添加成功: {ItemCatalog.GetName(stuffId)}({stuffId}) x{count}");
+                Plugin.LogInfo($"添加成功: {DataTables.ItemName(stuffId)}({stuffId}) x{count}");
             }
             else if (_addStuffMethod != null)
             {
                 _addStuffMethod.Invoke(bag, new object[] { stuffId, count, false });
-                Plugin.LogInfo($"添加成功: {ItemCatalog.GetName(stuffId)}({stuffId}) x{count}");
+                Plugin.LogInfo($"添加成功: {DataTables.ItemName(stuffId)}({stuffId}) x{count}");
             }
             else
             {
@@ -289,7 +254,7 @@ internal static class ChestService
                 if (string.IsNullOrEmpty(name))
                     name = GetProp(facility, "stuff_name_with_id_index")?.ToString() ?? "";
                 if (string.IsNullOrEmpty(name))
-                    name = ItemCatalog.GetName(stuffId);
+                    name = DataTables.ItemName(stuffId);
 
                 var items = ReadItemsFromBag(facility);
 
@@ -379,7 +344,7 @@ internal static class ChestService
             }
             if (getStuffCountMethod != null)
             {
-                foreach (var kvp in ItemCatalog.GetAllItems())
+                foreach (var kvp in DataTables.AllItems())
                 {
                     try
                     {
@@ -582,7 +547,7 @@ internal static class ChestService
             {
                 if (!first) sb.Append(',');
                 first = false;
-                sb.Append($"{{\"stuffId\":{it.StuffId},\"name\":\"{Escape(ItemCatalog.GetName(it.StuffId))}\",\"count\":{it.Count}}}");
+                sb.Append($"{{\"stuffId\":{it.StuffId},\"name\":\"{Escape(DataTables.ItemName(it.StuffId))}\",\"count\":{it.Count}}}");
             }
             // 计划库存（永恒圣殿自带的功能）
             sb.Append("],\"plan\":[");
@@ -611,7 +576,7 @@ internal static class ChestService
             var facility = FindTempleFacility();
             if (facility == null) return "{\"error\":\"temple not found\"}";
             SetStuffPlanValue(facility, stuffId, count);
-            Plugin.LogInfo($"[Temple] 设置计划库存 {ItemCatalog.GetName(stuffId)}({stuffId}) = {count}");
+            Plugin.LogInfo($"[Temple] 设置计划库存 {DataTables.ItemName(stuffId)}({stuffId}) = {count}");
             return GetTempleJson();
         }
         catch (Exception ex) { return $"{{\"error\":\"{Escape(ex.Message)}\"}}"; }
@@ -642,7 +607,7 @@ internal static class ChestService
                     return "{\"error\":\"AddStuff not found\"}";
             }
 
-            Plugin.LogInfo($"[Temple] 设置 {ItemCatalog.GetName(stuffId)}({stuffId}) = {count}");
+            Plugin.LogInfo($"[Temple] 设置 {DataTables.ItemName(stuffId)}({stuffId}) = {count}");
             return GetTempleJson();
         }
         catch (Exception ex) { return $"{{\"error\":\"{Escape(ex.Message)}\"}}"; }
@@ -810,7 +775,7 @@ internal static class ChestService
     {
         if (System.Environment.TickCount64 - _itemsJsonAt < 500) return _itemsJson;
         if (_allItems == null)
-            _allItems = ItemCatalog.GetAllItems().ToList();
+            _allItems = DataTables.AllItems().ToList();
         var sb = new System.Text.StringBuilder();
         sb.Append('[');
         bool first = true;
@@ -843,7 +808,7 @@ internal static class ChestService
         {
             var item = c.Items[j];
             if (j > 0) sb.Append(',');
-            sb.Append($"{{\"stuffId\":{item.StuffId},\"name\":\"{Escape(ItemCatalog.GetName(item.StuffId))}\",\"count\":{item.Count}}}");
+            sb.Append($"{{\"stuffId\":{item.StuffId},\"name\":\"{Escape(DataTables.ItemName(item.StuffId))}\",\"count\":{item.Count}}}");
         }
         sb.Append("],\"planStock\":[");
         if (c.PlanStock != null)
@@ -852,7 +817,7 @@ internal static class ChestService
             {
                 if (j > 0) sb.Append(',');
                 var ps = c.PlanStock[j];
-                sb.Append($"{{\"stuffId\":{ps.StuffId},\"name\":\"{Escape(ItemCatalog.GetName(ps.StuffId))}\",\"count\":{ps.Count}}}");
+                sb.Append($"{{\"stuffId\":{ps.StuffId},\"name\":\"{Escape(DataTables.ItemName(ps.StuffId))}\",\"count\":{ps.Count}}}");
             }
         }
         sb.Append("]}");
