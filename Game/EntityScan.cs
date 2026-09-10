@@ -17,10 +17,12 @@ namespace ChestEditor.Game;
 /// </summary>
 internal static class EntityScan
 {
-    private static readonly List<EditorEntity> _entities = new();
+    // ⚠ 这两个字段会在扫描结束时被**整体替换**（先攒后换），所以不能 readonly：
+    // 分片扫描要好几秒，中途读到的必须是上一份完整名单，不能是半截。
+    private static List<EditorEntity> _entities = new();
 
     // ptrHash -> 实体索引（ScanAll 时重建；OnPostUpdate 每帧查询用，替代 O(n) 线性查找）
-    private static readonly Dictionary<int, EditorEntity> _byPtrHash = new();
+    private static Dictionary<int, EditorEntity> _byPtrHash = new();
 
 
     // NPC 类名关键词
@@ -77,14 +79,23 @@ internal static class EntityScan
         public GameObject[] Gos = Array.Empty<GameObject>();
         public int Index;
         public readonly HashSet<int> Seen = new();
+        /// <summary>
+        /// ⚠ 结果先攒在这里，扫完才整体换给 <see cref="_entities"/>。
+        /// 不能直接往 _entities 里写：分片扫描要 9 秒左右，中间若被销毁/查询接口读到，
+        /// 拿到的是"半截名单" —— 表现为"批量销毁 0 成功 40 失败"。
+        /// </summary>
+        public readonly List<EditorEntity> Entities = new();
+        public readonly Dictionary<int, EditorEntity> ByPtr = new();
         public int Found, GoCount, SceneGoCount;
         public long FindMs;
+        public double CpuMs;      // 真正花在遍历上的 CPU 时间（不含帧间等待）
+        public int Steps;         // 分片次数
         public readonly System.Diagnostics.Stopwatch Total = System.Diagnostics.Stopwatch.StartNew();
-        public readonly System.Diagnostics.Stopwatch Loop = new();
     }
 
     private static ScanRun? _run;
     private static readonly object ScanLock = new();
+    private static readonly System.Diagnostics.Stopwatch StepWatch = new();
 
     /// <summary>
     /// 开始一次扫描：清空结果 + 枚举场景对象；真正的遍历交给 <see cref="StepScan"/> 分片推进。
@@ -93,8 +104,7 @@ internal static class EntityScan
     internal static bool BeginScan(GameObject[]? source = null, bool forceFieldRefresh = false, bool force = false)
     {
         if (_run != null && !force) return false;
-        _byPtrHash.Clear();
-        try { _entities.Clear(); } catch (Exception ex) { Plugin.LogError($"[EntityEditor] Clear error: {ex.Message}"); return false; }
+        // ⚠ 这里**不**清 _entities / _byPtrHash：新结果先攒在 run 里，扫完才整体替换。
         if (forceFieldRefresh) Il2CppApi.ClearClassFieldCache();
 
         var run = new ScanRun();
@@ -102,7 +112,6 @@ internal static class EntityScan
         try { run.Gos = source ?? Resources.FindObjectsOfTypeAll<GameObject>(); }
         catch (Exception ex) { Plugin.LogError($"[EntityEditor] FindObjectsOfTypeAll error: {ex.Message}"); return false; }
         swFind.Stop(); run.FindMs = swFind.ElapsedMilliseconds;
-        run.Loop.Start();
         _run = run;
         return true;
     }
@@ -120,6 +129,7 @@ internal static class EntityScan
         if (run == null) return false;
 
         int processed = 0;
+        StepWatch.Restart();
         while (run.Index < run.Gos.Length && processed < maxObjects)
         {
             var go = run.Gos[run.Index++];
@@ -255,8 +265,8 @@ internal static class EntityScan
                         if (entity.HometownKingdomId == 0 && entity.TerritoryKingdomId != 0)
                             entity.HometownKingdomId = entity.TerritoryKingdomId;
 
-                        _entities.Add(entity);
-                        _byPtrHash[entity.PtrHash] = entity;
+                        run.Entities.Add(entity);
+                        run.ByPtr[entity.PtrHash] = entity;
                         run.Found++;
                         break; // 每个 GO 只取第一个匹配组件
                     }
@@ -265,17 +275,22 @@ internal static class EntityScan
         }
 
         // 还没扫完 → 下帧继续（不在这里收尾，避免中途把半成品当成最终结果）
+        run.CpuMs += StepWatch.Elapsed.TotalMilliseconds;
+        run.Steps++;
         if (run.Index < run.Gos.Length) return true;
 
-        run.Loop.Stop();
-        _entities.Sort((a, b) =>
+        // 扫完了：排序后**整体替换**（这样期间读到的永远是上一份完整名单，不会是半截）
+        run.Entities.Sort((a, b) =>
         {
             int cmp = string.Compare(a.ClassName, b.ClassName, StringComparison.Ordinal);
             return cmp != 0 ? cmp : a.StuffId.CompareTo(b.StuffId);
         });
+        _entities = run.Entities;
+        _byPtrHash = run.ByPtr;
         run.Total.Stop();
         Plugin.LogInfo($"[EntityEditor] ScanAll: 实体 {run.Found} 条 / GO {run.GoCount} 个（场景内 {run.SceneGoCount}）；"
-            + $"FindObjects {run.FindMs}ms，遍历 {run.Loop.ElapsedMilliseconds}ms，合计 {run.Total.ElapsedMilliseconds}ms");
+            + $"FindObjects {run.FindMs}ms，遍历 CPU {run.CpuMs:0}ms（{run.Steps} 次分片，均 {run.CpuMs / Math.Max(1, run.Steps):0.0}ms），"
+            + $"墙钟 {run.Total.ElapsedMilliseconds}ms");
         _run = null;
         return false;
         }

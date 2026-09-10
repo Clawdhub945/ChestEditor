@@ -9,6 +9,13 @@ internal static class EntityHandlers
     /// <summary>扫描每帧处理的 GameObject 个数（分片：全量扫描要几秒，单帧做完会明显卡死）</summary>
     private const int ScanObjectsPerFrame = 150;
 
+    /// <summary>
+    /// 单个主线程任务里最多花多少毫秒做销毁/写值 —— 超出的留给下一帧。
+    /// <para>销毁单个单位本身很便宜，但"一次几十上百个"堆在同一帧照样会顿一下；
+    /// 按时间预算摊到多帧后，可以放心把每批数量调大（少几次 HTTP 往返）。</para>
+    /// </summary>
+    private const int FrameBudgetMs = 4;
+
     internal static void Register()
     {
         // 全量扫描：分片推进（每帧一批），扫完再在主线程上应用待写入的修改
@@ -53,7 +60,7 @@ internal static class EntityHandlers
             });
         });
 
-        // 批量销毁（一次主线程任务循环执行；一键清除使用）
+        // 批量销毁（一键清除/安全发展模式用）；按帧时间预算分片执行，不占用单帧太久
         Router.Add("POST", "/api/editor/destroy/batch", ctx =>
         {
             var arr = ctx.Json?["ptrHashes"] as System.Text.Json.Nodes.JsonArray;
@@ -61,18 +68,22 @@ internal static class EntityHandlers
             var hashes = new List<int>();
             foreach (var n in arr)
                 if (n != null) hashes.Add(n.GetValue<int>());
-            return MainThread.Run(() =>
+
+            int ok = 0, fail = 0, i = 0, frames = 0;
+            var swTotal = System.Diagnostics.Stopwatch.StartNew();
+            MainThread.RunPaced(() =>
             {
+                frames++;
                 var sw = System.Diagnostics.Stopwatch.StartNew();
-                int ok = 0, fail = 0;
-                foreach (var ph in hashes)
+                while (i < hashes.Count && sw.ElapsedMilliseconds < FrameBudgetMs)
                 {
-                    var result = EntityDestroyer.DestroyEntity(ph);
-                    if (result == "ok") ok++; else fail++;
+                    if (EntityDestroyer.DestroyEntity(hashes[i++]) == "ok") ok++; else fail++;
                 }
-                Plugin.LogInfo($"[EntityDestroyer] 批量销毁: {ok} 成功 / {fail} 失败 / 共 {hashes.Count} 个, 耗时 {sw.ElapsedMilliseconds}ms（本帧主线程占用）");
-                return JsonBuilder.Object(w => { w.WriteBoolean("ok", true); w.WriteNumber("destroyed", ok); w.WriteNumber("failed", fail); });
+                return i < hashes.Count;   // true = 还没做完，下帧继续
             }, 120000);
+            Plugin.LogInfo($"[EntityDestroyer] 批量销毁: {ok} 成功 / {fail} 失败 / 共 {hashes.Count} 个, "
+                + $"分 {frames} 帧, 墙钟 {swTotal.ElapsedMilliseconds}ms（其中主线程占用已按帧摊开）");
+            return JsonBuilder.Object(w => { w.WriteBoolean("ok", true); w.WriteNumber("destroyed", ok); w.WriteNumber("failed", fail); });
         });
 
         // 战斗力批量缩放（×10 / ÷10；一次主线程任务循环执行，界面上的「战斗力×10 / ÷10」用）
@@ -85,23 +96,27 @@ internal static class EntityHandlers
             var hashes = new List<int>();
             foreach (var n in arr)
                 if (n != null) hashes.Add(n.GetValue<int>());
-            return MainThread.Run(() =>
+            int entities = 0, fields = 0, i = 0, frames = 0;
+            var swAll = System.Diagnostics.Stopwatch.StartNew();
+            MainThread.RunPaced(() =>
             {
+                frames++;
                 var sw = System.Diagnostics.Stopwatch.StartNew();
-                int entities = 0, fields = 0;
-                foreach (var ph in hashes)
+                while (i < hashes.Count && sw.ElapsedMilliseconds < FrameBudgetMs)
                 {
-                    int n = EntityScan.ScaleCombatStats(ph, factor);
+                    int n = EntityScan.ScaleCombatStats(hashes[i++], factor);
                     if (n > 0) { entities++; fields += n; }
                 }
-                Plugin.LogInfo($"[EntityEditor] 战斗力缩放 x{factor}: {entities}/{hashes.Count} 个实体, {fields} 个字段, 耗时 {sw.ElapsedMilliseconds}ms（本帧主线程占用）");
-                return JsonBuilder.Object(w =>
-                {
-                    w.WriteBoolean("ok", true);
-                    w.WriteNumber("entities", entities);
-                    w.WriteNumber("fields", fields);
-                });
+                return i < hashes.Count;
             }, 60000);
+            Plugin.LogInfo($"[EntityEditor] 战斗力缩放 x{factor}: {entities}/{hashes.Count} 个实体, {fields} 个字段, "
+                + $"分 {frames} 帧, 墙钟 {swAll.ElapsedMilliseconds}ms");
+            return JsonBuilder.Object(w =>
+            {
+                w.WriteBoolean("ok", true);
+                w.WriteNumber("entities", entities);
+                w.WriteNumber("fields", fields);
+            });
         });
 
         Router.Add("POST", "/api/editor/locate", ctx =>

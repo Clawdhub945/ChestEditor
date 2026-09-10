@@ -634,9 +634,17 @@ let npcfixSafeTimer = null;
 let npcfixSafeDone = new Set();
 let npcfixSafeTicks = 0;
 let npcfixSafeCount = 0;
-const NPCFIX_SAFE_BATCH = 6;         // 每拍最多清几个
-const NPCFIX_SAFE_INTERVAL = 1600;   // 拍间隔 ms
-const NPCFIX_SAFE_RESCAN_EVERY = 8;  // 每 N 拍重扫一次（拿新刷出来的敌人）
+let npcfixScanning = false;          // 正在全量重扫（扫描期间别再发销毁，省得大批 not found）
+const NPCFIX_SAFE_BATCH = 20;        // 每拍最多清几个（后端已按帧摊开，批量大也不会顿）
+const NPCFIX_SAFE_INTERVAL = 1500;   // 拍间隔 ms
+const NPCFIX_SAFE_RESCAN_EVERY = 12; // 每 N 拍重扫一次（拿新刷出来的敌人）
+
+// 包一层重扫：标记"正在扫描"。分片扫描要好几秒，
+// 这期间让安全发展模式先别发销毁请求（名单会整体替换，中途发只是白跑一趟）。
+async function npcfixScan() {
+  npcfixScanning = true;
+  try { await entityEditorScan(); } finally { npcfixScanning = false; }
+}
 
 function npcfixSafeBtnText() {
   return npcfixSafeOn ? ('安全发展模式: 开（已清 ' + npcfixSafeCount + '）') : '安全发展模式: 关';
@@ -665,23 +673,26 @@ function npcfixSafeToggle() {
   }
   npcfixSafeUpdateBtn();
 }
-// 一拍：重扫（偶尔）→ 挑最多 NPCFIX_SAFE_BATCH 个敌方单位 → 小批量销毁
+// 一拍：重扫（偶尔）→ 挑最多 NPCFIX_SAFE_BATCH 个敌方单位 → 批量销毁（后端按帧摊开）
 async function npcfixSafeTick() {
   if (!npcfixSafeOn) return;
   try {
     if (npcfixSafeTicks % NPCFIX_SAFE_RESCAN_EVERY === 0) {
-      await entityEditorScan();
+      await npcfixScan();
       npcfixSafeDone = new Set();   // 重扫后数据是新的一份，旧的"已清"记录作废
     }
-    const targets = entityEditorData
-      .filter(e => !npcfixSafeDone.has(e.ptrHash) && npcfixIsAnyUnit(e))
-      .filter(e => { const k = npcfixUnitKingdom(e); return k !== 1 && k !== 0; })
-      .slice(0, NPCFIX_SAFE_BATCH)
-      .map(e => e.ptrHash);
-    if (targets.length > 0) {
-      const r = await destroyBatch(targets);
-      for (const h of targets) npcfixSafeDone.add(h);
-      npcfixSafeCount += (r && r.destroyed) || 0;
+    // 正在重扫就跳过这一拍的销毁：这期间名单在整体替换，发了也是白跑
+    if (!npcfixScanning) {
+      const targets = entityEditorData
+        .filter(e => !npcfixSafeDone.has(e.ptrHash) && npcfixIsAnyUnit(e))
+        .filter(e => { const k = npcfixUnitKingdom(e); return k !== 1 && k !== 0; })
+        .slice(0, NPCFIX_SAFE_BATCH)
+        .map(e => e.ptrHash);
+      if (targets.length > 0) {
+        const r = await destroyBatch(targets);
+        for (const h of targets) npcfixSafeDone.add(h);
+        npcfixSafeCount += (r && r.destroyed) || 0;
+      }
     }
   } catch (e) { /* 单拍失败不中断整个模式 */ }
   npcfixSafeTicks++;
@@ -868,7 +879,7 @@ async function destroyBatch(hashes) {
 }
 
 // 一键清除的单批数量：分批提交，避免一帧内回收成百上千个单位（卡帧 + 资源峰值）
-const NPCFIX_KILL_CHUNK = 40;
+const NPCFIX_KILL_CHUNK = 120;
 
 // 分批销毁：每批之间让出一帧；返回 { destroyed, failed }
 async function npcfixKillInChunks(hashes) {
@@ -901,7 +912,6 @@ async function npcfixClear(spec) {
   const hashes = p.pick();
   if (hashes.length === 0) { toast('没有可清除的' + p.def.name, true); return; }
   let msg = '确定清除' + p.where + '的 ' + hashes.length + ' 个' + p.def.name + '？\n（将分批执行2遍，覆盖分裂怪）';
-  if (hashes.length > 100) msg += '\n\n数量过多可能卡顿2-5s';
   if (!confirm(msg)) return;
 
   // 记住"动刀前"都有谁：舰船被摧毁时游戏会把船员丢上岸变成士兵，
@@ -912,11 +922,11 @@ async function npcfixClear(spec) {
   const d1 = await npcfixKillInChunks(hashes);
   await new Promise(r => setTimeout(r, 1000));
   // 重扫拿到分裂新生成的目标，再清一遍
-  await entityEditorScan();
+  await npcfixScan();
   const hashes2 = p.pick();
   let d2 = { destroyed: 0 };
   if (hashes2.length > 0) d2 = await npcfixKillInChunks(hashes2);
-  await entityEditorScan();
+  await npcfixScan();
 
   // 舰船专属收尾：ShipHelper.DestroyShip(船, false) 会把船员按 sailor_count 生成士兵丢在船的位置
   // （反编译 ShipHelper.DestroyShip 最后那段 do/while + SoldierHelper.CreateSoldier）。
@@ -933,7 +943,7 @@ async function npcfixClear(spec) {
       const r = await npcfixKillInChunks(fresh);
       sailor.destroyed += (r.destroyed || 0);
       await new Promise(rs => setTimeout(rs, 600));
-      await entityEditorScan();
+      await npcfixScan();
     }
   }
 
@@ -953,7 +963,6 @@ async function npcfixScale(spec, factor) {
   const pct = factor >= 1 ? ('×' + factor) : ('÷' + Math.round(1 / factor));
   let msg = '确定把' + p.where + '的 ' + hashes.length + ' 个' + p.def.name + '战斗力 ' + pct + '？'
     + '\n（攻击 / 血量 / 魔法攻击，共 6 个字段）';
-  if (hashes.length > 100) msg += '\n\n数量过多可能卡顿2-5s';
   if (!confirm(msg)) return;
   toast('战斗力 ' + pct + ' 中...', false);
   let entities = 0, fields = 0;

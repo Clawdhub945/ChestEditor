@@ -165,6 +165,7 @@ ok(!scopeFilter('monster', 'enemy').some(e => kidOf(e) === 1), 'monster:enemy �
 
 // ---------- 5) renderNpcfixBox2 结构 ----------
 console.log('\n== 5) renderNpcfixBox2 产出 ==');
+const src = fs.readFileSync(path.join(dir, 'npcfix.js'), 'utf8');
 (async () => {
   await ctx.renderNpcfixBox2();
   const H = els['npcfixBox2Body'].innerHTML;
@@ -206,7 +207,7 @@ console.log('\n== 5) renderNpcfixBox2 产出 ==');
   ok(/npcfixKillMonsters/.test(H) === false, '没有旧函数残留');
   ok(!/MonsterDragon/.test(H), '我方怪物分组里没有英文类名（龙已合并）');
 
-  // ---------- 6) 确认框文案阈值 ----------
+  // ---------- 6) 确认框文案 ----------
   console.log('\n== 6) 确认框文案（用合成大数据保证确定性） ==');
   let captured = null;
   ctx.confirm = m => { captured = m; return false; };   // 一律取消，不真的销毁
@@ -215,27 +216,25 @@ console.log('\n== 5) renderNpcfixBox2 产出 ==');
     stuffId: 201385, name: '5级工蚁', ptrHash: -920000 - i, guid: 920000 + i }));
 
   setData(many(150));
-  await ctx.npcfixClear('monster:89');
+  await ctx.npcfixClear('monster:enemy');
   console.log('  [150] ' + String(captured).replace(/\n/g, ' ⏎ '));
-  ok(captured && /数量过多可能卡顿2-5s/.test(captured), '150 个 → 追加「数量过多可能卡顿2-5s」');
-  ok(captured && /确定清除阵营89的 150 个怪物/.test(captured), '文案含范围/数量/种类');
+  ok(/确定清除敌方全部阵营的 150 个怪物/.test(captured), '文案含范围/数量/种类');
+  ok(!/卡顿/.test(captured), '文案里已不再出现"卡顿"提示');
 
   setData(many(80));
   await ctx.npcfixClear('monster:89');
   console.log('  [80 ] ' + String(captured).replace(/\n/g, ' ⏎ '));
-  ok(captured && !/数量过多可能卡顿/.test(captured), '80 个 → 不追加提示');
+  ok(/确定清除阵营89的 80 个怪物/.test(captured), '二级分组文案按阵营号描述');
+  ok(!/卡顿/.test(captured), '少量时同样没有"卡顿"提示');
+  ok(!/数量过多/.test(src), '源码里已彻底删掉"数量过多"文案');
 
-  setData(many(101));
-  await ctx.npcfixClear('monster:89');
-  ok(captured && /数量过多可能卡顿2-5s/.test(captured), '101 个（阈值边界）→ 追加提示');
-
-  setData(many(100));
-  await ctx.npcfixClear('monster:89');
-  ok(captured && !/数量过多可能卡顿/.test(captured), '100 个（阈值边界）→ 不追加提示');
+  // 战斗力缩放同样不该带"卡顿"提示
+  await ctx.npcfixScale('monster:89', 0.1);
+  console.log('  [缩放] ' + String(captured).replace(/\n/g, ' ⏎ '));
+  ok(/战斗力 ÷10/.test(captured) && !/卡顿/.test(captured), '缩放确认框也无"卡顿"提示');
 
   // ---------- 7) 舰船落岸船员：二次清除 ----------
   console.log('\n== 7) 舰船落岸船员的二次清除 ==');
-  const src = fs.readFileSync(path.join(dir, 'npcfix.js'), 'utf8');
   const clearSrc = src.slice(src.indexOf('async function npcfixClear'));
   ok(/kindName === 'ship' \|\| kindName === 'enemyAll'/.test(clearSrc), 'npcfixClear 里有"清过船"的判断');
   ok(/!before\.has\(e\.ptrHash\)/.test(clearSrc), '靠"动刀前名单"识别新刷出来的士兵');
@@ -273,8 +272,16 @@ console.log('\n== 5) renderNpcfixBox2 产出 ==');
   ok(ctx.npcfixSafeBtnText() === '安全发展模式: 关', '再点一下变回「关」');
   const safeSrc = src.slice(src.indexOf('async function npcfixSafeTick'));
   ok(/NPCFIX_SAFE_BATCH/.test(safeSrc) && /slice\(0, NPCFIX_SAFE_BATCH\)/.test(safeSrc),
-    '每拍只清一小批（慢速，不卡帧）');
+    '每拍按 NPCFIX_SAFE_BATCH 取一批');
+  const safeBatch = ev('NPCFIX_SAFE_BATCH');
+  console.log('  NPCFIX_SAFE_BATCH =', safeBatch, '/ 间隔', ev('NPCFIX_SAFE_INTERVAL') + 'ms',
+    '/ 每', ev('NPCFIX_SAFE_RESCAN_EVERY'), '拍重扫');
+  ok(safeBatch >= 20, '每拍清除数量已调大（≥20）');
   ok(/k !== 1 && k !== 0/.test(safeSrc), '只清敌方（不含我方 1 / 阵营0）');
+  ok(/npcfixScanning/.test(safeSrc), '重扫进行中时跳过这一拍（避免大批 not found）');
+  ok(/async function npcfixScan\(\)/.test(src) && /npcfixScanning = true/.test(src),
+    'npcfixScan() 会给重扫打标记');
+  console.log('  NPCFIX_KILL_CHUNK =', ev('NPCFIX_KILL_CHUNK'), '（后端按帧摊开，批次可以更大）');
 
   // ---------- 10) 分区线常驻（没有单位也要在） ----------
   console.log('\n== 10) 分区线常驻 ==');
