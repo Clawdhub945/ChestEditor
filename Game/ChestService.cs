@@ -19,7 +19,9 @@ internal static class ChestService
 
     internal struct ItemInfo { public int StuffId; public int Count; }
 
-    internal struct ChestInfo { public int Guid; public int StuffId; public string Name; public List<ItemInfo> Items; public int MaxCap; public int UsedCap; public float PosX; public float PosY; public object Facility; public List<ItemInfo> PlanStock; }
+    // PlanStock 为 null 表示该设施不支持计划库存功能（无 GetStuffPlanDic，如普通箱子）；
+    // 非 null（可能为空列表）表示支持 —— 前端据此决定是否显示计划库存 UI。
+    internal struct ChestInfo { public int Guid; public int StuffId; public string Name; public List<ItemInfo> Items; public int MaxCap; public int UsedCap; public float PosX; public float PosY; public object Facility; public List<ItemInfo>? PlanStock; }
 
     private static readonly List<ChestInfo> _chests = new();
     internal static IReadOnlyList<ChestInfo> Chests => _chests;
@@ -263,11 +265,17 @@ internal static class ChestService
                 float px = 0, py = 0;
                 ReadFacilityPos(facility, ref px, ref py);
 
+                // 计划库存仅部分设施支持（游戏里为 FacilityWagonStation 驿站类）。
+                // ReadStuffPlanDic 返回 null = 该设施没有 GetStuffPlanDic -> 保持 null，
+                // 前端因此不显示"添加计划 / 计划"行。
                 var planDic = ReadStuffPlanDic(facility);
-                var planStock = new List<ItemInfo>();
+                List<ItemInfo>? planStock = null;
                 if (planDic != null)
+                {
+                    planStock = new List<ItemInfo>();
                     foreach (var kv in planDic)
                         planStock.Add(new ItemInfo { StuffId = kv.Key, Count = kv.Value });
+                }
 
                 _chests.Add(new ChestInfo
                 {
@@ -284,12 +292,13 @@ internal static class ChestService
                 });
             }
 
-
-
+            int planCount = 0;
+            foreach (var ch in _chests) if (ch.PlanStock != null) planCount++;
+            Plugin.LogInfo($"[Chest] 刷新完成: {_chests.Count} 个容器, {planCount} 个支持计划库存");
         }
         catch (Exception ex)
         {
-
+            Plugin.LogError($"[Chest] RefreshChestList 异常: {ex.Message}");
         }
     }
 
@@ -636,6 +645,11 @@ internal static class ChestService
     });
 
 
+    /// <summary>
+    /// 读取设施的计划库存字典。
+    /// 返回 <c>null</c> 表示该设施**不支持**计划库存功能（无 GetStuffPlanDic 方法，如普通箱子）；
+    /// 返回列表（可能为空）表示支持该功能。
+    /// </summary>
     internal static List<KeyValuePair<int, int>>? ReadStuffPlanDic(object facility)
     {
         try
@@ -644,13 +658,13 @@ internal static class ChestService
             IntPtr objPtr = GetIl2CppPtr(facility);
             if (objPtr == IntPtr.Zero) return null;
             var methodPtr = FindIl2CppMethod(facility, "GetStuffPlanDic");
-            if (methodPtr == IntPtr.Zero) return null;
+            if (methodPtr == IntPtr.Zero) return null;    // 无此方法 = 该设施不支持计划库存
 
+            var result = new List<KeyValuePair<int, int>>();
             IntPtr dictPtr = Invoke(methodPtr, objPtr);
-            if (dictPtr == IntPtr.Zero) return null;
+            if (dictPtr == IntPtr.Zero) return result;    // 支持功能，但当前计划字典为空
 
             var dict = new Il2CppSystem.Collections.Generic.Dictionary<int, int>(dictPtr);
-            var result = new List<KeyValuePair<int, int>>();
             var enumerator = dict.GetEnumerator();
             while (enumerator.MoveNext())
                 result.Add(new KeyValuePair<int, int>(enumerator.Current.Key, enumerator.Current.Value));
@@ -828,9 +842,11 @@ internal static class ChestService
         }
         w.WriteEndArray();
 
-        w.WriteStartArray("planStock");
+        // 仅对支持计划库存的容器输出该字段（前端用 planStock != null 判断是否显示计划 UI）；
+        // 不支持的容器不写此字段 -> 前端得到 undefined -> 隐藏计划库存。
         if (c.PlanStock != null)
         {
+            w.WriteStartArray("planStock");
             foreach (var ps in c.PlanStock)
             {
                 w.WriteStartObject();
@@ -839,8 +855,8 @@ internal static class ChestService
                 w.WriteNumber("count", ps.Count);
                 w.WriteEndObject();
             }
+            w.WriteEndArray();
         }
-        w.WriteEndArray();
 
         w.WriteEndObject();
     }
