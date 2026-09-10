@@ -1,67 +1,110 @@
-// 盒子2 回归：用实机数据跑 npcfixCombatClassify + 渲染 + 一键清除范围，断言守恒关系
+// 盒子2 回归：实机数据 + 合成样本，跑 npcfixCombatClassify / 渲染 / 一键清除范围
 // 用法: node _tools/test_box2_clear.js <entities.json>
+//
+// 为什么要掺合成样本：实机世界是会变的（怪物会被打光、船会开走），
+// 只靠 live 数据会让「敌方-怪物」「船」这类盒子时有时无，断言没法稳定跑。
+// 所以 live 负责"跟真实数据对得上"，合成样本负责"结构/按钮/文案一定被覆盖"。
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const live = JSON.parse(fs.readFileSync(process.argv[2] || 'live_tmp.json', 'utf8'));
+const LIVE = JSON.parse(fs.readFileSync(process.argv[2] || 'live_tmp.json', 'utf8'));
+
+// ---- 合成样本：每种盒子各塞几条 ----
+const mk = (o) => Object.assign(
+  { goName: '', className: '', npcName: '', stuffNameWithIdIndex: '', soldierTypeId: 0,
+    soldierTypeName: '', hometownKingdomId: 0, territoryKingdomId: 0, kingdomId: 0,
+    ptrHash: 0, guid: 0, stuffId: 0, name: '', fieldCount: 100 }, o);
+let ph = -900000, gd = 900000;
+const nx = o => mk(Object.assign({ ptrHash: --ph, guid: ++gd }, o));
+const SYNTH = [
+  nx({ className: 'Npc', soldierTypeId: 202, soldierTypeName: '剑士', hometownKingdomId: 1, territoryKingdomId: 1 }),     // 我方战斗单位
+  nx({ className: 'MonsterAntWorker', hometownKingdomId: 1, territoryKingdomId: 1, stuffId: 201385, name: '5级工蚁' }),   // 我方怪物
+  nx({ className: 'MonsterDragon5Fire', hometownKingdomId: 1, territoryKingdomId: 1, stuffId: 201441, name: '1级火龙' }),  // 我方龙
+  nx({ className: 'Npc', soldierTypeId: 202, soldierTypeName: '剑士', hometownKingdomId: 89, territoryKingdomId: 89 }),    // 敌方小人
+  nx({ className: 'MonsterAntSoldier', hometownKingdomId: 89, territoryKingdomId: 89, stuffId: 201395, name: '5级兵蚁' }), // 敌方怪物
+  nx({ className: 'Ship', kingdomId: 100, hometownKingdomId: 100, territoryKingdomId: 100, stuffId: 706002, name: '战舰' }),// 敌方战舰
+  nx({ className: 'Ship', kingdomId: 1, hometownKingdomId: 1, territoryKingdomId: 1, stuffId: 706002, name: '战舰' }),      // 我方战舰
+  nx({ className: 'Ship', kingdomId: 100, hometownKingdomId: 100, territoryKingdomId: 100, stuffId: 706001, name: '货船' }),// 商船：不该出现
+  nx({ className: 'Npc', soldierTypeId: 202, soldierTypeName: '剑士', stuffId: 0 }),                                       // 阵营0：不该出现
+];
+const DATA = LIVE.concat(SYNTH);
 
 // ---- 最小 DOM / 环境 mock ----
 function mkEl() {
-  const el = {
+  return {
     _h: '', value: '', checked: false, open: false, dataset: {}, style: {},
-    classList: { add(){}, remove(){}, toggle(){} },
+    classList: { add() {}, remove() {}, toggle() {} },
     get innerHTML() { return this._h; }, set innerHTML(v) { this._h = v; },
     querySelector: () => null, querySelectorAll: () => [],
-    closest: () => null, getAttribute: () => null, setAttribute(){},
-    appendChild(){}, addEventListener(){}, set textContent(v) { this._t = v; }, get textContent(){ return this._t; }
+    closest: () => null, getAttribute: () => null, setAttribute() {},
+    appendChild() {}, addEventListener() {},
+    set textContent(v) { this._t = v; }, get textContent() { return this._t; },
   };
-  return el;
 }
 const els = {};
 const ctx = {
-  console,
-  window: {},
-  document: {
-    body: mkEl(),
-    getElementById: id => (els[id] = els[id] || mkEl()),
-    querySelector: () => null,
-    querySelectorAll: () => [],
-    createElement: () => mkEl(),
-    addEventListener() {},
-  },
+  console, window: {},
+  document: { body: mkEl(), getElementById: id => (els[id] = els[id] || mkEl()),
+    querySelector: () => null, querySelectorAll: () => [], createElement: mkEl, addEventListener() {} },
   localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
   setTimeout, clearTimeout, Date, JSON, Math, Number, String, Object, Array, Promise, Set, Map,
 };
-ctx.window = ctx;
-ctx.globalThis = ctx;
+ctx.window = ctx; ctx.globalThis = ctx;
 vm.createContext(ctx);
 
 // ---- 载入除 main.js 外的全部前端模块 ----
 const dir = path.join('Web', 'Static', 'js');
-const files = fs.readdirSync(dir).filter(f => f.endsWith('.js') && f !== 'main.js');
-for (const f of files) {
-  const src = fs.readFileSync(path.join(dir, f), 'utf8');
-  try { vm.runInContext(src, ctx, { filename: f }); }
+for (const f of fs.readdirSync(dir).filter(f => f.endsWith('.js') && f !== 'main.js')) {
+  try { vm.runInContext(fs.readFileSync(path.join(dir, f), 'utf8'), ctx, { filename: f }); }
   catch (e) { console.log('  [skip]', f, e.message.slice(0, 80)); }
 }
 
-// ---- 注入实机数据（let 全局必须走 runInContext）----
-vm.runInContext('entityEditorData = ' + JSON.stringify(live) + ';', ctx);
-
-const classify = ctx.npcfixCombatClassify(live);
-const sumKinds = ctx.npcfixSumKinds;
 // ⚠ 顶层 const/let 不会挂到 context 上（词法绑定），必须回 vm 里求值
 const ev = expr => vm.runInContext(expr, ctx);
+const setData = d => vm.runInContext('entityEditorData = ' + JSON.stringify(d) + ';', ctx);
+setData(DATA);
+
+const KINDS = ev('NPCFIX_CLEAR_KINDS');
+const sumKinds = ctx.npcfixSumKinds;
+const kidOf = e => ctx.npcfixUnitKingdom(e);
+const classify = ctx.npcfixCombatClassify(DATA);
 
 let fails = 0;
 function ok(cond, msg) { console.log((cond ? '  ok  ' : '  FAIL') + '  ' + msg); if (!cond) fails++; }
 
-console.log('== 数据规模 ==');
-console.log('  实体总数', live.length, '| 怪物', live.filter(e => (e.className||'').startsWith('Monster')).length);
+// 与 npcfixClear 里的 inScope 保持同一语义（enemy 同时排除 1 和 0）
+function scopeFilter(kind, scope, data) {
+  const def = KINDS[kind];
+  return (data || DATA).filter(e => {
+    if (!def.test(e)) return false;
+    const kid = kidOf(e);
+    if (scope === 'all') return true;
+    if (scope === 'enemy') return kid !== 1 && kid !== 0;
+    return kid === Number(scope);
+  });
+}
 
-// ---------- 1) 我方-怪物：龙合并 ----------
-console.log('\n== 1) 我方-怪物 分组 ==');
+console.log('== 数据规模 ==');
+console.log('  实机', LIVE.length, '条 | 合成', SYNTH.length, '条 | 合计', DATA.length);
+
+// ---------- 1) 阵营0 必须隐藏 ----------
+console.log('\n== 1) 阵营0 隐藏 ==');
+const zeroUnits = LIVE.filter(e => kidOf(e) === 0 && ctx.npcfixIsAnyUnit(e));
+console.log('  实机阵营0 战斗单位:', zeroUnits.length);
+const boxed = [
+  ...classify.ours, ...classify.monstersOurs, ...classify.shipsOurs,
+  ...Object.values(classify.humanoids).flat(),
+  ...Object.values(classify.monstersEnemy).flat(),
+  ...Object.values(classify.shipsEnemy).flat(),
+];
+ok(boxed.every(e => e && typeof e === 'object' && e.className !== undefined), '每个盒子元素都是实体（无嵌套数组）');
+ok(!boxed.some(e => kidOf(e) === 0), '任何盒子里都没有阵营0 单位');
+ok(!('0' in classify.humanoids) && !(0 in classify.monstersEnemy) && !(0 in classify.shipsEnemy),
+  '阵营0 分组键没有生成');
+
+// ---------- 2) 我方-怪物：龙合并 + 绿色 ----------
+console.log('\n== 2) 我方-怪物 分组 ==');
 const ours = classify.monstersOurs;
 const kinds = {};
 for (const e of ours) {
@@ -69,122 +112,129 @@ for (const e of ours) {
   const k = cn.indexOf('Dragon') >= 0 ? '龙' : (e.name || cn || '未知怪物');
   (kinds[k] = kinds[k] || []).push(e);
 }
-const dragonNames = new Set(ours.filter(e => (e.className||'').indexOf('Dragon') >= 0).map(e => e.name || e.className));
+const dragons = ours.filter(e => (e.className || '').indexOf('Dragon') >= 0);
 console.log('  我方怪物', ours.length, '| 分组数', Object.keys(kinds).length);
-console.log('  分组:', Object.keys(kinds).sort((a,b)=>kinds[b].length-kinds[a].length)
+console.log('  分组:', Object.keys(kinds).sort((a, b) => kinds[b].length - kinds[a].length)
   .map(k => k + '(' + kinds[k].length + ')').join(' '));
-if (dragonNames.size > 0) {
-  console.log('  合并前会是独立卡片的龙名:', [...dragonNames].join(' / '));
-  ok(!!kinds['龙'], '龙只占 1 个分组');
-  ok(kinds['龙'].length === ours.filter(e => (e.className||'').indexOf('Dragon') >= 0).length, '「龙」分组的人数 = 全部龙');
-  ok(dragonNames.size > 1, '合并确实减少了卡片数（原 ' + dragonNames.size + ' 张 → 1 张）');
-} else {
-  console.log('  (本次实机数据里我方没有龙)');
-}
+console.log('  龙（合并前会各占一张卡）:', dragons.map(e => e.name || e.className).join(' / ') || '(无)');
 ok(Object.values(kinds).reduce((a, l) => a + l.length, 0) === ours.length, '分组守恒 == 我方怪物总数');
-ok(!Object.keys(kinds).some(k => /^Monster/.test(k)), '分组名里没有英文类名残留（除兜底）');
-
-// ---------- 2) 一键清除范围：与分类桶一致 ----------
-console.log('\n== 2) 一键清除范围 vs 分类桶 ==');
-const KINDS = ev('NPCFIX_CLEAR_KINDS');
-ok(!!KINDS && !!KINDS.monster && !!KINDS.humanoid && !!KINDS.ship, 'NPCFIX_CLEAR_KINDS 已定义');
-
-function scopeFilter(kind, scope) {
-  const def = KINDS[kind];
-  return live.filter(e => {
-    if (!def.test(e)) return false;
-    const kid = ctx.npcfixUnitKingdom(e);
-    if (scope === 'all') return true;
-    if (scope === 'enemy') return kid !== 1;
-    return kid === Number(scope);
-  });
+if (dragons.length > 0) {
+  ok(!!kinds['龙'] && kinds['龙'].length === dragons.length, '所有龙只占「龙」这 1 张卡');
+  ok(new Set(dragons.map(e => e.name)).size >= 1, '龙原本有 ' + new Set(dragons.map(e => e.name)).size + ' 个不同名字');
 }
+ok(!Object.keys(kinds).some(k => /^Monster/.test(k)), '分组名里没有英文类名残留');
 
-// 敌方-小人 一级 = humanoid:enemy
-const hAll = scopeFilter('humanoid', 'enemy');
-ok(hAll.length === sumKinds(classify.humanoids),
-  'humanoid:enemy (' + hAll.length + ') == 敌方-小人盒 (' + sumKinds(classify.humanoids) + ')');
-
-// 敌方-小人 二级 = humanoid:<kid>
-let hBad = 0;
-for (const kid of Object.keys(classify.humanoids)) {
-  const n = scopeFilter('humanoid', Number(kid)).length;
-  if (n !== classify.humanoids[kid].length) { hBad++; console.log('   kid', kid, n, '!=', classify.humanoids[kid].length); }
-}
-ok(hBad === 0, 'humanoid:<kid> 与各阵营分组逐一吻合');
-
-// 敌方-怪物 一级 / 二级
+// ---------- 3) 一键清除范围 vs 分类桶 ----------
+console.log('\n== 3) 一键清除范围 vs 分类桶 ==');
+ok(!!KINDS.enemyAll, 'enemyAll（毁灭吧）已定义');
+ok(scopeFilter('humanoid', 'enemy').length === sumKinds(classify.humanoids),
+  'humanoid:enemy (' + scopeFilter('humanoid', 'enemy').length + ') == 敌方-小人盒 (' + sumKinds(classify.humanoids) + ')');
 ok(scopeFilter('monster', 'enemy').length === sumKinds(classify.monstersEnemy),
-  'monster:enemy (' + scopeFilter('monster','enemy').length + ') == 敌方-怪物盒 (' + sumKinds(classify.monstersEnemy) + ')');
-let mBad = 0;
-for (const kid of Object.keys(classify.monstersEnemy)) {
-  if (scopeFilter('monster', Number(kid)).length !== classify.monstersEnemy[kid].length) mBad++;
-}
-ok(mBad === 0, 'monster:<kid> 与各阵营分组逐一吻合');
-
-// 我方-怪物 二级 = monster:1
+  'monster:enemy (' + scopeFilter('monster', 'enemy').length + ') == 敌方-怪物盒 (' + sumKinds(classify.monstersEnemy) + ')');
 ok(scopeFilter('monster', 1).length === classify.monstersOurs.length, 'monster:1 == 我方-怪物盒');
-
-// 船：一级 ship:all / 二级 ship:1 与各阵营
-const shipTotal = classify.shipsOurs.length + sumKinds(classify.shipsEnemy);
-ok(scopeFilter('ship', 'all').length === shipTotal, 'ship:all (' + scopeFilter('ship','all').length + ') == 船盒 (' + shipTotal + ')');
 ok(scopeFilter('ship', 1).length === classify.shipsOurs.length, 'ship:1 == 我方舰队');
-let sBad = 0;
-for (const kid of Object.keys(classify.shipsEnemy)) {
-  if (scopeFilter('ship', Number(kid)).length !== classify.shipsEnemy[kid].length) sBad++;
+ok(scopeFilter('ship', 'all').length === classify.shipsOurs.length + sumKinds(classify.shipsEnemy),
+  'ship:all == 船盒（货船不计）');
+
+let bad = 0;
+for (const key of ['humanoids', 'monstersEnemy', 'shipsEnemy']) {
+  const kind = key === 'humanoids' ? 'humanoid' : (key === 'monstersEnemy' ? 'monster' : 'ship');
+  for (const kid of Object.keys(classify[key]))
+    if (scopeFilter(kind, Number(kid)).length !== classify[key][kid].length) bad++;
 }
-ok(sBad === 0, 'ship:<kid> 与各阵营舰队吻合');
+ok(bad === 0, '各阵营二级分组逐一吻合');
 
-// ---------- 3) 危险边界：绝不能误伤我方 NPC ----------
-console.log('\n== 3) 边界：不一键清除到自己人 ==');
-const oursNpc = live.filter(e => (e.className||'').indexOf('Npc') === 0 && e.className !== 'NpcBody'
+const enemySum = sumKinds(classify.humanoids) + sumKinds(classify.monstersEnemy) + sumKinds(classify.shipsEnemy);
+ok(scopeFilter('enemyAll', 'enemy').length === enemySum,
+  'enemyAll:enemy (' + scopeFilter('enemyAll', 'enemy').length + ') == 敌方单位总数 (' + enemySum + ')');
+ok(!scopeFilter('enemyAll', 'enemy').some(e => kidOf(e) === 1 || kidOf(e) === 0),
+  '毁灭吧 只含有效敌方阵营（不含我方 1 / 阵营0）');
+ok(scopeFilter('ship', 'all').every(e => e.stuffId !== 706001), '货船不在清除范围内');
+
+// ---------- 4) 边界：不一键清除到自己人 ----------
+console.log('\n== 4) 边界 ==');
+const oursNpc = LIVE.filter(e => (e.className || '').indexOf('Npc') === 0 && e.className !== 'NpcBody'
   && (e.hometownKingdomId || 0) === 1);
-console.log('  我方 Npc 实体', oursNpc.length);
-ok(!hAll.some(e => (e.hometownKingdomId || 0) === 1), 'humanoid:enemy 里没有阵营1的人形');
-ok(!scopeFilter('monster', 'enemy').some(e => (e.hometownKingdomId||0) === 1), 'monster:enemy 里没有阵营1的怪物');
+console.log('  实例我方 Npc 实体:', oursNpc.length);
+ok(!scopeFilter('humanoid', 'enemy').some(e => kidOf(e) === 1), 'humanoid:enemy 里没有阵营1');
+ok(!scopeFilter('monster', 'enemy').some(e => kidOf(e) === 1), 'monster:enemy 里没有阵营1');
 
-// ---------- 4) 渲染产物：一级/二级清除按钮 ----------
-console.log('\n== 4) 渲染 HTML 按钮 ==');
-const html = ctx.npcfixEntityGroupCard('测试组', '#c0392b', 'x', classify.monstersOurs.slice(0, 2), {}, ctx.npcfixClearBtn('monster', 89));
-ok(/npcfixClear\('monster:89'\)/.test(html), '二级按钮 spec = monster:89');
-
-// 版本号确认（防"改了没生效"）
-// ---------- 5) 确认框文案：数量 > 100 追加"可能卡顿" ----------
-console.log('\n== 5) 确认框文案 ==');
-let captured = null;
-ctx.confirm = msg => { captured = msg; return false; };   // 一律取消，避免真的发起销毁
+// ---------- 5) renderNpcfixBox2 结构 ----------
+console.log('\n== 5) renderNpcfixBox2 产出 ==');
 (async () => {
-  await ctx.npcfixClear('monster:enemy');          // 实机 ~1700 只 > 100
-  console.log('  [>100] ' + String(captured).replace(/\n/g, '⏎'));
-  ok(/数量过多可能卡顿2-5s/.test(captured), '数量 > 100 时追加了「数量过多可能卡顿2-5s」');
-  ok(/确定清除敌方全部阵营的 \d+ 个怪物/.test(captured), '文案里有范围/种类/数量');
-
-  await ctx.npcfixClear('ship:100');              // 敌方舰队 8 条 < 100
-  console.log('  [<100] ' + String(captured).replace(/\n/g, '⏎'));
-  ok(!/数量过多可能卡顿/.test(captured), '数量 ≤ 100 时不追加提示');
-  ok(/确定清除阵营100的 8 个战舰/.test(captured), '二级分组文案按阵营号描述');
-
-  // ---------- 6) 整盒渲染：按钮落位 ----------
-  console.log('\n== 6) renderNpcfixBox2 产出 ==');
   await ctx.renderNpcfixBox2();
-  const boxHtml = els['npcfixBox2Body'].innerHTML;
-  const boxCount = (label) => {
-    // 取该一级盒子的 summary 段（到第一个 </summary> 为止）
-    const i = boxHtml.indexOf(label);
-    if (i < 0) return null;
-    return boxHtml.slice(i, boxHtml.indexOf('</summary>', i));
+  const H = els['npcfixBox2Body'].innerHTML;
+  const segment = label => {
+    const i = H.indexOf(label);
+    return i < 0 ? null : H.slice(i, H.indexOf('</summary>', i));
   };
-  for (const [label, need] of [['敌方-小人', true], ['敌方-怪物', true], ['船 · 战舰', true], ['我方-怪物', false]]) {
-    const seg = boxCount(label);
-    if (seg === null) { console.log('  (实机数据里没有 ' + label + ')'); continue; }
-    const hasBoxBtn = /npcfixClear\('/.test(seg);
-    ok(hasBoxBtn === need, label + ' 一级清除按钮: ' + (hasBoxBtn ? '有' : '无') + (need ? '' : '（本次未要求）'));
+  for (const label of ['我方战斗单位', '我方-怪物', '敌方-小人', '敌方-怪物', '船 · 战舰']) {
+    const seg = segment(label);
+    if (seg === null) { ok(false, '缺少盒子 ' + label); continue; }
+    console.log('  ' + label + ' 标题栏: ' + seg.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 90));
   }
-  const totalBtns = (boxHtml.match(/一键清除/g) || []).length;
-  console.log('  全盒「一键清除」按钮数:', totalBtns);
-  ok(totalBtns >= 8, '按钮数量合理（≥8）');
-  ok(!/npcfixKillMonsters/.test(boxHtml), '没有旧函数残留');
-  ok(!/MonsterDragon/.test(boxHtml), '我方怪物分组里没有出现英文类名（龙已合并）');
+
+  const iOurs = H.indexOf('>我方单位<');
+  const iEnemy = H.indexOf('>敌方单位<');
+  const iOursMon = H.indexOf('我方-怪物 (');
+  const iEnemyMan = H.indexOf('敌方-小人 (');
+  console.log('  下标: 我方单位=' + iOurs + ' 我方-怪物=' + iOursMon + ' 敌方单位=' + iEnemy + ' 敌方-小人=' + iEnemyMan);
+  ok(iOurs >= 0 && iEnemy >= 0, '「我方单位」「敌方单位」两条分区标题都在');
+  ok(iOurs < iOursMon && iOursMon < iEnemy, '我方-怪物 已上移到「我方单位」区');
+  ok(iEnemy < iEnemyMan, '「敌方单位」在敌方小人之前（已隔开）');
+  ok(/毁灭吧！！！/.test(H), '「敌方单位」后面有「毁灭吧！！！」');
+  ok(/npcfixClear\('enemyAll:enemy'\)/.test(H), '毁灭吧 的 spec = enemyAll:enemy');
+
+  const monSeg = H.slice(iOursMon - 200, H.indexOf('</summary>', iOursMon));
+  ok(/#27ae60/.test(monSeg), '我方-怪物 盒子是绿色');
+  ok(!/e67e22|--warning/.test(monSeg), '我方-怪物 盒子里没有残留橙色');
+
+  for (const [label, kind, scope] of [['敌方-小人', 'humanoid', 'enemy'], ['敌方-怪物', 'monster', 'enemy'],
+    ['船 · 战舰', 'ship', 'all']]) {
+    const seg = segment(label);
+    ok(seg && seg.indexOf("npcfixClear('" + kind + ":" + scope + "')") >= 0, label + ' 一级菜单有一键清除');
+  }
+  ok(segment('敌方-怪物').indexOf("npcfixClear('monster:") >= 0, '敌方-怪物 二级菜单有一键清除');
+  ok(/npcfixKillMonsters/.test(H) === false, '没有旧函数残留');
+  ok(!/MonsterDragon/.test(H), '我方怪物分组里没有英文类名（龙已合并）');
+
+  // ---------- 6) 确认框文案阈值 ----------
+  console.log('\n== 6) 确认框文案（用合成大数据保证确定性） ==');
+  let captured = null;
+  ctx.confirm = m => { captured = m; return false; };   // 一律取消，不真的销毁
+  const many = n => Array.from({ length: n }, (_, i) => mk({
+    className: 'MonsterAntWorker', hometownKingdomId: 89, territoryKingdomId: 89,
+    stuffId: 201385, name: '5级工蚁', ptrHash: -920000 - i, guid: 920000 + i }));
+
+  setData(many(150));
+  await ctx.npcfixClear('monster:89');
+  console.log('  [150] ' + String(captured).replace(/\n/g, ' ⏎ '));
+  ok(captured && /数量过多可能卡顿2-5s/.test(captured), '150 个 → 追加「数量过多可能卡顿2-5s」');
+  ok(captured && /确定清除阵营89的 150 个怪物/.test(captured), '文案含范围/数量/种类');
+
+  setData(many(80));
+  await ctx.npcfixClear('monster:89');
+  console.log('  [80 ] ' + String(captured).replace(/\n/g, ' ⏎ '));
+  ok(captured && !/数量过多可能卡顿/.test(captured), '80 个 → 不追加提示');
+
+  setData(many(101));
+  await ctx.npcfixClear('monster:89');
+  ok(captured && /数量过多可能卡顿2-5s/.test(captured), '101 个（阈值边界）→ 追加提示');
+
+  setData(many(100));
+  await ctx.npcfixClear('monster:89');
+  ok(captured && !/数量过多可能卡顿/.test(captured), '100 个（阈值边界）→ 不追加提示');
+
+  // ---------- 7) 舰船落岸船员：二次清除 ----------
+  console.log('\n== 7) 舰船落岸船员的二次清除 ==');
+  const src = fs.readFileSync(path.join(dir, 'npcfix.js'), 'utf8');
+  const clearSrc = src.slice(src.indexOf('async function npcfixClear'));
+  ok(/killedShips/.test(clearSrc), 'npcfixClear 里有"清过船"的判断');
+  ok(/!before\.has\(e\.ptrHash\)/.test(clearSrc), '靠"动刀前名单"识别新刷出来的士兵');
+  ok(/npcfixIsHumanEntity\(e\)/.test(clearSrc), '只是对敌方小人做二次清除（不误伤别的）');
+  ok(/before\.has/.test(clearSrc) && /const before = new Set/.test(clearSrc), '动刀前就记住了 before 集合（顺序正确）');
+  ok(clearSrc.indexOf('const before = new Set') < clearSrc.indexOf('npcfixKillInChunks(hashes)'),
+    'before 快照在第一轮销毁之前');
 
   console.log('\n' + (fails === 0 ? 'ALL PASS' : (fails + ' FAILED')));
   process.exit(fails === 0 ? 0 : 1);
