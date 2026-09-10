@@ -27,6 +27,9 @@ const SYNTH = [
   nx({ className: 'Ship', kingdomId: 1, hometownKingdomId: 1, territoryKingdomId: 1, stuffId: 706002, name: '战舰' }),      // 我方战舰
   nx({ className: 'Ship', kingdomId: 100, hometownKingdomId: 100, territoryKingdomId: 100, stuffId: 706001, name: '货船' }),// 商船：不该出现
   nx({ className: 'Npc', soldierTypeId: 202, soldierTypeName: '剑士', stuffId: 0 }),                                       // 阵营0：不该出现
+  nx({ className: 'FacilityWall', hometownKingdomId: 1, territoryKingdomId: 1, stuffId: 102006, name: '铁墙', stuffNameWithIdIndex: '铁墙1' }),            // 我方建筑
+  nx({ className: 'FacilityStorageBarn', hometownKingdomId: 1, territoryKingdomId: 1, stuffId: 103002, name: '大箱子', stuffNameWithIdIndex: '大箱子1' }), // 我方建筑·箱子（高危）
+  nx({ className: 'FacilityCityWall', hometownKingdomId: 102, territoryKingdomId: 102, stuffId: 102008, name: '城墙', stuffNameWithIdIndex: '城墙1' }),    // 敌方建筑
 ];
 const DATA = LIVE.concat(SYNTH);
 
@@ -368,6 +371,68 @@ const src = fs.readFileSync(path.join(dir, 'npcfix.js'), 'utf8');
   ok(sb.indexOf('>容器<') >= 0 && sb.indexOf('>驯龙<') >= 0 && sb.indexOf('>科技树<') >= 0,
     '容器 / 驯龙 / 科技树 不受影响');
   ok(ev('HIDE_LEGACY_PANELS') === true, 'HIDE_LEGACY_PANELS = true（想恢复改 false）');
+
+  // ---------- 12) 盒子3 建筑物 ----------
+  console.log('\n== 12) 盒子3 建筑物 ==');
+  // 判据：StartsWith('Facility')，不是 Contains（实体分类的历史坑）
+  ok(ev('npcfixIsFacilityEntity({className:"FacilityWall"})') === true, 'FacilityWall 命中');
+  ok(ev('npcfixIsFacilityEntity({className:"MyFacility"})') === false, '类名 Facility 不在开头 → 不命中（StartsWith 而非 Contains）');
+  ok(ev('npcfixIsFacilityEntity({className:"Npc"})') === false, 'Npc 不命中');
+
+  // 实机守恒：全部设施都能被分类（我方 / 敌方 / 阵营0）
+  const liveFac = LIVE.filter(e => ctx.npcfixIsFacilityEntity(e));
+  const liveFacOurs = liveFac.filter(e => kidOf(e) === 1).length;
+  const liveFacEnemy = liveFac.filter(e => kidOf(e) !== 1 && kidOf(e) !== 0).length;
+  const liveFacZero = liveFac.filter(e => kidOf(e) === 0).length;
+  console.log('  实机设施', liveFac.length, '= 我方', liveFacOurs, '+ 敌方', liveFacEnemy, '(阵营0:', liveFacZero, ')');
+  ok(liveFacOurs + liveFacEnemy + liveFacZero === liveFac.length, '实机设施守恒（我方+敌方+阵营0=全部）');
+
+  // 渲染：分区线 / 中文分组 / 按钮 spec / 防误触
+  setData(DATA);
+  await ctx.renderNpcfixBox3(false);
+  const H3 = els['npcfixBox3Body'].innerHTML;
+  ok(H3.indexOf('>我方建筑<') >= 0 && H3.indexOf('>敌方建筑<') >= 0, '两条分区线都在');
+  ok(H3.indexOf('>敌方建筑<') < H3.indexOf('城墙'), '敌方建筑分区线在敌方分组之前');
+  ok(H3.indexOf('铁墙') >= 0 && H3.indexOf('大箱子') >= 0, '我方建筑按中文名分组（铁墙 / 大箱子）');
+  ok(H3.indexOf('城墙') >= 0, '敌方建筑有「城墙」组');
+  ok(H3.indexOf("npcfixClear('facility:ours:g=%E9%93%81%E5%A2%99')") >= 0, '铁墙组按钮 spec = facility:ours:g=铁墙');
+  ok(H3.indexOf("npcfixClear('facility:enemy')") >= 0, '敌方建筑分区有「一键清除」（facility:enemy）');
+  ok(!/npcfixClear\('facility:ours'\)/.test(H3), '我方建筑分区没有"一键全删"按钮（防误触）');
+  ok(/data-g="铁墙"/.test(H3), '组卡带 data-g（搜索重绘后恢复展开状态用）');
+
+  // 确认框：tail（拆除真实风险）+ warn（箱子/床高危）
+  let capC = null;
+  ctx.confirm = m => { capC = m; return false; };
+  await ctx.npcfixClear('facility:ours:g=铁墙');
+  console.log('  [清除铁墙] ' + String(capC).replace(/\n/g, ' ⏎ '));
+  ok(/不返还材料与物品/.test(capC), '确认框提示不返还材料（手动拆除流程）');
+  ok(/箱子/.test(capC) && /床/.test(capC), '确认框有箱子/床高危提示');
+  ok(!/覆盖分裂怪/.test(capC), '建筑确认框不再写"覆盖分裂怪"');
+
+  // 限量渲染：独立小数据集（31 面铁墙）→ 只渲染 24 张卡 + "还有 7 个"提示
+  // ⚠ 不能用 DATA.concat：实机里本来就有 1574 面铁墙，数量会跟着实机变
+  const manyWalls = Array.from({ length: 30 }, (_, i) => mk({
+    className: 'FacilityWall', hometownKingdomId: 1, territoryKingdomId: 1,
+    stuffId: 102006, name: '铁墙', stuffNameWithIdIndex: '铁墙X' + (i + 1), ptrHash: -930000 - i, guid: 930000 + i }));
+  setData(manyWalls.concat(SYNTH));
+  await ctx.npcfixBox3RenderBody();
+  const H3b = els['npcfixBox3Body'].innerHTML;
+  ok(/还有 7 个未显示/.test(H3b), '31 面铁墙只渲染 24 张卡（提示还有 7 个）');
+  ok(ev('NPCFIX_BOX3_CARD_LIMIT') === 24, '每组限量 = 24');
+
+  // 搜索过滤：搜「箱」→ 只留大箱子组（回到完整数据集）
+  setData(DATA);
+
+  // 搜索过滤：搜「箱」→ 只留大箱子组，铁墙/城墙组不显示
+  ev('npcfixBox3Query = "箱"');
+  await ctx.npcfixBox3RenderBody();
+  const H3c = els['npcfixBox3Body'].innerHTML;
+  ok(H3c.indexOf('大箱子') >= 0, '搜「箱」时大箱子组显示');
+  ok(H3c.indexOf('铁墙') < 0, '搜「箱」时铁墙组隐藏');
+  ok(H3c.indexOf('城墙') < 0, '搜「箱」时城墙组隐藏');
+  ev('npcfixBox3Query = ""');
+  await ctx.npcfixBox3RenderBody();
+  ok(els['npcfixBox3Body'].innerHTML.indexOf('铁墙') >= 0, '清空搜索词后恢复全部分组');
 
   console.log('\n' + (fails === 0 ? 'ALL PASS' : (fails + ' FAILED')));
   process.exit(fails === 0 ? 0 : 1);

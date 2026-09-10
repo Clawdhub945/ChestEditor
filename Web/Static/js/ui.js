@@ -150,7 +150,8 @@ function renderSidebar() {
     "selectNpcfixView('box1')", npcfixView === 'box1', 'font-size:16px;' + MENU_ICON_FLEX);
   npcfixHtml += htmlMenuItem('&#x2694;', '盒子2 战斗单位', '敌我阵营',
     "selectNpcfixView('box2')", npcfixView === 'box2', 'font-size:20px;' + MENU_ICON_FLEX);
-  npcfixHtml += htmlMenuItem('&#x1F3D7;', '盒子3 建筑物', '敬请期待', '', false, 'font-size:16px;' + MENU_ICON_FLEX);
+  npcfixHtml += htmlMenuItem('&#x1F3D7;', '盒子3 建筑物', '敌我建筑',
+    "selectNpcfixView('box3')", npcfixView === 'box3', 'font-size:16px;' + MENU_ICON_FLEX);
   npcfixHtml += htmlMenuItem('&#x1F43E;', '盒子4 动物', '敬请期待', '', false, 'font-size:20px;' + MENU_ICON_FLEX);
   npcfixHtml += htmlMenuItem('&#x1F4E6;', '盒子5 掉落物', '敬请期待', '', false, 'font-size:16px;' + MENU_ICON_FLEX);
   html += htmlCategory(npcfixOpen, 'toggleNpcfix', 'NPC修改', null, npcfixHtml);

@@ -35,6 +35,9 @@ function selectNpcfixView(view) {
   // 盒子2 同理：实体扫描结果也要刷一遍，否则船/怪物是新生成的就看不到
   if (!wasActive && view === 'box2' && npcfixView === 'box2' && entityEditorData.length > 0)
     renderNpcfixBox2(true);
+  // 盒子3（建筑物）同理：数据源也是实体扫描
+  if (!wasActive && view === 'box3' && npcfixView === 'box3' && entityEditorData.length > 0)
+    renderNpcfixBox3(true);
 }
 
 // ===== 盒子1 小人数值修改 =====
@@ -534,6 +537,12 @@ function npcfixIsOurUnit(e) {
   return npcfixIsOurCombatUnit(e) || npcfixIsMonsterEntity(e) || npcfixIsWarship(e);
 }
 
+// ===== 设施/建筑（盒子3） =====
+// ⚠ 用 StartsWith 而不是 Contains：实机全部设施类名都是 Facility* 开头
+// （FacilityWall / FacilityBed / FacilityStorageBarn…），"包含"匹配没有任何收益，
+// 反而可能吃进未知类名 —— 与 IsShipEntity 的教训同一性质。
+function npcfixIsFacilityEntity(e) { return (e.className || '').indexOf('Facility') === 0; }
+
 const NPCFIX_CLEAR_KINDS = {
   monster: { name: '怪物', test: npcfixIsMonsterEntity },
   humanoid: { name: '小人', test: npcfixIsHumanEntity },
@@ -541,11 +550,19 @@ const NPCFIX_CLEAR_KINDS = {
   enemyAll: { name: '敌方单位', test: npcfixIsAnyUnit },
   ourCombat: { name: '我方战斗单位', test: npcfixIsOurCombatUnit },
   oursAll: { name: '我方单位', test: npcfixIsOurUnit },
+  // 建筑：tail 定制确认框尾行（建筑不会"分裂"，写真实风险）；warn 追加高危提示行
+  facility: {
+    name: '建筑', test: npcfixIsFacilityEntity,
+    tail: '（手动拆除流程：不返还材料与物品，删除后不可恢复）',
+    warn: '箱子 / 仓库 / 床类建筑删除后，里面的物品与住宿功能一并消失！',
+  },
 };
 
 // 二级分组的组名（必须与渲染分组时用的规则一致，否则 :g= 匹配不上）
 function npcfixGroupKeyOf(kind, e) {
   if (kind === 'ourCombat') return e.soldierTypeName || '未知兵种';
+  // 建筑：后端 name = DataTables.ItemName(stuff_id) 的中文名（铁墙 / 小床 / 大箱子…）
+  if (kind === 'facility') return e.name || e.className || '未知建筑';
   const cn = e.className || '';
   if (cn.indexOf('Dragon') >= 0) return '龙';
   return e.name || cn || '未知怪物';
@@ -987,6 +1004,7 @@ async function npcfixKillInChunks(hashes) {
 // 「重新扫描」才能看到结果 —— 那又多扫一遍全量。
 function npcfixRefreshView() {
   if (npcfixView === 'box2') renderNpcfixBox2(false);
+  if (npcfixView === 'box3') renderNpcfixBox3(false);
 }
 
 // 一键清除（spec 见 npcfixParseSpec）：
@@ -998,7 +1016,10 @@ async function npcfixClear(spec) {
   // 先算数量：确认框要按数量决定是否追加"可能卡顿"提示
   const hashes = p.pick();
   if (hashes.length === 0) { toast('没有可清除的' + p.def.name, true); return; }
-  let msg = '确定清除' + p.where + '的 ' + hashes.length + ' 个' + p.def.name + '？\n（将分批执行2遍，覆盖分裂怪）';
+  // tail 定制尾行（默认文案对"建筑"不适用——建筑不会分裂，写的是拆除的真实风险）
+  let msg = '确定清除' + p.where + '的 ' + hashes.length + ' 个' + p.def.name + '？\n'
+    + (p.def.tail || '（将分批执行2遍，覆盖分裂怪）');
+  if (p.def.warn) msg += '\n\n⚠ ' + p.def.warn;
   if (!confirm(msg)) return;
 
   // 记住"动刀前"都有谁：舰船被摧毁时游戏会把船员丢上岸变成士兵，
@@ -1067,4 +1088,124 @@ async function npcfixScale(spec, factor) {
     await new Promise(rs => setTimeout(rs, 40));
   }
   toast('战斗力 ' + pct + ' 完成: ' + entities + ' 个单位 / ' + fields + ' 个字段');
+}
+// ===== 盒子3 建筑物 =====
+// 数据源：实体扫描（/api/editor/entities，零后端改动）。实机分布：设施 40+ 种，
+// 我方 ~2323 / 敌方 ~58（敌方设施 kingdomId=0 但 hometownKingdomId=102，兜底函数直接可用）。
+// ⚠ 设施量大（铁墙 1574 个）—— 每组限量渲染卡片 + 顶部搜索框，别把 DOM 铺爆。
+const NPCFIX_BOX3_CARD_LIMIT = 24;   // 每组最多渲染的卡片数，超出显示"还有 N 个"
+let npcfixBox3Query = '';            // 搜索词（仅前端过滤已扫描数据，不触发扫描）
+
+// 设施分组卡：与 npcfixEntityGroupCard 的区别 —— 网格限量 + "还有 N 个"提示 + 组级一键清除。
+// 展开状态由 data-g 记录（搜索重绘后恢复，见 npcfixBox3RenderBody）。
+function npcfixFacilityGroupCard(label, color, icon, list, clearSpec) {
+  if (!list || list.length === 0) return '';
+  const shown = list.slice(0, NPCFIX_BOX3_CARD_LIMIT);
+  let h = '<details class="npcfix-group" style="--gc:' + color + '" data-g="' + esc(label) + '">';
+  h += '<summary class="npcfix-group-head">';
+  h += '<span class="npcfix-chev">&#x25B6;</span>';
+  h += '<span>' + icon + '</span><span>' + esc(label) + '</span>';
+  h += '<span class="npcfix-count">' + list.length + ' 个</span>';
+  if (clearSpec) h += npcfixMiniBtn('一键清除', NPCFIX_CLEAR_COLOR, "npcfixClear('" + clearSpec + "')");
+  h += '</summary>';
+  h += npcfixEntityGrid(shown, {});
+  if (list.length > shown.length)
+    h += '<div style="padding:0 12px 10px;font-size:12px;color:var(--text-muted)">…还有 '
+      + (list.length - shown.length) + ' 个未显示（用上方搜索框过滤后查看）</div>';
+  h += '</details>';
+  return h;
+}
+
+async function renderNpcfixBox3(forceScan) {
+  const el = document.getElementById('content');
+  // 与盒子2 同策略：首次进入（无缓存）或显式刷新才扫描，其余复用已扫描数据
+  const needScan = forceScan === true || entityEditorData.length === 0;
+  let html = '';
+  html += '<div style="padding:20px;height:100%;box-sizing:border-box;display:flex;flex-direction:column;overflow:hidden">';
+  html += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-shrink:0">';
+  html += '<h2 style="color:var(--accent-light);margin:0;font-size:18px">&#x1F3D7; 建筑物</h2>';
+  html += '<span style="color:var(--text-muted);font-size:13px">我方建筑 / 敌方建筑 · 按建筑名分组（大分组限量显示，用搜索框过滤）</span>';
+  html += '<button onclick="renderNpcfixBox3(true)" style="padding:6px 16px;background:var(--accent);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;font-size:13px;margin-left:auto">重新扫描</button>';
+  html += '</div>';
+  html += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-shrink:0">';
+  html += '<input id="npcfixBox3Search" value="' + esc(npcfixBox3Query) + '"'
+    + ' placeholder="搜索建筑名，如：墙 / 床 / 箱（留空显示全部）"'
+    + ' oninput="npcfixBox3Query=this.value;npcfixBox3RenderBody()"'
+    + ' style="width:300px;padding:6px 10px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px">';
+  html += '<span id="npcfixBox3Summary" style="color:var(--text-muted);font-size:12px"></span>';
+  html += '</div>';
+  html += '<div id="npcfixBox3Body" style="flex:1;overflow-y:auto;min-height:0;color:var(--text-muted)">' + (needScan ? '扫描中...' : '') + '</div>';
+  html += '</div>';
+  el.innerHTML = html;
+
+  if (needScan) {
+    try {
+      await fetch('/api/editor/scan', { method: 'POST' });
+      await fetchEntityEditorData();
+    } catch (e) {
+      const b = document.getElementById('npcfixBox3Body');
+      if (b) b.innerHTML = '<div style="padding:40px;text-align:center;color:var(--danger)">扫描失败: ' + esc(String((e && e.message) || e)) + '</div>';
+      return;
+    }
+  }
+  npcfixBox3RenderBody();
+}
+
+// 分类 + 分组 + 渲染（搜索框输入时只重绘 body，不重新扫描）
+function npcfixBox3RenderBody() {
+  const body = document.getElementById('npcfixBox3Body');
+  if (!body) return;
+  const GREEN = 'var(--success-dark, #27ae60)';
+  const RED = 'var(--danger, #e74c3c)';
+
+  // 分类：判据 StartsWith('Facility')（与清除范围共用同一个判据，历史坑）；
+  // 阵营0 隐藏（与盒子2 同规则）
+  const ours = {}, enemy = {};
+  let nOurs = 0, nEnemy = 0;
+  for (const e of entityEditorData) {
+    if (!npcfixIsFacilityEntity(e)) continue;
+    const kid = npcfixUnitKingdom(e);
+    if (kid === 0) continue;
+    const k = npcfixGroupKeyOf('facility', e);
+    if (kid === 1) { (ours[k] = ours[k] || []).push(e); nOurs++; }
+    else { (enemy[k] = enemy[k] || []).push(e); nEnemy++; }
+  }
+
+  const sum = document.getElementById('npcfixBox3Summary');
+  if (sum) sum.textContent = '共 ' + (nOurs + nEnemy) + ' 座（我方 ' + nOurs + ' · 敌方 ' + nEnemy + '）';
+
+  // 搜索：组名命中 → 显示整组（仍限量）；组名不中 → 卡片名（带编号的设施名）命中才显示
+  const q = (npcfixBox3Query || '').trim().toLowerCase();
+  const renderGroups = (map, color, icon, scope) => {
+    const names = Object.keys(map).sort((a, b) => map[b].length - map[a].length);
+    let h = '';
+    for (const name of names) {
+      let list = map[name];
+      const groupHit = !q || name.toLowerCase().indexOf(q) >= 0;
+      if (!groupHit) {
+        list = list.filter(e => String(e.stuffNameWithIdIndex || e.name || '').toLowerCase().indexOf(q) >= 0);
+        if (list.length === 0) continue;
+      }
+      h += npcfixFacilityGroupCard(name, color, icon, list, npcfixSpecOf('facility', scope, name));
+    }
+    return h;
+  };
+
+  // 记住展开的组（搜索重绘后恢复，不然每敲一个字全收起）
+  const wasOpen = [];
+  body.querySelectorAll('details.npcfix-group[open]').forEach(d => { if (d.dataset && d.dataset.g) wasOpen.push(d.dataset.g); });
+
+  let h = '';
+  // 我方建筑：不挂分区级一键清除 —— 1574 堵墙误触一次就没了，组级清除足够
+  h += npcfixSectionTitle('我方建筑', GREEN)
+    + (renderGroups(ours, GREEN, '&#x1F3E0;', 'ours') || npcfixEmptyHint('暂无我方建筑（' + nOurs + ' 个）'));
+  // 敌方建筑：分区级一键清除（清打城残墙 / 大炮）；每组也带
+  h += npcfixSectionTitle('敌方建筑', RED, npcfixBoxClearBtn('facility', 'enemy'))
+    + (renderGroups(enemy, RED, '&#x1F3F0;', 'enemy') || npcfixEmptyHint('暂无敌方建筑（' + nEnemy + ' 个）'));
+
+  body.innerHTML = h;
+  if (wasOpen.length > 0)
+    body.querySelectorAll('details.npcfix-group').forEach(d => {
+      if (d.dataset && wasOpen.indexOf(d.dataset.g) >= 0) d.open = true;
+    });
 }
