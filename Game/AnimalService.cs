@@ -102,7 +102,6 @@ internal static class AnimalService
         Plugin.LogInfo("[AnimalService]   DestroyAnimal 返回");
         return true;
     }
-}
 
     /// <summary>
     /// 召唤动物：照抄游戏创建路径 <c>AnimalHelper.CreateAnimal(Point pos, int stuff_id, int count)</c>
