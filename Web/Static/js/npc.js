@@ -149,7 +149,8 @@ function renderNpcCard(npc, opts) {
     : ('所有字段 (' + (npc.fieldCount || 0) + ')');
   let h = '';
 
-  h += '<div class="npc-card" style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius)">';
+  // opts.extraAttr：额外挂到卡片根上的属性（如 data-race/data-job，供分组筛选框过滤）
+  h += '<div class="npc-card"' + (opts.extraAttr || '') + ' style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius)">';
 
   // 头部：名称 + NPC类型 + 兵种
   h += '<div style="display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid var(--border)">';

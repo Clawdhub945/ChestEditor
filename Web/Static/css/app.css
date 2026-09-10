@@ -1003,6 +1003,32 @@ input[type='number']::-webkit-inner-spin-button {
 }
 .npcfix-group[open] .npcfix-group-head .npcfix-chev { transform: rotate(90deg); }
 
+/* 分组内的筛选框（市民 → 工作者/杂工/儿童）：种族 +（工作者）职业 */
+.npcfix-filters {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 6px 8px;
+  background: var(--bg-input);
+  border-bottom: 1px solid var(--border);
+}
+.npcfix-filters .npcfix-fl {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.npcfix-filters select.npcfix-select {
+  background: var(--bg-card);
+  color: var(--text-primary);
+  border: 1px solid var(--border-light);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 11px;
+  max-width: 130px;
+  outline: none;
+  cursor: pointer;
+}
+
 /* 展开字段的卡片占满整行：字段表（字段/翻译/数值/操作）最小宽度约 330px，
    留在 260px 的网格格里一定横向溢出。class 由 loadNpcfixCard 在 ontoggle 里切换。 */
 .npcfix-grid > .npc-card-open { grid-column: 1 / -1; }

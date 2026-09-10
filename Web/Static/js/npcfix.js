@@ -36,10 +36,89 @@ function selectNpcfixView(view) {
 
 // ===== 盒子1 小人数值修改 =====
 
+// ===== 分组内筛选框（市民：工作者 / 杂工 / 儿童） =====
+// 种族选项：race_id 0..9（顺序取自 race.json：0矮人…9蜥蜴人），
+// 外加「石头人 / 小精灵」——它们不是种族，而是 npcType 23/30 的特殊单位。
+const NPCFIX_RACES = [
+  ['0', '矮人'], ['1', '蚁人'], ['2', '鼠人'], ['3', '猫人'], ['4', '羊人'], ['5', '狼人'],
+  ['6', '猪人'], ['7', '精灵族'], ['8', '三眼人'], ['9', '蜥蜴人'],
+  ['stone', '石头人'], ['sprite', '小精灵'],
+];
+
+// 卡片上的种族标识（data-race）
+function npcfixRaceKey(npc) {
+  const t = npc.npcType;
+  if (t === 23) return 'sprite';   // 小精灵
+  if (t === 30) return 'stone';    // 石头人
+  return (npc.raceId === undefined || npc.raceId === null) ? '' : String(npc.raceId);
+}
+
+// 卡片上的职业标识（data-job）= npcType
+function npcfixJobKey(npc) {
+  return (npc.npcType === undefined || npc.npcType === null) ? '' : String(npc.npcType);
+}
+
+// 职业下拉的选项 = 本组里**实际出现**的 npcType（名称取自 npc_types.json），按人数降序
+function npcfixJobOptions(list) {
+  const cnt = new Map();
+  for (const n of list) {
+    const k = npcfixJobKey(n);
+    cnt.set(k, (cnt.get(k) || 0) + 1);
+  }
+  return [...cnt.entries()]
+    .sort((a, b) => b[1] - a[1] || (Number(a[0]) - Number(b[0])))
+    .map(([k, c]) => [k, getNpcTypeName(Number(k))]);
+}
+
+// 过滤判定（纯函数，便于单测）：空值 = 不限
+function npcfixMatchFilter(race, job, cardRace, cardJob) {
+  return (!race || race === cardRace) && (!job || job === cardJob);
+}
+
+function npcfixFilterBar(list, withJob) {
+  let h = '<div class="npcfix-filters"><span class="npcfix-fl">种族</span>';
+  h += '<select class="npcfix-select" onchange="npcfixApplyFilter(this)"><option value="">不限</option>';
+  for (const [v, label] of NPCFIX_RACES) h += '<option value="' + v + '">' + label + '</option>';
+  h += '</select>';
+  if (withJob) {
+    h += '<span class="npcfix-fl">职业</span>';
+    h += '<select class="npcfix-select" onchange="npcfixApplyFilter(this)"><option value="">不限</option>';
+    for (const [v, label] of npcfixJobOptions(list))
+      h += '<option value="' + v + '">' + esc(label) + '</option>';
+    h += '</select>';
+  }
+  h += '</div>';
+  return h;
+}
+
+// 改选后本地过滤：隐藏不匹配的卡片，并把标题栏计数改成「命中 / 总数 个」。
+// 只操作 display，不重建 DOM —— 已展开的字段、已填的输入框都保留。
+function npcfixApplyFilter(sel) {
+  const group = sel && sel.closest ? sel.closest('.npcfix-group') : null;
+  if (!group) return;
+  const selects = group.querySelectorAll('.npcfix-select');
+  const race = selects[0] ? selects[0].value : '';
+  const job = selects[1] ? selects[1].value : '';
+  const cards = group.querySelectorAll('.npc-card');
+  let shown = 0;
+  for (const c of cards) {
+    const show = npcfixMatchFilter(race, job, c.getAttribute('data-race'), c.getAttribute('data-job'));
+    c.style.display = show ? '' : 'none';
+    if (show) shown++;
+  }
+  const cnt = group.querySelector('.npcfix-count');
+  if (cnt) cnt.textContent = (race || job) ? (shown + ' / ' + cards.length + ' 个') : (cards.length + ' 个');
+}
+
 // NPC 卡片网格（自适应列数；窄窗口自动降为 1 列，不会挤坏卡片）
+// 卡片带 data-race / data-job，供上面的分组筛选框过滤
 function npcfixGrid(list, groupKey) {
   let h = '<div class="npcfix-grid">';
-  for (const npc of list) h += renderNpcCard(npc, {groupKey: groupKey});
+  for (const npc of list)
+    h += renderNpcCard(npc, {
+      groupKey: groupKey,
+      extraAttr: ' data-race="' + npcfixRaceKey(npc) + '" data-job="' + npcfixJobKey(npc) + '"'
+    });
   h += '</div>';
   return h;
 }
@@ -69,7 +148,8 @@ function npcfixBoxExpandAll(el, open) {
 // 少点一次（士兵→兵种 / 市民→职业 / 贵族→身份）。
 // 卡片本身是 <details>：**默认收起**，点标题栏单独展开/收起；
 // 想一次全摊开用所属一级盒子标题栏上的「展开 / 收起」。
-function npcfixGroupCard(label, color, icon, list, groupKey) {
+// filterSpec 存在时在标题栏下插一行筛选框；{ job: true } 额外给一个「职业」下拉
+function npcfixGroupCard(label, color, icon, list, groupKey, filterSpec) {
   if (!list || list.length === 0) return '';
   let h = '<details class="npcfix-group" style="--gc:' + color + '">';
   h += '<summary class="npcfix-group-head">';
@@ -77,6 +157,7 @@ function npcfixGroupCard(label, color, icon, list, groupKey) {
   h += '<span>' + icon + '</span><span>' + esc(label) + '</span>';
   h += '<span class="npcfix-count">' + list.length + ' 个</span>';
   h += '</summary>';
+  if (filterSpec) h += npcfixFilterBar(list, filterSpec.job === true);
   h += npcfixGrid(list, groupKey);
   h += '</details>';
   return h;
@@ -171,10 +252,11 @@ async function renderNpcfixBox1(forceScan) {
   // 市民：工作者 / 杂工 / 儿童 归入同一个盒子（二级菜单）
   // 杂工组额外并入「小精灵 / 石头人」（npcType 23/30，classifyNpcByType 归入 misc）：
   // 它们同为我方平民单位，单独成组会从市民计数里漏掉（我方总数 > 各盒子之和）。
+  // 三组都带「种族」筛选框；「工作者」额外带「职业」筛选框（职业选项按实际出现的人生成）
   const citizenGroups = [
-    { key: 'workers', label: '工作者', icon: '&#x1F527;', color: '#f39c12', list: oursByType.workers },
-    { key: 'laborers', label: '杂工', icon: '&#x1F6E0;', color: '#95a5a6', list: (oursByType.laborers || []).concat(oursByType.misc || []) },
-    { key: 'children', label: '儿童', icon: '&#x1F476;', color: '#e91e63', list: oursByType.children },
+    { key: 'workers', label: '工作者', icon: '&#x1F527;', color: '#f39c12', list: oursByType.workers, filter: { job: true } },
+    { key: 'laborers', label: '杂工', icon: '&#x1F6E0;', color: '#95a5a6', list: (oursByType.laborers || []).concat(oursByType.misc || []), filter: {} },
+    { key: 'children', label: '儿童', icon: '&#x1F476;', color: '#e91e63', list: oursByType.children, filter: {} },
   ];
   let citizenInner = '<div class="npcfix-box-body">';
   let citizenCount = 0;
@@ -182,7 +264,7 @@ async function renderNpcfixBox1(forceScan) {
     const list = g.list;
     if (!list || list.length === 0) continue;
     citizenCount += list.length;
-    citizenInner += npcfixGroupCard(g.label, g.color, g.icon, list, g.key);
+    citizenInner += npcfixGroupCard(g.label, g.color, g.icon, list, g.key, g.filter || null);
   }
   citizenInner += '</div>';
   if (citizenCount > 0)

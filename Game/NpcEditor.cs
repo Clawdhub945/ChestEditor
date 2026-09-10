@@ -128,6 +128,12 @@ internal static class NpcEditor
                 if (e.FieldMeta.TryGetValue("_npc_type", out var npcTypeFe) && !npcTypeFe.IsString && !npcTypeFe.IsPointer)
                     jw.WriteNumber("npcType", ReadIl2CppInt(e.Ptr, npcTypeFe.Offset));
 
+                // 种族：Npc.race_id（0矮人 1蚁人 2鼠人 3猫人 4羊人 5狼人 6猪人
+                //        7精灵族 8三眼人 9蜥蜴人，见 race.json）。
+                // 前端「市民」三组（工作者/杂工/儿童）的种族筛选框据此过滤。
+                if (e.FieldMeta.TryGetValue("race_id", out var raceFe) && !raceFe.IsString && !raceFe.IsPointer)
+                    jw.WriteNumber("raceId", ReadIl2CppInt(e.Ptr, raceFe.Offset));
+
                 // 王室身份：Npc.is_royal (bool)。前端「贵族」盒子据此分出「王室成员」
                 // （Npc.cs: IsRoyal => is_royal；被贬为平民时游戏会把它清零）
                 if (e.FieldMeta.TryGetValue("is_royal", out var royalFe) && !royalFe.IsString && !royalFe.IsPointer)
