@@ -1038,7 +1038,7 @@ async function npcfixKillInChunks(hashes) {
   return { destroyed: destroyed, failed: failed };
 }
 
-// 动物专用：按 ptrHash 走 /api/editor/animal/batch（活体 AnimalHelper.DestroyAnimal /
+// 动物专用：按 ptrHash 走 /api/editor/animal/batch（活体 OnBeDestroy 完整流程 /
 // 尸体 MapStuffHelper.DestroyElement，见 AnimalService）。后端已按帧摊开。
 async function npcfixKillAnimalInChunks(ptrHashes) {
   let destroyed = 0, failed = 0;
@@ -1048,7 +1048,7 @@ async function npcfixKillAnimalInChunks(ptrHashes) {
       const r = await fetch('/api/editor/animal/batch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ptrHashes: part })
+        body: JSON.stringify({ ptrHashes: part, mode: 'onBeDestroy' })
       }).then(x => x.json());
       destroyed += (r && r.destroyed) || 0;
       failed += (r && r.failed) || 0;

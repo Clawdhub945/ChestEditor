@@ -193,8 +193,8 @@ internal static class EntityHandlers
             });
         });
 
-        // 动物批量删除（盒子4）：活体走 AnimalHelper.DestroyAnimal、尸体走 MapStuffHelper.DestroyElement
-        // —— 都是游戏自己的注销路径（通用兜底不清注册表，见 AnimalService 注释）。
+        // 动物批量删除（盒子4）：mode 用于对照实验（onBeDestroy=游戏完整流程 / destroySelf /
+        // destroyAnimal / element=尸体专用），默认 onBeDestroy。
         Router.Add("POST", "/api/editor/animal/batch", ctx =>
         {
             var arr = ctx.Json?["ptrHashes"] as System.Text.Json.Nodes.JsonArray;
@@ -202,6 +202,7 @@ internal static class EntityHandlers
             var hashes = new List<int>();
             foreach (var n in arr)
                 if (n != null) hashes.Add(n.GetValue<int>());
+            string mode = ctx.Json?["mode"]?.GetValue<string>() ?? "onBeDestroy";
 
             int ok = 0, fail = 0, i = 0, frames = 0;
             bool resolved = false;
@@ -214,7 +215,7 @@ internal static class EntityHandlers
                 while (i < hashes.Count && sw.ElapsedMilliseconds < FrameBudgetMs)
                 {
                     var e = EntityScan.FindByPtrHash(hashes[i++]);
-                    if (e != null && AnimalService.DestroyOne(e)) ok++; else fail++;
+                    if (e != null && AnimalService.DestroyOne(e, mode)) ok++; else fail++;
                 }
                 return i < hashes.Count;
             }, 120000);

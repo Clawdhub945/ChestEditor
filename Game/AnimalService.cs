@@ -51,31 +51,30 @@ internal static class AnimalService
     /// 按 className 分派：Animal → DestroyAnimal(ptr)；AnimalDeadBody → DestroyElement(guid)。
     /// <para>⚠ 每步 LogInfo：闪退（native 崩溃没有托管异常）时，日志的最后一条就是崩点。</para>
     /// </summary>
-    internal static bool DestroyOne(EntityScan.EditorEntity e)
+    /// <summary>删一只/一具（mode 诊断分派）。</summary>
+    internal static bool DestroyOne(EntityScan.EditorEntity e, string mode)
     {
-        Plugin.LogInfo($"[AnimalService] DestroyOne: {e.ClassName} ptrHash={e.PtrHash} ptr={e.Ptr.ToInt64():X} guid={e.Guid}");
-        // ⚠ 防护：GameObject 未激活的对象（召唤在未加载区块的"幽灵动物"/池化尸体）
-        // DestroySelf 会访问未创建的渲染组件 → native 崩溃。一律跳过并在日志标记。
-        if (e.GoRef != null)
-        {
-            try
-            {
-                bool active = e.GoRef.activeInHierarchy;
-                Plugin.LogInfo($"[AnimalService]   go.active={active}");
-                if (!active) { Plugin.LogInfo("[AnimalService]   GO 未激活（幽灵/池化），跳过不删"); return false; }
-            }
-            catch (Exception ex) { Plugin.LogInfo($"[AnimalService]   activeInHierarchy 检查异常: {ex.Message}，继续"); }
-        }
+        Plugin.LogInfo($"[AnimalService] DestroyOne({mode}): {e.ClassName} ptrHash={e.PtrHash} ptr={e.Ptr.ToInt64():X} guid={e.Guid}");
         if (e.ClassName == "AnimalDeadBody")
         {
             if (e.Guid <= 0) { Plugin.LogInfo("[AnimalService]   guid<=0，跳过"); return false; }
             Plugin.LogInfo($"[AnimalService]   调 DestroyElement(guid={e.Guid})...");
-            Invoke(_destroyElement, _mapStuffHelper, e.Guid);   // void 方法
+            Invoke(_destroyElement, _mapStuffHelper, e.Guid);
             Plugin.LogInfo("[AnimalService]   DestroyElement 返回");
             return true;
         }
-        // 活体：先读 is_dead 预检（扫描后可能已被别的系统注销；重复调 DestroyAnimal
-        // 会走"注册表 Remove 失败直接 return"，虽安全但跳过更干净）
+
+        if (mode == "destroySelf")
+        {
+            // 对照实验：只调 Animal.DestroySelf()（跳过注册表/状态池）
+            IntPtr ds = FindMethodInHierarchy(GetClass(e.Ptr), "DestroySelf", 0);
+            Plugin.LogInfo($"[AnimalService]   DestroySelf={ds.ToInt64():X}，调用...");
+            Invoke(ds, e.Ptr);
+            Plugin.LogInfo("[AnimalService]   DestroySelf 返回");
+            return true;
+        }
+
+        // 活体：先读 is_dead 预检
         if (e.FieldMeta.TryGetValue("is_dead", out var df) && !df.IsString && !df.IsPointer)
         {
             try
@@ -86,12 +85,24 @@ internal static class AnimalService
             }
             catch (Exception ex) { Plugin.LogInfo($"[AnimalService]   is_dead 读取失败: {ex.Message}"); }
         }
-        // 活体：传对象指针
-        Plugin.LogInfo("[AnimalService]   调 DestroyAnimal(animal)...");
+
+        if (mode == "onBeDestroy")
+        {
+            // 推荐：游戏完整移除流程 ExitFacility + DestroyAnimal
+            IntPtr obd = FindMethodInHierarchy(GetClass(e.Ptr), "OnBeDestroy", 1);
+            Plugin.LogInfo($"[AnimalService]   OnBeDestroy={obd.ToInt64():X}，调用...");
+            Invoke(obd, e.Ptr, 0);
+            Plugin.LogInfo("[AnimalService]   OnBeDestroy 返回");
+            return true;
+        }
+
+        // mode = destroyAnimal（原路径，闪退）
+        Plugin.LogInfo($"[AnimalService]   调 DestroyAnimal(animal)...");
         Invoke(_destroyAnimal, _animalHelper, e.Ptr);
         Plugin.LogInfo("[AnimalService]   DestroyAnimal 返回");
         return true;
     }
+}
 
     /// <summary>
     /// 召唤动物：照抄游戏创建路径 <c>AnimalHelper.CreateAnimal(Point pos, int stuff_id, int count)</c>
