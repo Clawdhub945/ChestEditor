@@ -305,4 +305,21 @@ internal static class GameChainLocator
         catch (Exception ex) { Plugin.LogVerbose($"[EntityEditor] GetMapStuffHelper error: {ex.Message}"); }
         return IntPtr.Zero;
     }
+
+    /// <summary>
+    /// territory.animal_helper（AnimalHelper 实例）——动物的标准移除路径
+    /// <c>AnimalHelper.DestroyAnimal(animal)</c> 的宿主（OnBeDestroy 里就是这么调的）。
+    /// </summary>
+    internal static IntPtr GetAnimalHelper()
+    {
+        try
+        {
+            IntPtr territory = GetTerritory();
+            if (territory == IntPtr.Zero) return IntPtr.Zero;
+            IntPtr territoryClass = Il2CppApi.GetClass(territory);
+            return Il2CppApi.ReadFieldSafe(territory, territoryClass, "animal_helper");
+        }
+        catch (Exception ex) { Plugin.LogVerbose($"[EntityEditor] GetAnimalHelper error: {ex.Message}"); }
+        return IntPtr.Zero;
+    }
 }

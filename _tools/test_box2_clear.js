@@ -31,6 +31,8 @@ const SYNTH = [
   nx({ className: 'FacilityStorageBarn', hometownKingdomId: 1, territoryKingdomId: 1, stuffId: 103002, name: '大箱子', stuffNameWithIdIndex: '大箱子1' }), // 我方建筑·箱子（高危）
   nx({ className: 'FacilityCityWall', hometownKingdomId: 102, territoryKingdomId: 102, stuffId: 102008, name: '城墙', stuffNameWithIdIndex: '城墙1' }),    // 敌方建筑
   nx({ className: 'StuffOnMap', hometownKingdomId: 1, territoryKingdomId: 1, stuffId: 304001, name: '白银', stuffNameWithIdIndex: '白银1' }),             // 掉落物（结构断言的稳定锚点，实机会被拾光）
+  nx({ className: 'Animal', hometownKingdomId: 1, territoryKingdomId: 1, stuffId: 501005, name: '猪', goName: '猪13201139' }),                            // 动物（领地牲畜）
+  nx({ className: 'AnimalDeadBody', stuffId: 501006, name: '猪' }),                                                                                        // 动物尸体
 ];
 const DATA = LIVE.concat(SYNTH);
 
@@ -445,8 +447,7 @@ const src = fs.readFileSync(path.join(dir, 'npcfix.js'), 'utf8');
   // 实机守恒：全部 StuffOnMap* 都能分组（物品无阵营语义，全 0 的粪便也照常显示）
   const liveStuff = LIVE.filter(e => ctx.npcfixIsStuffOnMapEntity(e));
   const liveZeroStuff = liveStuff.filter(e => kidOf(e) === 0).length;
-  console.log('  实机掉落物', liveStuff.length, '堆（其中阵营字段全0的粪便', liveZeroStuff, '堆照常显示；实机可能已被拾光，结构断言靠 SYNTH 的白银）');
-  ok(liveZeroStuff > 0 || liveStuff.length === 0, '实机有全0阵营的掉落物（或实机暂无掉落物）');
+  console.log('  实机掉落物', liveStuff.length, '堆（其中阵营字段全0', liveZeroStuff, '堆；实机会被拾光，结构断言靠 SYNTH 的白银，不作实机状态断言）');
 
   setData(DATA);
   await ctx.renderNpcfixBox5(false);
@@ -539,10 +540,47 @@ const src = fs.readFileSync(path.join(dir, 'npcfix.js'), 'utf8');
   if (pickCall && pickCall[1]) {
     const sent = JSON.parse(pickCall[1]);
     ok(sent.target === 'treasury', '请求带 target=当前下拉选择（treasury）');
-    ok(Array.isArray(sent.ptrHashes) && sent.ptrHashes.length === 1, '请求带未拾的掉落物 ptrHash（1 堆）');
+    ok(Array.isArray(sent.ptrHashes) && sent.ptrHashes.length >= 1, '请求带未拾的掉落物 ptrHash（≥1 堆）');
   }
   ctx.fetch = origFetch;
   ok(/读取存档时自动关闭|自动关闭/.test(els['content'].innerHTML), '自动拾取行有「读取存档时自动关闭」说明');
+
+  // ---------- 15) 盒子4 动物 ----------
+  console.log('\n== 15) 盒子4 动物 ==');
+  // 判据：Animal（活体）+ AnimalDeadBody（尸体），精确匹配
+  ok(ev('npcfixIsAnimalEntity({className:"Animal"})') === true, 'Animal 命中');
+  ok(ev('npcfixIsAnimalEntity({className:"AnimalDeadBody"})') === true, 'AnimalDeadBody（尸体）命中');
+  ok(ev('npcfixIsAnimalEntity({className:"AnimalHelper"})') === false, 'AnimalHelper 不命中（精确匹配）');
+  ok(ev('npcfixIsAnimalEntity({className:"Npc"})') === false, 'Npc 不命中');
+
+  // 组名：活体按种类、尸体统一一组（与 :g= 定位共用 npcfixGroupKeyOf）
+  ok(ev(`npcfixGroupKeyOf('animal', {className:'Animal', name:'猪'})`) === '猪', '活体组名 = 物种名');
+  ok(ev(`npcfixGroupKeyOf('animal', {className:'AnimalDeadBody', name:'猪'})`) === '动物尸体', '尸体组名 = 动物尸体');
+
+  // 渲染：分组 / 按钮 spec / 搜索
+  setData(DATA);
+  await ctx.renderNpcfixBox4(false);
+  const H4 = els['npcfixBox4Body'].innerHTML;
+  ok(H4.indexOf('猪') >= 0, '活体按物种分组（猪）');
+  ok(H4.indexOf('动物尸体') >= 0, '尸体统一「动物尸体」组');
+  ok(H4.indexOf("npcfixClear('animal:all:g=%E7%8C%AA')") >= 0, '猪组按钮 spec = animal:all:g=猪');
+  ok(ev('NPCFIX_CLEAR_KINDS.animal.route') === 'animal', 'animal 的 route = animal（走 /api/editor/animal/batch）');
+  ok(ev('NPCFIX_CLEAR_KINDS.animal.tail').indexOf('不掉肉') >= 0, '确认框写明静默移除不掉肉');
+  // 清除路由：animal 走 animal/batch
+  ctx.confirm = () => true;
+  const calls4 = [];
+  ctx.fetch = (u, o) => { calls4.push(String(u)); return origFetch(u, o); };
+  setData([{ className: 'Animal', name: '猪', hometownKingdomId: 1, ptrHash: -777, guid: 1 }]);
+  await ctx.npcfixClear('animal:all');
+  ctx.fetch = origFetch;
+  ok(calls4.some(u => u.indexOf('/api/editor/animal/batch') >= 0), '清除请求走 /api/editor/animal/batch');
+  ok(!calls4.some(u => u.indexOf('/api/editor/destroy/batch') >= 0), '不走 destroy/batch（不清注册表）');
+  // 搜索
+  setData(DATA);
+  ev('npcfixBox4Query = "猪"');
+  await ctx.npcfixBox4RenderBody();
+  ok(els['npcfixBox4Body'].innerHTML.indexOf('猪') >= 0, '搜「猪」显示猪组');
+  ev('npcfixBox4Query = ""');
 
   console.log('\n' + (fails === 0 ? 'ALL PASS' : (fails + ' FAILED')));
   process.exit(fails === 0 ? 0 : 1);

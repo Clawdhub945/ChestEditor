@@ -193,6 +193,41 @@ internal static class EntityHandlers
             });
         });
 
+        // 动物批量删除（盒子4）：活体走 AnimalHelper.DestroyAnimal、尸体走 MapStuffHelper.DestroyElement
+        // —— 都是游戏自己的注销路径（通用兜底不清注册表，见 AnimalService 注释）。
+        Router.Add("POST", "/api/editor/animal/batch", ctx =>
+        {
+            var arr = ctx.Json?["ptrHashes"] as System.Text.Json.Nodes.JsonArray;
+            if (arr == null || arr.Count == 0) throw new HttpError(400, "missing ptrHashes");
+            var hashes = new List<int>();
+            foreach (var n in arr)
+                if (n != null) hashes.Add(n.GetValue<int>());
+
+            int ok = 0, fail = 0, i = 0, frames = 0;
+            bool resolved = false;
+            var swTotal = System.Diagnostics.Stopwatch.StartNew();
+            MainThread.RunPaced(() =>
+            {
+                frames++;
+                if (!resolved) { resolved = true; AnimalService.Resolve(); }
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                while (i < hashes.Count && sw.ElapsedMilliseconds < FrameBudgetMs)
+                {
+                    var e = EntityScan.FindByPtrHash(hashes[i++]);
+                    if (e != null && AnimalService.DestroyOne(e)) ok++; else fail++;
+                }
+                return i < hashes.Count;
+            }, 120000);
+            Plugin.LogInfo($"[EntityEditor] 动物删除: {ok} 成功 / {fail} 失败 / 共 {hashes.Count} 个, "
+                + $"分 {frames} 帧, 墙钟 {swTotal.ElapsedMilliseconds}ms");
+            return JsonBuilder.Object(w =>
+            {
+                w.WriteBoolean("ok", true);
+                w.WriteNumber("destroyed", ok);
+                w.WriteNumber("failed", fail);
+            });
+        });
+
         // 战斗力批量缩放（×10 / ÷10；一次主线程任务循环执行，界面上的「战斗力×10 / ÷10」用）
         Router.Add("POST", "/api/editor/scale/batch", ctx =>
         {

@@ -38,7 +38,9 @@ function selectNpcfixView(view) {
   // 盒子3（建筑物）同理：数据源也是实体扫描
   if (!wasActive && view === 'box3' && npcfixView === 'box3' && entityEditorData.length > 0)
     renderNpcfixBox3(true);
-  // 盒子5（掉落物）同理：数据源也是实体扫描
+  // 盒子4（动物）/ 盒子5（掉落物）同理：数据源也是实体扫描
+  if (!wasActive && view === 'box4' && npcfixView === 'box4' && entityEditorData.length > 0)
+    renderNpcfixBox4(true);
   if (!wasActive && view === 'box5' && npcfixView === 'box5' && entityEditorData.length > 0)
     renderNpcfixBox5(true);
 }
@@ -549,6 +551,12 @@ function npcfixIsFacilityEntity(e) { return (e.className || '').indexOf('Facilit
 // ===== 掉落物（盒子5）：StuffOnMap*（StuffOnMapFaeces 粪便也在内），判据与渲染/清除三处共用 =====
 function npcfixIsStuffOnMapEntity(e) { return (e.className || '').indexOf('StuffOnMap') === 0; }
 
+// ===== 动物（盒子4）：活体 Animal + 尸体 AnimalDeadBody，判据与渲染/清除三处共用 =====
+function npcfixIsAnimalEntity(e) {
+  const cn = e.className || '';
+  return cn === 'Animal' || cn === 'AnimalDeadBody';
+}
+
 const NPCFIX_CLEAR_KINDS = {
   monster: { name: '怪物', test: npcfixIsMonsterEntity },
   humanoid: { name: '小人', test: npcfixIsHumanEntity },
@@ -562,13 +570,20 @@ const NPCFIX_CLEAR_KINDS = {
     tail: '（手动拆除流程：不返还材料与物品，删除后不可恢复）',
     warn: '箱子 / 仓库 / 床类建筑删除后，里面的物品与住宿功能一并消失！',
   },
-  // 掉落物：keyField='guid' —— 按 guid 走 /api/editor/stuff/batch（游戏自己的
+  // 掉落物：route='stuff' —— 按 guid 走 /api/editor/stuff/batch（游戏自己的
   // MapStuffHelper.DestroyStuffOnMap），清注册表 + 取消 NPC 拾取任务；
   // 通用 destroy/batch 按 ptrHash 只销毁 GO，不清注册表，所以这里不能复用。
   stuff: {
-    name: '掉落物', test: npcfixIsStuffOnMapEntity,
+    name: '掉落物', test: npcfixIsStuffOnMapEntity, route: 'stuff',
     keyField: 'guid', whereLabel: '地图上全部',
     tail: '（物品将直接消失，不会进背包 / 仓库 —— 游戏没有"强制拾取"语义）',
+  },
+  // 动物：route='animal' —— 活体走 AnimalHelper.DestroyAnimal、尸体走 DestroyElement
+  // （通用 destroy/batch 不清 AnimalHelper 注册表，NPC 牧场任务会对着空气跑）。
+  // 静默移除不掉肉：确认框 tail 写明。
+  animal: {
+    name: '动物', test: npcfixIsAnimalEntity, route: 'animal', whereLabel: '地图上全部',
+    tail: '（静默移除：不掉肉、不生成尸体，删除后不可恢复）',
   },
 };
 
@@ -579,6 +594,8 @@ function npcfixGroupKeyOf(kind, e) {
   if (kind === 'facility') return e.name || e.className || '未知建筑';
   // 掉落物：同走后端中文名（白银 / 银币 / 粪便…）
   if (kind === 'stuff') return e.name || e.className || '未知物品';
+  // 动物：活体按种类（猪 / 鹿…），尸体统一一组
+  if (kind === 'animal') return e.className === 'AnimalDeadBody' ? '动物尸体' : (e.name || '未知动物');
   const cn = e.className || '';
   if (cn.indexOf('Dragon') >= 0) return '龙';
   return e.name || cn || '未知怪物';
@@ -1021,6 +1038,25 @@ async function npcfixKillInChunks(hashes) {
   return { destroyed: destroyed, failed: failed };
 }
 
+// 动物专用：按 ptrHash 走 /api/editor/animal/batch（活体 AnimalHelper.DestroyAnimal /
+// 尸体 MapStuffHelper.DestroyElement，见 AnimalService）。后端已按帧摊开。
+async function npcfixKillAnimalInChunks(ptrHashes) {
+  let destroyed = 0, failed = 0;
+  for (let i = 0; i < ptrHashes.length; i += NPCFIX_KILL_CHUNK) {
+    const part = ptrHashes.slice(i, i + NPCFIX_KILL_CHUNK);
+    try {
+      const r = await fetch('/api/editor/animal/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ptrHashes: part })
+      }).then(x => x.json());
+      destroyed += (r && r.destroyed) || 0;
+      failed += (r && r.failed) || 0;
+    } catch (e) { failed += part.length; }
+    await new Promise(r => setTimeout(r, 60));
+  }
+  return { destroyed: destroyed, failed: failed };
+}
 // 掉落物专用：按 guid 走 /api/editor/stuff/batch（游戏自己的 MapStuffHelper.DestroyStuffOnMap，
 // 清注册表 + 取消 NPC 拾取任务）。后端已按帧摊开，这里照旧分批提交（少几次往返）。
 // 返回同构 {destroyed, failed}（failed = guid 已不在注册表，多半被 NPC 捡走了）。
@@ -1047,6 +1083,7 @@ async function npcfixKillStuffInChunks(guids) {
 function npcfixRefreshView() {
   if (npcfixView === 'box2') renderNpcfixBox2(false);
   if (npcfixView === 'box3') renderNpcfixBox3(false);
+  if (npcfixView === 'box4') renderNpcfixBox4(false);
   if (npcfixView === 'box5') renderNpcfixBox5(false);
 }
 
@@ -1070,10 +1107,13 @@ async function npcfixClear(spec) {
   const before = new Set(entityEditorData.map(e => e.ptrHash));
 
   toast('清除中...', false);
-  // 掉落物（keyField='guid'）走 /api/editor/stuff/batch（游戏自己的注册表删除）；
-  // 其余走 destroy/batch(ptrHash)
-  const kill = (p.def.keyField && p.def.keyField !== 'ptrHash')
-    ? npcfixKillStuffInChunks : npcfixKillInChunks;
+  // 按种类路由销毁接口：
+  //   route='stuff'  → /api/editor/stuff/batch（guid，游戏注册表删除）
+  //   route='animal' → /api/editor/animal/batch（AnimalHelper/MapStuffHelper）
+  //   默认           → destroy/batch(ptrHash)
+  const kill = p.def.route === 'stuff' ? npcfixKillStuffInChunks
+    : p.def.route === 'animal' ? npcfixKillAnimalInChunks
+      : npcfixKillInChunks;
   const d1 = await kill(hashes);
   await new Promise(r => setTimeout(r, 1000));
   // 重扫拿到分裂/新刷的目标，再清一遍（掉落物：清掉NPC来不及捡而刚掉的）
@@ -1533,4 +1573,83 @@ async function npcfixAutoPickTick() {
   } catch (e) { /* 单拍失败不中断整个模式 */ }
   npcfixAutoPickUpdateBtn();
   if (npcfixAutoPickOn) npcfixAutoPickTimer = setTimeout(npcfixAutoPickTick, npcfixAutoPickGetInterval() * 1000);
+}
+
+// ===== 盒子4 动物 =====
+// 数据源：实体扫描（零后端扫描改动）。实机：领地牲畜（猪，kingdom=1）与野生动物同类 Animal，
+// 动物被杀后留 AnimalDeadBody（尸体，内含肉，走 MapStuffHelper.DestroyElement 删除）。
+// 删除走 /api/editor/animal/batch：活体 AnimalHelper.DestroyAnimal（静默移除不掉肉）、
+// 尸体 DestroyElement —— 都是游戏自己的注销路径。
+// ⚠ Animal 有 is_dead 字段，扫描已过滤池化尸体（与 StuffOnMap 同坑同修）。
+
+async function renderNpcfixBox4(forceScan) {
+  const el = document.getElementById('content');
+  const needScan = forceScan === true || entityEditorData.length === 0;
+  let html = '';
+  html += '<div style="padding:20px;height:100%;box-sizing:border-box;display:flex;flex-direction:column;overflow:hidden">';
+  html += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-shrink:0">';
+  html += '<h2 style="color:var(--accent-light);margin:0;font-size:18px">&#x1F43E; 动物</h2>';
+  html += '<span style="color:var(--text-muted);font-size:13px">牲畜与野生动物 · 按种类分组（尸体单独一组；大分组限量显示）</span>';
+  html += '<button onclick="renderNpcfixBox4(true)" style="padding:6px 16px;background:var(--accent);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;font-size:13px;margin-left:auto">重新扫描</button>';
+  html += '</div>';
+  html += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-shrink:0">';
+  html += '<input id="npcfixBox4Search" value="' + esc(npcfixBox4Query) + '"'
+    + ' placeholder="搜索动物名，如：猪 / 鹿（留空显示全部）"'
+    + ' oninput="npcfixBox4Query=this.value;npcfixBox4RenderBody()"'
+    + ' style="width:300px;padding:6px 10px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px">';
+  html += '<span id="npcfixBox4Summary" style="color:var(--text-muted);font-size:12px"></span>';
+  html += '</div>';
+  html += '<div id="npcfixBox4Body" style="flex:1;overflow-y:auto;min-height:0;color:var(--text-muted)">' + (needScan ? '扫描中...' : '') + '</div>';
+  html += '</div>';
+  el.innerHTML = html;
+
+  if (needScan) {
+    try {
+      await fetch('/api/editor/scan', { method: 'POST' });
+      await fetchEntityEditorData();
+    } catch (e) {
+      const b = document.getElementById('npcfixBox4Body');
+      if (b) b.innerHTML = '<div style="padding:40px;text-align:center;color:var(--danger)">扫描失败: ' + esc(String((e && e.message) || e)) + '</div>';
+      return;
+    }
+  }
+  npcfixBox4RenderBody();
+}
+
+let npcfixBox4Query = '';   // 搜索词（纯前端过滤已扫描数据，不触发扫描）
+
+function npcfixBox4RenderBody() {
+  const body = document.getElementById('npcfixBox4Body');
+  if (!body) return;
+
+  // 分组：组名走 npcfixGroupKeyOf('animal')（活体按种类、尸体统一一组），与 :g= 定位共用
+  const kinds = {};
+  let total = 0, corpse = 0;
+  for (const e of entityEditorData) {
+    if (!npcfixIsAnimalEntity(e)) continue;
+    const k = npcfixGroupKeyOf('animal', e);
+    (kinds[k] = kinds[k] || []).push(e);
+    total++;
+    if (e.className === 'AnimalDeadBody') corpse++;
+  }
+
+  const sum = document.getElementById('npcfixBox4Summary');
+  if (sum) sum.textContent = '共 ' + total + ' 只/具（' + Object.keys(kinds).length + ' 组）'
+    + (corpse > 0 ? '，其中尸体 ' + corpse + ' 具' : '');
+
+  const q = (npcfixBox4Query || '').trim().toLowerCase();
+  const names = Object.keys(kinds).sort((a, b) => kinds[b].length - kinds[a].length);
+  let h = '';
+  for (const name of names) {
+    let list = kinds[name];
+    const groupHit = !q || name.toLowerCase().indexOf(q) >= 0;
+    if (!groupHit) {
+      list = list.filter(e => String(e.stuffNameWithIdIndex || e.name || '').toLowerCase().indexOf(q) >= 0);
+      if (list.length === 0) continue;
+    }
+    const icon = name === '动物尸体' ? '&#x1F480;' : '&#x1F416;';
+    const color = name === '动物尸体' ? 'var(--text-muted)' : 'var(--success-dark, #27ae60)';
+    h += npcfixFacilityGroupCard(name, color, icon, list, npcfixSpecOf('animal', 'all', name));
+  }
+  body.innerHTML = h || npcfixEmptyHint('没有匹配的动物（共 ' + total + ' 只/具）');
 }

@@ -208,6 +208,16 @@ internal static class EntityScan
                             try { if (ReadIl2CppByte(compPtr, deadFe.Offset) != 0) continue; } catch { }
                         }
 
+                        // 动物（Animal）同款过滤：被杀/被移除的动物 GameObject 也会池化残留
+                        // （Animal 自身有 is_dead 字段，源码 Animal.cs 多处 if(is_dead)）。
+                        // 字段不在（子类差异）时 TryGetValue 失败 → 不过滤，安全退化。
+                        if (className == "Animal"
+                            && fieldMap.TryGetValue("is_dead", out var aDeadFe)
+                            && !aDeadFe.IsString && !aDeadFe.IsPointer)
+                        {
+                            try { if (ReadIl2CppByte(compPtr, aDeadFe.Offset) != 0) continue; } catch { }
+                        }
+
                         if (fieldMap.TryGetValue("guid", out var guidFe))
                             try { guid = ReadIl2CppInt(compPtr, guidFe.Offset); } catch { }
                         if (guid <= 0 && !isNpc) continue; // 无 guid 且不是 NPC，跳过
