@@ -1101,7 +1101,10 @@ async function npcfixClear(spec) {
     }
   }
 
+  // 掉落物：missing = 请求时 guid 已不在注册表（多半被 NPC 抢先捡走了），如实告知
+  const gone = (d1.failed || 0) + (d2.failed || 0);
   toast('清除完成: 首轮' + (d1.destroyed || 0) + ' + 二轮' + (d2.destroyed || 0)
+    + (gone > 0 ? ' + 已消失' + gone : '')
     + (sailor.destroyed > 0 ? ' + 落岸船员' + sailor.destroyed : ''));
   npcfixRefreshView();
 }

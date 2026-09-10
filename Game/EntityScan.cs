@@ -196,6 +196,18 @@ internal static class EntityScan
                             if (stuffId <= 0 && !isNpc) continue; // stuff_id 为 0 且不是 NPC，跳过
                         }
 
+                        // 掉落物（StuffOnMap*）专有过滤：NPC 捡走后游戏走 DestroyStuffOnMap +
+                        // RecycleToCache —— 逻辑对象 is_dead=1、注册表里已无此 guid，但 GameObject
+                        // 只是回收进池子（scene 仍有效），扫描会把它扫成"幽灵实体"。
+                        // 实测：面板显示的肉/粪便删除请求全部 missing（6/6），fields 读出 is_dead=1。
+                        // 所以这里读 is_dead（bool 1 字节），死了的直接跳过。
+                        if (className.IndexOf("StuffOnMap", StringComparison.Ordinal) == 0
+                            && fieldMap.TryGetValue("is_dead", out var deadFe)
+                            && !deadFe.IsString && !deadFe.IsPointer)
+                        {
+                            try { if (ReadIl2CppByte(compPtr, deadFe.Offset) != 0) continue; } catch { }
+                        }
+
                         if (fieldMap.TryGetValue("guid", out var guidFe))
                             try { guid = ReadIl2CppInt(compPtr, guidFe.Offset); } catch { }
                         if (guid <= 0 && !isNpc) continue; // 无 guid 且不是 NPC，跳过
