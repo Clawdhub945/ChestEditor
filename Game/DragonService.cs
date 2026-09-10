@@ -883,22 +883,10 @@ internal static class DragonService
     {
         if (_dragonOffsetsCached) return;
         _dragonOffsetsCached = true;
-        var seen = new HashSet<int>();
-        IntPtr cls = compClass;
-        int depth = 0;
-        while (cls != IntPtr.Zero && depth < 10)
+        foreach (var (name, offset) in Il2CppApi.CollectFieldsInHierarchy(compClass))
         {
-            int clsAddr = cls.GetHashCode();
-            if (seen.Contains(clsAddr)) break;
-            seen.Add(clsAddr);
-            var fields = Il2CppApi.EnumerateFields(cls);
-            foreach (var (name, offset, _) in fields)
-            {
-                if (offset > 0 && !_dragonFieldOffsets.ContainsKey(name))
-                    _dragonFieldOffsets[name] = offset;
-            }
-            try { cls = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(cls); } catch { break; }
-            depth++;
+            if (!_dragonFieldOffsets.ContainsKey(name))
+                _dragonFieldOffsets[name] = offset;
         }
     }
 
@@ -938,22 +926,9 @@ internal static class DragonService
                         // 检查是否有 hp_total 字段（战斗组件）
                         if (!_dragonOffsetsCached)
                         {
-                            var tmpFields = new List<(string, int)>();
-                            var seen = new HashSet<int>();
-                            IntPtr cls = compClass;
-                            int d = 0;
-                            while (cls != IntPtr.Zero && d < 10)
-                            {
-                                int ca = cls.GetHashCode();
-                                if (seen.Contains(ca)) break;
-                                seen.Add(ca);
-                                var ff = Il2CppApi.EnumerateFields(cls);
-                                foreach (var f in ff) { if (f.Offset > 0 && !tmpFields.Any(x => x.Item1 == f.Name)) tmpFields.Add((f.Name, f.Offset)); }
-                                try { cls = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(cls); } catch { break; }
-                                d++;
-                            }
-                            if (!tmpFields.Any(x => x.Item1 == "hp_total")) continue;
-                            foreach (var (n, o) in tmpFields) { if (o > 0 && !_dragonFieldOffsets.ContainsKey(n)) _dragonFieldOffsets[n] = o; }
+                            var tmpFields = Il2CppApi.CollectFieldsInHierarchy(compClass);
+                            if (!tmpFields.Any(x => x.Name == "hp_total")) continue;
+                            foreach (var (n, o) in tmpFields) { if (!_dragonFieldOffsets.ContainsKey(n)) _dragonFieldOffsets[n] = o; }
                             _dragonOffsetsCached = true;
                         }
 
@@ -1071,22 +1046,9 @@ internal static class DragonService
                         // 避免非战斗组件污染缓存
                         if (!_dragonFieldOffsets.ContainsKey("hp_total"))
                         {
-                            var tmpFields = new List<(string, int)>();
-                            var seen = new HashSet<int>();
-                            IntPtr cls = compClass;
-                            int d = 0;
-                            while (cls != IntPtr.Zero && d < 10)
-                            {
-                                int ca = cls.GetHashCode();
-                                if (seen.Contains(ca)) break;
-                                seen.Add(ca);
-                                var ff = Il2CppApi.EnumerateFields(cls);
-                                foreach (var f in ff) { if (f.Offset > 0 && !tmpFields.Any(x => x.Item1 == f.Name)) tmpFields.Add((f.Name, f.Offset)); }
-                                try { cls = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(cls); } catch { break; }
-                                d++;
-                            }
-                            if (tmpFields.Any(x => x.Item1 == "hp_total"))
-                                foreach (var (n, o) in tmpFields) { if (o > 0 && !_dragonFieldOffsets.ContainsKey(n)) _dragonFieldOffsets[n] = o; }
+                            var tmpFields = Il2CppApi.CollectFieldsInHierarchy(compClass);
+                            if (tmpFields.Any(x => x.Name == "hp_total"))
+                                foreach (var (n, o) in tmpFields) { if (!_dragonFieldOffsets.ContainsKey(n)) _dragonFieldOffsets[n] = o; }
                         }
 
                         if (!_dragonFieldOffsets.TryGetValue("guid", out int guidOff)) continue;
@@ -1160,31 +1122,14 @@ internal static class DragonService
                             try { compClass = Il2CppApi.GetClass(compPtr); } catch { }
                             if (compClass == IntPtr.Zero) continue;
 
-                            var allFields = new List<(string Name, int Offset, string TypeName)>();
-                            var seen = new HashSet<int>();
-                            IntPtr cls = compClass;
-                            int depth = 0;
-                            while (cls != IntPtr.Zero && depth < 10)
-                            {
-                                int clsAddr = cls.GetHashCode();
-                                if (seen.Contains(clsAddr)) break;
-                                seen.Add(clsAddr);
-                                var clsFields = Il2CppApi.EnumerateFields(cls);
-                                foreach (var f in clsFields)
-                                {
-                                    if (f.Offset > 0 && !allFields.Any(x => x.Name == f.Name))
-                                        allFields.Add(f);
-                                }
-                                try { cls = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(cls); } catch { break; }
-                                depth++;
-                            }
+                            var allFields = Il2CppApi.CollectFieldsInHierarchy(compClass);
 
                             // 只输出有 hp_total 字段的组件（战斗组件）
                             if (!allFields.Any(x => x.Name == "hp_total")) continue;
 
                             int stuffId = 0, guid = 0;
                             float hp = 0, hpTotal = 0, atkMax = 0, mAtkMax = 0, speed = 0, power = 0;
-                            foreach (var (name, offset, _) in allFields)
+                            foreach (var (name, offset) in allFields)
                             {
                                 try
                                 {

@@ -136,7 +136,7 @@ public static class SaveLoadPatches
     {
         try
         {
-            IntPtr ptr = GetIl2CppPtr(__instance);
+            IntPtr ptr = Il2CppApi.GetIl2CppPtr(__instance);
             if (ptr != IntPtr.Zero)
                 NpcEditor.OnPostUpdate(ptr);
         }
@@ -149,43 +149,14 @@ public static class SaveLoadPatches
 
         try
         {
-            var areaMap = GetProp(__instance, "area_map");
+            var areaMap = ManagedReflect.GetProp(__instance, "area_map");
             if (areaMap == null) return;
 
-            var myTerritory = GetProp(areaMap, "my_territory");
+            var myTerritory = ManagedReflect.GetProp(areaMap, "my_territory");
             if (myTerritory == null) return;
 
             CachedTerritory = myTerritory;
         }
         catch { }
-    }
-
-    // ========== 辅助方法 ==========
-
-    private static IntPtr GetIl2CppPtr(object obj)
-    {
-        try
-        {
-            var prop = obj.GetType().GetProperty("Pointer", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            if (prop != null) return (IntPtr)prop.GetValue(obj);
-        }
-        catch { }
-        return IntPtr.Zero;
-    }
-
-    private static object? GetProp(object obj, string name)
-    {
-        try
-        {
-            var t = obj.GetType();
-            while (t != null && t != typeof(object))
-            {
-                var prop = t.GetProperty(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.FlattenHierarchy);
-                if (prop != null) return prop.GetValue(obj);
-                t = t.BaseType;
-            }
-        }
-        catch { }
-        return null;
     }
 }

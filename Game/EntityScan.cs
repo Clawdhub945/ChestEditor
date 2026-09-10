@@ -151,44 +151,9 @@ internal static class EntityScan
                                 // 先尝试直接读字段（可能已被缓存）
                                 if (fieldMap.TryGetValue("stuff_name_with_id_index", out var snFe) && snFe.IsString)
                                     stuffNameWithIdIndex = ReadIl2CppString(compPtr, snFe.Offset) ?? "";
-                                // 如果字段为空，尝试调用方法触发计算
+                                // 字段为空则调用 GetFacilityNameWithIdIndex() 触发计算
                                 if (string.IsNullOrEmpty(stuffNameWithIdIndex))
-                                {
-                                IntPtr fnCls = compClass;
-                                int fnD = 0;
-                                while (fnCls != IntPtr.Zero && fnD < 10)
-                                {
-                                    IntPtr fnIter = IntPtr.Zero;
-                                    IntPtr fnM;
-                                    while ((fnM = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_methods(fnCls, ref fnIter)) != IntPtr.Zero)
-                                    {
-                                        string? fnName = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_name(fnM));
-                                        if (fnName == "GetFacilityNameWithIdIndex" && Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_param_count(fnM) == 0)
-                                        {
-                                            IntPtr exFn = IntPtr.Zero;
-                                            try
-                                            {
-                                                IntPtr fnResult = IntPtr.Zero;
-                                                unsafe { fnResult = (IntPtr)Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(fnM, compPtr, null, ref exFn); }
-                                                if (fnResult != IntPtr.Zero)
-                                                {
-                                                    // 读取返回的 IL2CPP string
-                                                    unsafe
-                                                    {
-                                                        IntPtr charsPtr = fnResult + 0x14;
-                                                        stuffNameWithIdIndex = Marshal.PtrToStringUni(charsPtr) ?? "";
-                                                    }
-                                                }
-                                            }
-                                            catch { }
-                                            break;
-                                        }
-                                    }
-                                    if (!string.IsNullOrEmpty(stuffNameWithIdIndex)) break;
-                                    fnCls = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(fnCls);
-                                    fnD++;
-                                }
-                            }
+                                    stuffNameWithIdIndex = InvokeStringByName(compPtr, compClass, "GetFacilityNameWithIdIndex") ?? "";
                             }
                             catch { }
                         }
@@ -223,38 +188,13 @@ internal static class EntityScan
                             FieldMeta = fieldMap
                         };
 
-                        // 读取实体所属 territory 的 kingdom_id
+                        // 读取实体所属 territory 的 kingdom_id（territory / _territory 两个候选名）
                         try
                         {
-                            IntPtr territoryPtr = ReadFieldSafe(compPtr, compClass, "territory");
-                            if (territoryPtr == IntPtr.Zero)
-                            {
-                                // 递归搜索父类
-                                IntPtr tCls = compClass;
-                                int tD = 0;
-                                while (tCls != IntPtr.Zero && tD < 10)
-                                {
-                                    IntPtr fi = IntPtr.Zero;
-                                    IntPtr f;
-                                    while ((f = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_fields(tCls, ref fi)) != IntPtr.Zero)
-                                    {
-                                        string? fn = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_field_get_name(f));
-                                        if (fn == "territory" || fn == "_territory")
-                                        {
-                                            int offset = (int)Il2CppInterop.Runtime.IL2CPP.il2cpp_field_get_offset(f);
-                                            if (offset >= 0x10 && offset < 0x10000)
-                                                unsafe { territoryPtr = *(IntPtr*)(compPtr + offset); }
-                                            break;
-                                        }
-                                    }
-                                    if (territoryPtr != IntPtr.Zero) break;
-                                    tCls = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(tCls);
-                                    tD++;
-                                }
-                            }
+                            IntPtr territoryPtr = Il2CppApi.ReadPointerFieldAny(compPtr, compClass, "territory", "_territory");
                             if (territoryPtr != IntPtr.Zero)
                             {
-                                IntPtr tClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(territoryPtr);
+                                IntPtr tClass = Il2CppApi.GetClass(territoryPtr);
                                 entity.TerritoryKingdomId = ReadIntFieldSafe(territoryPtr, tClass, "kingdom_id", 0);
                             }
                         }
@@ -435,26 +375,18 @@ internal static class EntityScan
             try
             {
                 var sb = new System.Text.StringBuilder();
-                IntPtr cls = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(e.Ptr);
+                IntPtr cls = Il2CppApi.GetClass(e.Ptr);
                 sb.AppendLine($"ptr={e.Ptr} classPtr={cls}");
                 if (cls == IntPtr.Zero) return "classPtr is null";
-                string? cn = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_name(cls));
-                sb.AppendLine($"className={cn}");
+                sb.AppendLine($"className={Il2CppApi.GetClassName(cls)}");
                 int depth = 0;
                 while (cls != IntPtr.Zero && depth < 10)
                 {
-                    string? className = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_name(cls));
-                    sb.AppendLine($"=== {className} (depth={depth}) ===");
-                    IntPtr iter = IntPtr.Zero;
-                    int count = 0;
-                    IntPtr m;
-                    while ((m = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_methods(cls, ref iter)) != IntPtr.Zero)
-                    {
-                        string? mName = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_name(m));
-                        if (mName != null) { sb.AppendLine($"  {mName}"); count++; }
-                    }
-                    sb.AppendLine($"  (total: {count})");
-                    cls = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(cls);
+                    sb.AppendLine($"=== {Il2CppApi.GetClassName(cls)} (depth={depth}) ===");
+                    var methods = Il2CppApi.EnumerateMethods(cls);
+                    foreach (var m in methods) sb.AppendLine($"  {m.Name}");
+                    sb.AppendLine($"  (total: {methods.Count})");
+                    cls = Il2CppApi.GetParent(cls);
                     depth++;
                 }
                 return sb.ToString();

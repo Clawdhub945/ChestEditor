@@ -76,6 +76,17 @@ internal static unsafe class Il2CppInvoke
         catch { return false; }
     }
 
+    /// <summary>调用返回 IL2CPP string 的方法并解码为托管字符串</summary>
+    internal static string? InvokeString(IntPtr method, IntPtr objPtr, params object?[] args)
+        => Il2CppMemory.ReadStringObject(Invoke(method, objPtr, args));
+
+    /// <summary>对已解析的对象指针按名沿继承链查找并调用 0 参方法，返回字符串</summary>
+    internal static string? InvokeStringByName(IntPtr objPtr, IntPtr classPtr, string methodName, params object?[] args)
+    {
+        IntPtr m = FindMethodInHierarchy(classPtr, methodName, args.Length);
+        return m == IntPtr.Zero ? null : InvokeString(m, objPtr, args);
+    }
+
     // 值类型参数：把值放进 IntPtr 槽的低 4 字节；引用类型：槽里放对象指针
     private static IntPtr ToSlot(object? arg) => arg switch
     {

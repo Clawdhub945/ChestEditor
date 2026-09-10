@@ -37,8 +37,8 @@ internal static class EntityDestroyer
                     return "GameObject reference lost (rescan needed)";
 
                 string name = e.GoRef.name;
-                IntPtr classPtr = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(e.Ptr);
-                string className = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_name(classPtr)) ?? "?";
+                IntPtr classPtr = Il2CppApi.GetClass(e.Ptr);
+                string className = Il2CppApi.PtrToString(Il2CppApi.ClassGetName(classPtr)) ?? "?";
                 Plugin.LogInfo($"[EntityEditor] === DestroyEntity START: {name} class={className} ptrHash={ptrHash} ===");
 
                 bool called = false;
@@ -53,25 +53,25 @@ internal static class EntityDestroyer
                     int depth = 0;
                     while (searchCls != IntPtr.Zero && depth < 15 && !called)
                     {
-                        string clsName = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_name(searchCls)) ?? "?";
+                        string clsName = Il2CppApi.PtrToString(Il2CppApi.ClassGetName(searchCls)) ?? "?";
                         IntPtr iter = IntPtr.Zero;
                         IntPtr mth;
-                        while ((mth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_methods(searchCls, ref iter)) != IntPtr.Zero)
+                        while ((mth = Il2CppApi.ClassGetMethods(searchCls, ref iter)) != IntPtr.Zero)
                         {
-                            string? mName = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_name(mth));
+                            string? mName = Il2CppApi.PtrToString(Il2CppApi.MethodGetName(mth));
                             if (mName == null) continue;
                             foreach (var target in targetNames)
                             {
                                 if (mName == target)
                                 {
-                                    uint pCount = Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_param_count(mth);
+                                    uint pCount = Il2CppApi.GetMethodParamCountRaw(mth);
                                     Plugin.LogInfo($"[EntityEditor] [NPC] Found {mName}({pCount}p) at depth={depth} cls={clsName}");
                                     try
                                     {
                                         IntPtr exception = IntPtr.Zero;
                                         if (pCount == 0)
                                         {
-                                            unsafe { Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(mth, e.Ptr, null, ref exception); }
+                                            unsafe { Il2CppApi.RuntimeInvoke(mth, e.Ptr, null, ref exception); }
                                         }
                                         else
                                         {
@@ -80,8 +80,8 @@ internal static class EntityDestroyer
                                             IntPtr[] storage = new IntPtr[pCount];
                                             for (int a = 0; a < (int)pCount; a++)
                                             {
-                                                IntPtr paramType = Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_param(mth, (uint)a);
-                                                string? tn = paramType != IntPtr.Zero ? Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_type_get_name(paramType)) : null;
+                                                IntPtr paramType = Il2CppApi.GetMethodParam(mth, (uint)a);
+                                                string? tn = paramType != IntPtr.Zero ? Il2CppApi.PtrToString(Il2CppApi.TypeGetName(paramType)) : null;
                                                 bool isBool = tn != null && (tn == "System.Boolean" || tn == "bool");
                                                 storage[a] = isBool ? (IntPtr)1 : IntPtr.Zero;
                                             }
@@ -93,7 +93,7 @@ internal static class EntityDestroyer
                                                         argPtrs[a] = (IntPtr)(&storPtr[a]);
                                                     fixed (IntPtr* argsArr = argPtrs)
                                                     {
-                                                        Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(mth, e.Ptr, (void**)argsArr, ref exception);
+                                                        Il2CppApi.RuntimeInvoke(mth, e.Ptr, (void**)argsArr, ref exception);
                                                     }
                                                 }
                                             }
@@ -112,7 +112,7 @@ internal static class EntityDestroyer
                             }
                             if (called) break;
                         }
-                        searchCls = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(searchCls);
+                        searchCls = Il2CppApi.GetParent(searchCls);
                         depth++;
                     }
                 }
@@ -132,19 +132,19 @@ internal static class EntityDestroyer
                     {
                         // 手动执行 Dismantle 的关键步骤（避免直接调用 Dismantle 导致崩溃）
                         // IDA 流程: Facility.CloseWindow -> SetJobCount(0) -> RemoveFacility -> AfterDismantle
-                        IntPtr bhClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(buildHelperInst);
+                        IntPtr bhClass = Il2CppApi.GetClass(buildHelperInst);
 
                         // Step 1: Facility.CloseWindow(f)
                         {
-                            IntPtr closeWindowMth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(classPtr, "CloseWindow", 0);
+                            IntPtr closeWindowMth = Il2CppApi.GetMethodFromName(classPtr, "CloseWindow", 0);
                             if (closeWindowMth == IntPtr.Zero)
                             {
                                 IntPtr searchCls = classPtr;
                                 int d = 0;
                                 while (searchCls != IntPtr.Zero && d < 10 && closeWindowMth == IntPtr.Zero)
                                 {
-                                    closeWindowMth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(searchCls, "CloseWindow", 0);
-                                    searchCls = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(searchCls);
+                                    closeWindowMth = Il2CppApi.GetMethodFromName(searchCls, "CloseWindow", 0);
+                                    searchCls = Il2CppApi.GetParent(searchCls);
                                     d++;
                                 }
                             }
@@ -153,7 +153,7 @@ internal static class EntityDestroyer
                                 try
                                 {
                                     IntPtr ex = IntPtr.Zero;
-                                    unsafe { Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(closeWindowMth, e.Ptr, null, ref ex); }
+                                    unsafe { Il2CppApi.RuntimeInvoke(closeWindowMth, e.Ptr, null, ref ex); }
                                     Plugin.LogInfo($"[EntityEditor] Facility.CloseWindow() done, ex={ex != IntPtr.Zero}");
                                 }
                                 catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] CloseWindow failed: {ex.Message}"); }
@@ -162,15 +162,15 @@ internal static class EntityDestroyer
 
                         // Step 2: 尝试 Facility.Dismantle(6p) — 之前测试过不崩溃
                         {
-                            IntPtr disMth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(classPtr, "Dismantle", 6);
+                            IntPtr disMth = Il2CppApi.GetMethodFromName(classPtr, "Dismantle", 6);
                             if (disMth == IntPtr.Zero)
                             {
                                 IntPtr searchCls = classPtr;
                                 int d = 0;
                                 while (searchCls != IntPtr.Zero && d < 10 && disMth == IntPtr.Zero)
                                 {
-                                    disMth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(searchCls, "Dismantle", 6);
-                                    searchCls = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(searchCls);
+                                    disMth = Il2CppApi.GetMethodFromName(searchCls, "Dismantle", 6);
+                                    searchCls = Il2CppApi.GetParent(searchCls);
                                     d++;
                                 }
                             }
@@ -185,8 +185,8 @@ internal static class EntityDestroyer
                                     IntPtr[] storage = new IntPtr[pc];
                                     for (int a = 0; a < pc; a++)
                                     {
-                                        IntPtr paramType = Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_param(disMth, (uint)a);
-                                        string? tn = paramType != IntPtr.Zero ? Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_type_get_name(paramType)) : null;
+                                        IntPtr paramType = Il2CppApi.GetMethodParam(disMth, (uint)a);
+                                        string? tn = paramType != IntPtr.Zero ? Il2CppApi.PtrToString(Il2CppApi.TypeGetName(paramType)) : null;
                                         bool isBool = tn != null && (tn == "System.Boolean" || tn == "bool");
                                         storage[a] = isBool ? (IntPtr)1 : IntPtr.Zero;
                                     }
@@ -198,7 +198,7 @@ internal static class EntityDestroyer
                                                 argPtrs[a] = (IntPtr)(&storPtr[a]);
                                             fixed (IntPtr* argsArr = argPtrs)
                                             {
-                                                Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(disMth, e.Ptr, (void**)argsArr, ref exception);
+                                                Il2CppApi.RuntimeInvoke(disMth, e.Ptr, (void**)argsArr, ref exception);
                                             }
                                         }
                                     }
@@ -213,22 +213,22 @@ internal static class EntityDestroyer
                         {
                             IntPtr fi = IntPtr.Zero;
                             IntPtr f;
-                            while ((f = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_fields(bhClass, ref fi)) != IntPtr.Zero)
+                            while ((f = Il2CppApi.ClassGetFields(bhClass, ref fi)) != IntPtr.Zero)
                             {
-                                string? fn = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_field_get_name(f));
-                                IntPtr ft = Il2CppInterop.Runtime.IL2CPP.il2cpp_field_get_type(f);
-                                string? ftn = ft != IntPtr.Zero ? Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_type_get_name(ft)) : null;
+                                string? fn = Il2CppApi.PtrToString(Il2CppApi.FieldGetName(f));
+                                IntPtr ft = Il2CppApi.FieldGetType(f);
+                                string? ftn = ft != IntPtr.Zero ? Il2CppApi.PtrToString(Il2CppApi.TypeGetName(ft)) : null;
                                 if (fn == null || ftn == null) continue;
                                 if (!ftn.Contains("List<Facility") && !ftn.Contains("List<Facility")) continue;
 
-                                int offset = (int)Il2CppInterop.Runtime.IL2CPP.il2cpp_field_get_offset(f);
+                                int offset = (int)Il2CppApi.FieldGetOffset(f);
                                 IntPtr listPtr;
                                 unsafe { listPtr = *(IntPtr*)(buildHelperInst + offset); }
                                 if (listPtr == IntPtr.Zero) continue;
 
                                 // 尝试调用 List.Remove(item)
-                                IntPtr listClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(listPtr);
-                                IntPtr removeMth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(listClass, "Remove", 1);
+                                IntPtr listClass = Il2CppApi.GetClass(listPtr);
+                                IntPtr removeMth = Il2CppApi.GetMethodFromName(listClass, "Remove", 1);
                                 if (removeMth != IntPtr.Zero)
                                 {
                                     try
@@ -244,7 +244,7 @@ internal static class EntityDestroyer
                                                 args[0] = (IntPtr)(&sp[0]);
                                                 fixed (IntPtr* ap = args)
                                                 {
-                                                    Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(removeMth, listPtr, (void**)ap, ref ex);
+                                                    Il2CppApi.RuntimeInvoke(removeMth, listPtr, (void**)ap, ref ex);
                                                 }
                                             }
                                         }
@@ -261,19 +261,19 @@ internal static class EntityDestroyer
                             int rDepth = 0;
                             while (rCls != IntPtr.Zero && rDepth < 10)
                             {
-                                IntPtr rMth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(rCls, "RecycleMySp", 0);
+                                IntPtr rMth = Il2CppApi.GetMethodFromName(rCls, "RecycleMySp", 0);
                                 if (rMth != IntPtr.Zero)
                                 {
                                     try
                                     {
                                         IntPtr ex = IntPtr.Zero;
-                                        unsafe { Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(rMth, e.Ptr, null, ref ex); }
+                                        unsafe { Il2CppApi.RuntimeInvoke(rMth, e.Ptr, null, ref ex); }
                                         Plugin.LogInfo($"[EntityEditor] RecycleMySp() done, ex={ex != IntPtr.Zero}");
                                     }
                                     catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] RecycleMySp failed: {ex.Message}"); }
                                     break;
                                 }
-                                rCls = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(rCls);
+                                rCls = Il2CppApi.GetParent(rCls);
                                 rDepth++;
                             }
                         }
@@ -320,27 +320,27 @@ internal static class EntityDestroyer
                         {
                             IntPtr fi = IntPtr.Zero;
                             IntPtr f;
-                            while ((f = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_fields(searchCls, ref fi)) != IntPtr.Zero)
+                            while ((f = Il2CppApi.ClassGetFields(searchCls, ref fi)) != IntPtr.Zero)
                             {
-                                string? fn = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_field_get_name(f));
+                                string? fn = Il2CppApi.PtrToString(Il2CppApi.FieldGetName(f));
                                 if (fn == "territory" || fn == "_territory")
                                 {
-                                    int offset = (int)Il2CppInterop.Runtime.IL2CPP.il2cpp_field_get_offset(f);
+                                    int offset = (int)Il2CppApi.FieldGetOffset(f);
                                     if (offset >= 0x10 && offset < 0x10000)
                                         unsafe { shipTerritoryPtr = *(IntPtr*)(e.Ptr + offset); }
                                     if (shipTerritoryPtr != IntPtr.Zero) break;
                                 }
                             }
                             if (shipTerritoryPtr != IntPtr.Zero) break;
-                            searchCls = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(searchCls);
+                            searchCls = Il2CppApi.GetParent(searchCls);
                             depth++;
                         }
                     }
 
                     if (shipTerritoryPtr != IntPtr.Zero)
                     {
-                        IntPtr shipTerritoryClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(shipTerritoryPtr);
-                        string? territoryName = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_name(shipTerritoryClass));
+                        IntPtr shipTerritoryClass = Il2CppApi.GetClass(shipTerritoryPtr);
+                        string? territoryName = Il2CppApi.PtrToString(Il2CppApi.ClassGetName(shipTerritoryClass));
                         Plugin.LogInfo($"[EntityEditor] [Ship] Ship's territory class={territoryName}, ptr={shipTerritoryPtr.ToInt64():X}");
 
                         // 从船的所属 territory 读取 ship_list 和 ship_dic
@@ -359,8 +359,8 @@ internal static class EntityDestroyer
                         // 从 ship_dic 按 guid 移除
                         if (shipDicPtr != IntPtr.Zero && guid != 0)
                         {
-                            IntPtr dicClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(shipDicPtr);
-                            IntPtr removeMth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(dicClass, "Remove", 1);
+                            IntPtr dicClass = Il2CppApi.GetClass(shipDicPtr);
+                            IntPtr removeMth = Il2CppApi.GetMethodFromName(dicClass, "Remove", 1);
                             if (removeMth != IntPtr.Zero)
                             {
                                 try
@@ -371,7 +371,7 @@ internal static class EntityDestroyer
                                         int guidArg = guid;
                                         IntPtr* rmArgs = stackalloc IntPtr[1];
                                         rmArgs[0] = (IntPtr)(&guidArg);
-                                        Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(removeMth, shipDicPtr, (void**)rmArgs, ref exRm);
+                                        Il2CppApi.RuntimeInvoke(removeMth, shipDicPtr, (void**)rmArgs, ref exRm);
                                     }
                                     Plugin.LogInfo($"[EntityEditor] [Ship] ship_dic.Remove({guid}) ex={exRm != IntPtr.Zero}");
                                 }
@@ -383,14 +383,14 @@ internal static class EntityDestroyer
                         IntPtr shipHelperPtr = ReadFieldSafe(shipTerritoryPtr, shipTerritoryClass, "ship_helper");
                         if (shipHelperPtr != IntPtr.Zero)
                         {
-                            IntPtr shClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(shipHelperPtr);
+                            IntPtr shClass = Il2CppApi.GetClass(shipHelperPtr);
                             IntPtr destroyShipMth = IntPtr.Zero;
                             {
                                 IntPtr shIter = IntPtr.Zero;
                                 IntPtr shM;
-                                while ((shM = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_methods(shClass, ref shIter)) != IntPtr.Zero)
+                                while ((shM = Il2CppApi.ClassGetMethods(shClass, ref shIter)) != IntPtr.Zero)
                                 {
-                                    string? shName = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_name(shM));
+                                    string? shName = Il2CppApi.PtrToString(Il2CppApi.MethodGetName(shM));
                                     if (shName == "DestroyShip") { destroyShipMth = shM; break; }
                                 }
                             }
@@ -405,7 +405,7 @@ internal static class EntityDestroyer
                                         IntPtr* destroyArgs = stackalloc IntPtr[2];
                                         destroyArgs[0] = e.Ptr;
                                         destroyArgs[1] = (IntPtr)(&boolArg);
-                                        Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(destroyShipMth, shipHelperPtr, (void**)destroyArgs, ref exDestroy);
+                                        Il2CppApi.RuntimeInvoke(destroyShipMth, shipHelperPtr, (void**)destroyArgs, ref exDestroy);
                                     }
                                     Plugin.LogInfo($"[EntityEditor] [Ship] DestroyShip call ex={exDestroy != IntPtr.Zero}");
                                 }
@@ -428,7 +428,7 @@ internal static class EntityDestroyer
                         // 最终验证
                         if (shipListPtr != IntPtr.Zero)
                         {
-                            IntPtr listClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(shipListPtr);
+                            IntPtr listClass = Il2CppApi.GetClass(shipListPtr);
                             int finalSize = ReadIntFieldSafe(shipListPtr, listClass, "_size", -1);
                             Plugin.LogInfo($"[EntityEditor] [Ship] Final: ship_list._size={finalSize}");
                         }
@@ -440,7 +440,7 @@ internal static class EntityDestroyer
                         IntPtr territoryPtr = FindTerritory();
                         if (territoryPtr != IntPtr.Zero)
                         {
-                            IntPtr tc = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(territoryPtr);
+                            IntPtr tc = Il2CppApi.GetClass(territoryPtr);
                             IntPtr shipListPtr = ReadFieldSafe(territoryPtr, tc, "ship_list");
                             if (shipListPtr != IntPtr.Zero)
                                 shipDestroyed = RemoveFromListByPtr(shipListPtr, e.Ptr);
@@ -462,18 +462,18 @@ internal static class EntityDestroyer
                             {
                                 IntPtr fi = IntPtr.Zero;
                                 IntPtr f;
-                                while ((f = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_fields(idCls, ref fi)) != IntPtr.Zero)
+                                while ((f = Il2CppApi.ClassGetFields(idCls, ref fi)) != IntPtr.Zero)
                                 {
-                                    string? fn = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_field_get_name(f));
+                                    string? fn = Il2CppApi.PtrToString(Il2CppApi.FieldGetName(f));
                                     if (fn == "is_dead")
                                     {
-                                        int offset = (int)Il2CppInterop.Runtime.IL2CPP.il2cpp_field_get_offset(f);
+                                        int offset = (int)Il2CppApi.FieldGetOffset(f);
                                         if (offset >= 0x10 && offset < 0x10000)
                                             unsafe { *(int*)(e.Ptr + offset) = 1; }
                                         break;
                                     }
                                 }
-                                idCls = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(idCls);
+                                idCls = Il2CppApi.GetParent(idCls);
                                 idD++;
                             }
                         }
@@ -493,14 +493,14 @@ internal static class EntityDestroyer
                     var foundMethods = new List<(string name, uint paramCount, IntPtr methodPtr, int d, string cls)>();
                     while (searchCls != IntPtr.Zero && depth < 15)
                     {
-                        string clsName = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_name(searchCls)) ?? "?";
+                        string clsName = Il2CppApi.PtrToString(Il2CppApi.ClassGetName(searchCls)) ?? "?";
                         IntPtr iter = IntPtr.Zero;
                         IntPtr mth;
-                        while ((mth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_methods(searchCls, ref iter)) != IntPtr.Zero)
+                        while ((mth = Il2CppApi.ClassGetMethods(searchCls, ref iter)) != IntPtr.Zero)
                         {
-                            string? mName = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_name(mth));
+                            string? mName = Il2CppApi.PtrToString(Il2CppApi.MethodGetName(mth));
                             if (mName == null) continue;
-                            uint pc = Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_param_count(mth);
+                            uint pc = Il2CppApi.GetMethodParamCountRaw(mth);
                             foreach (var target in targetNames)
                             {
                                 if (mName == target)
@@ -510,7 +510,7 @@ internal static class EntityDestroyer
                                 }
                             }
                         }
-                        searchCls = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(searchCls);
+                        searchCls = Il2CppApi.GetParent(searchCls);
                         depth++;
                     }
 
@@ -527,7 +527,7 @@ internal static class EntityDestroyer
                             IntPtr exception = IntPtr.Zero;
                             if (fm.paramCount == 0)
                             {
-                                unsafe { Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(fm.methodPtr, e.Ptr, null, ref exception); }
+                                unsafe { Il2CppApi.RuntimeInvoke(fm.methodPtr, e.Ptr, null, ref exception); }
                             }
                             else
                             {
@@ -535,8 +535,8 @@ internal static class EntityDestroyer
                                 IntPtr[] storage = new IntPtr[fm.paramCount];
                                 for (int a = 0; a < (int)fm.paramCount; a++)
                                 {
-                                    IntPtr paramType = Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_param(fm.methodPtr, (uint)a);
-                                    string? tn = paramType != IntPtr.Zero ? Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_type_get_name(paramType)) : null;
+                                    IntPtr paramType = Il2CppApi.GetMethodParam(fm.methodPtr, (uint)a);
+                                    string? tn = paramType != IntPtr.Zero ? Il2CppApi.PtrToString(Il2CppApi.TypeGetName(paramType)) : null;
                                     bool isBool = tn != null && (tn == "System.Boolean" || tn == "bool");
                                     storage[a] = isBool ? (IntPtr)1 : IntPtr.Zero;
                                 }
@@ -548,7 +548,7 @@ internal static class EntityDestroyer
                                             argPtrs[a] = (IntPtr)(&storPtr[a]);
                                         fixed (IntPtr* argsArr = argPtrs)
                                         {
-                                            Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(fm.methodPtr, e.Ptr, (void**)argsArr, ref exception);
+                                            Il2CppApi.RuntimeInvoke(fm.methodPtr, e.Ptr, (void**)argsArr, ref exception);
                                         }
                                     }
                                 }
@@ -573,18 +573,18 @@ internal static class EntityDestroyer
                         int methodCount = 0;
                         while (debugCls != IntPtr.Zero && debugDepth < 10)
                         {
-                            string dClsName = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_name(debugCls)) ?? "?";
+                            string dClsName = Il2CppApi.PtrToString(Il2CppApi.ClassGetName(debugCls)) ?? "?";
                             IntPtr dIter = IntPtr.Zero;
                             IntPtr dMth;
-                            while ((dMth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_methods(debugCls, ref dIter)) != IntPtr.Zero)
+                            while ((dMth = Il2CppApi.ClassGetMethods(debugCls, ref dIter)) != IntPtr.Zero)
                             {
-                                string? dName = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_name(dMth));
+                                string? dName = Il2CppApi.PtrToString(Il2CppApi.MethodGetName(dMth));
                                 if (dName == null) continue;
-                                uint dPc = Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_param_count(dMth);
+                                uint dPc = Il2CppApi.GetMethodParamCountRaw(dMth);
                                 if (dPc <= 2)
                                 {
                                     uint dIflags = 0;
-                                    uint dFlags = Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_flags(dMth, ref dIflags);
+                                    uint dFlags = Il2CppApi.MethodGetFlags(dMth, ref dIflags);
                                     bool dStatic = (dFlags & 0x10) != 0;
                                     Plugin.LogInfo($"[EntityEditor] [Generic]   {dClsName}.{dName}({dPc}p) static={dStatic} depth={debugDepth}");
                                     methodCount++;
@@ -592,7 +592,7 @@ internal static class EntityDestroyer
                                 }
                             }
                             if (methodCount >= 80) break;
-                            debugCls = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(debugCls);
+                            debugCls = Il2CppApi.GetParent(debugCls);
                             debugDepth++;
                         }
                         Plugin.LogInfo($"[EntityEditor] [Generic] Total: {methodCount} methods listed");
@@ -605,12 +605,12 @@ internal static class EntityDestroyer
                             bool dicRemoved = false;
                             if (mapStuffHelper != IntPtr.Zero)
                             {
-                                IntPtr mshClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(mapStuffHelper);
+                                IntPtr mshClass = Il2CppApi.GetClass(mapStuffHelper);
                                 IntPtr mshAreaMap = ReadFieldSafe(mapStuffHelper, mshClass, "area_map");
                                 Plugin.LogInfo($"[EntityEditor] [StuffOnMap] MapStuffHelper.area_map={mshAreaMap.ToInt64():X}");
                                 if (mshAreaMap != IntPtr.Zero)
                                 {
-                                    IntPtr areaMapClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(mshAreaMap);
+                                    IntPtr areaMapClass = Il2CppApi.GetClass(mshAreaMap);
 
                                     // 读取 guid
                                     int guid = 0;
@@ -622,8 +622,8 @@ internal static class EntityDestroyer
                                     IntPtr dicPtr = ReadFieldSafe(mshAreaMap, areaMapClass, "stuff_on_map_dic");
                                     if (dicPtr != IntPtr.Zero && guid != 0)
                                     {
-                                        IntPtr dicClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(dicPtr);
-                                        IntPtr removeMth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(dicClass, "Remove", 1);
+                                        IntPtr dicClass = Il2CppApi.GetClass(dicPtr);
+                                        IntPtr removeMth = Il2CppApi.GetMethodFromName(dicClass, "Remove", 1);
                                         if (removeMth != IntPtr.Zero)
                                         {
                                             try
@@ -634,7 +634,7 @@ internal static class EntityDestroyer
                                                     int guidArg = guid;
                                                     IntPtr* rmArgs = stackalloc IntPtr[1];
                                                     rmArgs[0] = (IntPtr)(&guidArg);
-                                                    Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(removeMth, dicPtr, (void**)rmArgs, ref exRm);
+                                                    Il2CppApi.RuntimeInvoke(removeMth, dicPtr, (void**)rmArgs, ref exRm);
                                                 }
                                                 Plugin.LogInfo($"[EntityEditor] [StuffOnMap] dic.Remove({guid}) ex={exRm != IntPtr.Zero}");
                                             }
@@ -655,22 +655,22 @@ internal static class EntityDestroyer
                                         {
                                             IntPtr fi = IntPtr.Zero;
                                             IntPtr f;
-                                            while ((f = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_fields(posSearchCls, ref fi)) != IntPtr.Zero)
+                                            while ((f = Il2CppApi.ClassGetFields(posSearchCls, ref fi)) != IntPtr.Zero)
                                             {
-                                                string? fn = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_field_get_name(f));
+                                                string? fn = Il2CppApi.PtrToString(Il2CppApi.FieldGetName(f));
                                                 if (fn == "_pos_point")
                                                 {
-                                                    int offset = (int)Il2CppInterop.Runtime.IL2CPP.il2cpp_field_get_offset(f);
+                                                    int offset = (int)Il2CppApi.FieldGetOffset(f);
                                                     if (offset >= 0x10 && offset < 0x10000)
                                                     {
                                                         posPointOffset = offset;
-                                                        Plugin.LogInfo($"[EntityEditor] [StuffOnMap] Found _pos_point at offset=0x{offset:X} on {Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_name(posSearchCls))}");
+                                                        Plugin.LogInfo($"[EntityEditor] [StuffOnMap] Found _pos_point at offset=0x{offset:X} on {Il2CppApi.PtrToString(Il2CppApi.ClassGetName(posSearchCls))}");
                                                     }
                                                     break;
                                                 }
                                             }
                                             if (posPointOffset >= 0) break;
-                                            posSearchCls = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(posSearchCls);
+                                            posSearchCls = Il2CppApi.GetParent(posSearchCls);
                                             posSearchD++;
                                         }
 
@@ -685,15 +685,15 @@ internal static class EntityDestroyer
                                             Plugin.LogInfo($"[EntityEditor] [StuffOnMap] _pos_point=({px},{py})");
 
                                             // MyListDic.Remove(Point, item) — 枚举找虚方法
-                                            IntPtr dicByPosClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(dicByPosPtr);
+                                            IntPtr dicByPosClass = Il2CppApi.GetClass(dicByPosPtr);
                                             IntPtr removeMth = IntPtr.Zero;
                                             {
                                                 IntPtr rIter = IntPtr.Zero;
                                                 IntPtr rM;
-                                                while ((rM = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_methods(dicByPosClass, ref rIter)) != IntPtr.Zero)
+                                                while ((rM = Il2CppApi.ClassGetMethods(dicByPosClass, ref rIter)) != IntPtr.Zero)
                                                 {
-                                                    string? rName = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_name(rM));
-                                                    uint rPc = Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_param_count(rM);
+                                                    string? rName = Il2CppApi.PtrToString(Il2CppApi.MethodGetName(rM));
+                                                    uint rPc = Il2CppApi.GetMethodParamCountRaw(rM);
                                                     if (rName == "Remove" && rPc == 2) { removeMth = rM; break; }
                                                 }
                                             }
@@ -710,7 +710,7 @@ internal static class EntityDestroyer
                                                         IntPtr* rmArgs = stackalloc IntPtr[2];
                                                         rmArgs[0] = (IntPtr)pointData;
                                                         rmArgs[1] = e.Ptr;
-                                                        Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(removeMth, dicByPosPtr, (void**)rmArgs, ref exRm);
+                                                        Il2CppApi.RuntimeInvoke(removeMth, dicByPosPtr, (void**)rmArgs, ref exRm);
                                                     }
                                                     Plugin.LogInfo($"[EntityEditor] [StuffOnMap] dic_by_pos.Remove(({px},{py}), entity) ex={exRm != IntPtr.Zero}");
                                                     dicRemoved = true;
@@ -728,8 +728,8 @@ internal static class EntityDestroyer
                                     IntPtr listPtr = ReadFieldSafe(mshAreaMap, areaMapClass, "stuff_on_map_list");
                                     if (listPtr != IntPtr.Zero)
                                     {
-                                        IntPtr listClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(listPtr);
-                                        IntPtr removeMth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(listClass, "Remove", 1);
+                                        IntPtr listClass = Il2CppApi.GetClass(listPtr);
+                                        IntPtr removeMth = Il2CppApi.GetMethodFromName(listClass, "Remove", 1);
                                         if (removeMth != IntPtr.Zero)
                                         {
                                             try
@@ -739,7 +739,7 @@ internal static class EntityDestroyer
                                                 {
                                                     IntPtr* rmArgs = stackalloc IntPtr[1];
                                                     rmArgs[0] = e.Ptr;
-                                                    Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(removeMth, listPtr, (void**)rmArgs, ref exRm);
+                                                    Il2CppApi.RuntimeInvoke(removeMth, listPtr, (void**)rmArgs, ref exRm);
                                                 }
                                                 Plugin.LogInfo($"[EntityEditor] [StuffOnMap] list.Remove(entity) ex={exRm != IntPtr.Zero}");
                                             }
@@ -763,19 +763,19 @@ internal static class EntityDestroyer
                                 int rtD = 0;
                                 while (rtCls != IntPtr.Zero && rtD < 10)
                                 {
-                                    IntPtr rtMth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(rtCls, "RecycleToCache", 0);
+                                    IntPtr rtMth = Il2CppApi.GetMethodFromName(rtCls, "RecycleToCache", 0);
                                     if (rtMth != IntPtr.Zero)
                                     {
                                         try
                                         {
                                             IntPtr exRt = IntPtr.Zero;
-                                            unsafe { Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(rtMth, e.Ptr, null, ref exRt); }
+                                            unsafe { Il2CppApi.RuntimeInvoke(rtMth, e.Ptr, null, ref exRt); }
                                             Plugin.LogInfo($"[EntityEditor] [StuffOnMap] RecycleToCache() ex={exRt != IntPtr.Zero}");
                                         }
                                         catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] [StuffOnMap] RecycleToCache failed: {ex.Message}"); }
                                         break;
                                     }
-                                    rtCls = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(rtCls);
+                                    rtCls = Il2CppApi.GetParent(rtCls);
                                     rtD++;
                                 }
                             }
@@ -827,9 +827,9 @@ internal static class EntityDestroyer
                             string[] removeKeywords = { "Remove", "Despawn", "Delete", "Kill", "Destroy", "Clear", "Release", "Recycle" };
                             IntPtr mIter = IntPtr.Zero;
                             IntPtr mMth;
-                            while ((mMth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_methods(mgrClass, ref mIter)) != IntPtr.Zero)
+                            while ((mMth = Il2CppApi.ClassGetMethods(mgrClass, ref mIter)) != IntPtr.Zero)
                             {
-                                string? mName = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_name(mMth));
+                                string? mName = Il2CppApi.PtrToString(Il2CppApi.MethodGetName(mMth));
                                 if (mName == null) continue;
                                 bool matches = false;
                                 foreach (var kw in removeKeywords)
@@ -838,27 +838,27 @@ internal static class EntityDestroyer
                                 }
                                 if (!matches) continue;
 
-                                uint mPc = Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_param_count(mMth);
+                                uint mPc = Il2CppApi.GetMethodParamCountRaw(mMth);
                                 // 获取参数类型信息
                                 string paramInfo = "";
                                 for (int pi = 0; pi < (int)mPc; pi++)
                                 {
-                                    IntPtr pt = Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_param(mMth, (uint)pi);
-                                    string? ptn = pt != IntPtr.Zero ? Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_type_get_name(pt)) : "?";
+                                    IntPtr pt = Il2CppApi.GetMethodParam(mMth, (uint)pi);
+                                    string? ptn = pt != IntPtr.Zero ? Il2CppApi.PtrToString(Il2CppApi.TypeGetName(pt)) : "?";
                                     if (pi > 0) paramInfo += ", ";
                                     paramInfo += ptn;
                                 }
                                 // 检查是否是静态方法 (METHOD_ATTRIBUTE_STATIC = 0x10)
                                 uint iflags = 0;
-                                uint methodFlags = Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_flags(mMth, ref iflags);
+                                uint methodFlags = Il2CppApi.MethodGetFlags(mMth, ref iflags);
                                 bool isStatic = (methodFlags & 0x10) != 0;
                                 Plugin.LogInfo($"[EntityEditor] [Generic]   {mgrName}.{mName}({mPc}p) params=({paramInfo}) static={isStatic}");
 
                                 if (mPc != 1) continue; // 只尝试 1 参数的（传入实体指针）
 
                                 // 获取参数类型名，检查是否兼容
-                                IntPtr paramType = Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_param(mMth, 0);
-                                string? paramTypeName = paramType != IntPtr.Zero ? Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_type_get_name(paramType)) : null;
+                                IntPtr paramType = Il2CppApi.GetMethodParam(mMth, 0);
+                                string? paramTypeName = paramType != IntPtr.Zero ? Il2CppApi.PtrToString(Il2CppApi.TypeGetName(paramType)) : null;
                                 Plugin.LogInfo($"[EntityEditor] [Generic]   param0 type={paramTypeName}, entity class={className}");
 
                                 try
@@ -877,7 +877,7 @@ internal static class EntityDestroyer
                                                 argPtrs[0] = (IntPtr)(&storPtr[0]);
                                                 fixed (IntPtr* argsArr = argPtrs)
                                                 {
-                                                    Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(mMth, IntPtr.Zero, (void**)argsArr, ref exception);
+                                                    Il2CppApi.RuntimeInvoke(mMth, IntPtr.Zero, (void**)argsArr, ref exception);
                                                 }
                                             }
                                         }
@@ -895,7 +895,7 @@ internal static class EntityDestroyer
                                                 argPtrs[0] = (IntPtr)(&storPtr[0]);
                                                 fixed (IntPtr* argsArr = argPtrs)
                                                 {
-                                                    Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(mMth, mgrInst, (void**)argsArr, ref exception);
+                                                    Il2CppApi.RuntimeInvoke(mMth, mgrInst, (void**)argsArr, ref exception);
                                                 }
                                             }
                                         }
@@ -931,7 +931,7 @@ internal static class EntityDestroyer
                             if (called) break;
                             for (int pc = 1; pc <= 3; pc++)
                             {
-                                IntPtr mth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(mgrClass, methodName, pc);
+                                IntPtr mth = Il2CppApi.GetMethodFromName(mgrClass, methodName, pc);
                                 if (mth != IntPtr.Zero)
                                 {
                                     IntPtr inst = FindClassInstance(mgrClass);
@@ -952,7 +952,7 @@ internal static class EntityDestroyer
                                                         argPtrs[a] = (IntPtr)(&storPtr[a]);
                                                     fixed (IntPtr* argsArr = argPtrs)
                                                     {
-                                                        Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(mth, inst, (void**)argsArr, ref exception);
+                                                        Il2CppApi.RuntimeInvoke(mth, inst, (void**)argsArr, ref exception);
                                                     }
                                                 }
                                             }
@@ -981,19 +981,19 @@ internal static class EntityDestroyer
                         int bdDepth = 0;
                         while (bdCls != IntPtr.Zero && bdDepth < 15)
                         {
-                            IntPtr bdMth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(bdCls, "BeforeDestroy", 0);
+                            IntPtr bdMth = Il2CppApi.GetMethodFromName(bdCls, "BeforeDestroy", 0);
                             if (bdMth != IntPtr.Zero)
                             {
                                 try
                                 {
                                     IntPtr exBd = IntPtr.Zero;
-                                    unsafe { Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(bdMth, e.Ptr, null, ref exBd); }
+                                    unsafe { Il2CppApi.RuntimeInvoke(bdMth, e.Ptr, null, ref exBd); }
                                     Plugin.LogInfo($"[EntityEditor] BeforeDestroy() at depth={bdDepth}");
                                 }
                                 catch { }
                                 break;
                             }
-                            bdCls = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(bdCls);
+                            bdCls = Il2CppApi.GetParent(bdCls);
                             bdDepth++;
                         }
                     }
@@ -1009,7 +1009,7 @@ internal static class EntityDestroyer
                         int hDepth = 0;
                         while (hCls != IntPtr.Zero && hDepth < 15)
                         {
-                            IntPtr hMth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(hCls, hideName, 1);
+                            IntPtr hMth = Il2CppApi.GetMethodFromName(hCls, hideName, 1);
                             if (hMth != IntPtr.Zero)
                             {
                                 try
@@ -1025,7 +1025,7 @@ internal static class EntityDestroyer
                                             hArgs[0] = (IntPtr)(&hStor[0]);
                                             fixed (IntPtr* hArgsArr = hArgs)
                                             {
-                                                Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(hMth, e.Ptr, (void**)hArgsArr, ref exH);
+                                                Il2CppApi.RuntimeInvoke(hMth, e.Ptr, (void**)hArgsArr, ref exH);
                                             }
                                         }
                                     }
@@ -1034,7 +1034,7 @@ internal static class EntityDestroyer
                                 catch { }
                                 break;
                             }
-                            hCls = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(hCls);
+                            hCls = Il2CppApi.GetParent(hCls);
                             hDepth++;
                         }
                     }
@@ -1044,18 +1044,18 @@ internal static class EntityDestroyer
                     int d2 = 0;
                     while (cls2 != IntPtr.Zero && d2 < 15)
                     {
-                        IntPtr mp = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(cls2, "RecycleMySp", 0);
+                        IntPtr mp = Il2CppApi.GetMethodFromName(cls2, "RecycleMySp", 0);
                         if (mp != IntPtr.Zero)
                         {
                             try
                             {
                                 IntPtr ex2 = IntPtr.Zero;
-                                unsafe { Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(mp, e.Ptr, null, ref ex2); }
+                                unsafe { Il2CppApi.RuntimeInvoke(mp, e.Ptr, null, ref ex2); }
                             }
                             catch { }
                             break;
                         }
-                        cls2 = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(cls2);
+                        cls2 = Il2CppApi.GetParent(cls2);
                         d2++;
                     }
 
@@ -1093,93 +1093,48 @@ internal static class EntityDestroyer
 
 
     /// <summary>
-    /// 通过类名在所有已加载的 IL2CPP 程序集中查找类
-    /// </summary>
-    private static unsafe IntPtr FindClassByName(string className)
-    {
-        try
-        {
-            IntPtr domain = Il2CppInterop.Runtime.IL2CPP.il2cpp_domain_get();
-            uint count = 0;
-            IntPtr* assemblies = Il2CppInterop.Runtime.IL2CPP.il2cpp_domain_get_assemblies(domain, ref count);
-            for (uint i = 0; i < count; i++)
-            {
-                IntPtr assembly = assemblies[i];
-                IntPtr image = Il2CppInterop.Runtime.IL2CPP.il2cpp_assembly_get_image(assembly);
-                IntPtr cls = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_from_name(image, "", className);
-                if (cls != IntPtr.Zero) return cls;
-                string[] namespaces = { "Il2Cpp", "Il2CppScripts", "Game", "" };
-                foreach (var ns in namespaces)
-                {
-                    cls = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_from_name(image, ns, className);
-                    if (cls != IntPtr.Zero) return cls;
-                }
-            }
-        }
-        catch { }
-        return IntPtr.Zero;
-    }
-
-
-    /// <summary>
     /// 查找游戏管理类的实例（通过静态字段或 FindObjectOfType）
     /// </summary>
     private static IntPtr FindClassInstance(IntPtr classPtr)
     {
         try
         {
-            string className = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_name(classPtr)) ?? "?";
+            string className = Il2CppApi.PtrToString(Il2CppApi.ClassGetName(classPtr)) ?? "?";
             // 方法1：查找静态 Instance/s_instance 字段并读取值
-            IntPtr iter = IntPtr.Zero;
-            IntPtr field;
-            while ((field = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_fields(classPtr, ref iter)) != IntPtr.Zero)
+            foreach (var fh in Il2CppApi.EnumerateFieldHandles(classPtr))
             {
-                string? fieldName = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_field_get_name(field));
-                if (fieldName == null) continue;
-                if (fieldName == "s_instance" || fieldName == "_instance" || fieldName == "Instance" || fieldName == "instance")
-                {
-                    // 检查是否是静态字段
-                    int attrs = Il2CppInterop.Runtime.IL2CPP.il2cpp_field_get_flags(field);
-                    bool isStatic = (attrs & 0x10) != 0; // FIELD_ATTRIBUTE_STATIC = 0x10
-                    Plugin.LogInfo($"[EntityEditor] Found field {fieldName} on {className}, isStatic={isStatic}, attrs=0x{attrs:X}");
+                if (!Il2CppApi.IsInstanceFieldName(fh.Name)) continue;
 
-                    if (isStatic)
-                    {
-                        try
-                        {
-                            IntPtr value = IntPtr.Zero;
-                            unsafe
-                            {
-                                Il2CppInterop.Runtime.IL2CPP.il2cpp_field_static_get_value(field, &value);
-                            }
-                            Plugin.LogInfo($"[EntityEditor] Static field {fieldName} value={value.ToInt64():X}");
-                            if (value != IntPtr.Zero)
-                            {
-                                // 验证这个指针是否是一个有效的 IL2CPP 对象
-                                IntPtr objClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(value);
-                                if (objClass != IntPtr.Zero)
-                                {
-                                    string? objClassName = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_name(objClass));
-                                    Plugin.LogInfo($"[EntityEditor] ✓ Got instance from {fieldName}, class={objClassName}");
-                                    return value;
-                                }
-                            }
-                        }
-                        catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] Read static field {fieldName} error: {ex.Message}"); }
-                    }
+                Plugin.LogInfo($"[EntityEditor] Found field {fh.Name} on {className}, isStatic={fh.IsStatic}, attrs=0x{Il2CppApi.FieldGetFlags(fh.Field):X}");
+                if (!fh.IsStatic) continue;
+
+                try
+                {
+                    IntPtr value = Il2CppApi.ReadStaticFieldValue(fh.Field);
+                    Plugin.LogInfo($"[EntityEditor] Static field {fh.Name} value={value.ToInt64():X}");
+                    if (value == IntPtr.Zero) continue;
+
+                    // 验证这个指针是否是一个有效的 IL2CPP 对象
+                    IntPtr objClass = Il2CppApi.GetClass(value);
+                    if (objClass == IntPtr.Zero) continue;
+
+                    string? objClassName = Il2CppApi.PtrToString(Il2CppApi.ClassGetName(objClass));
+                    Plugin.LogInfo($"[EntityEditor] ✓ Got instance from {fh.Name}, class={objClassName}");
+                    return value;
                 }
+                catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] Read static field {fh.Name} error: {ex.Message}"); }
             }
             // 方法2：通过 Resources.FindObjectsOfTypeAll 查找
             // 我们需要通过 IL2CPP 的类型系统来查找
             // 尝试直接调用 FindObjectOfType
-            IntPtr findMethod = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(classPtr, "get_Instance", 0);
+            IntPtr findMethod = Il2CppApi.GetMethodFromName(classPtr, "get_Instance", 0);
             if (findMethod != IntPtr.Zero)
             {
                 Plugin.LogInfo($"[EntityEditor] Found get_Instance() on {className}");
                 IntPtr exception = IntPtr.Zero;
                 unsafe
                 {
-                    IntPtr result = (IntPtr)Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(findMethod, IntPtr.Zero, null, ref exception);
+                    IntPtr result = (IntPtr)Il2CppApi.RuntimeInvoke(findMethod, IntPtr.Zero, null, ref exception);
                     if (exception == IntPtr.Zero && result != IntPtr.Zero)
                     {
                         Plugin.LogInfo($"[EntityEditor] get_Instance() returned valid object");
@@ -1197,7 +1152,7 @@ internal static class EntityDestroyer
                     foreach (var comp in comps)
                     {
                         if (comp == null) continue;
-                        IntPtr compClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(comp.Pointer);
+                        IntPtr compClass = Il2CppApi.GetClass(comp.Pointer);
                         if (compClass == classPtr)
                         {
                             Plugin.LogInfo($"[EntityEditor] Found instance of {className} on GO: {go.name}");
@@ -1224,22 +1179,22 @@ internal static class EntityDestroyer
         {
             IntPtr iter = IntPtr.Zero;
             IntPtr m;
-            while ((m = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_methods(cls, ref iter)) != IntPtr.Zero)
+            while ((m = Il2CppApi.ClassGetMethods(cls, ref iter)) != IntPtr.Zero)
             {
-                string? name = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_name(m));
+                string? name = Il2CppApi.PtrToString(Il2CppApi.MethodGetName(m));
                 if (name == methodName)
                 {
                     try
                     {
                         IntPtr ex = IntPtr.Zero;
-                        unsafe { Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(m, objPtr, null, ref ex); }
+                        unsafe { Il2CppApi.RuntimeInvoke(m, objPtr, null, ref ex); }
                         Plugin.LogInfo($"[EntityEditor] {methodName}() ex={ex != IntPtr.Zero}");
                     }
                     catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] {methodName}() failed: {ex.Message}"); }
                     return;
                 }
             }
-            cls = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_parent(cls);
+            cls = Il2CppApi.GetParent(cls);
             d++;
         }
         Plugin.LogInfo($"[EntityEditor] {methodName}() not found");
@@ -1257,13 +1212,13 @@ internal static class EntityDestroyer
             IntPtr gameClass = FindClassByName("Game");
             if (gameClass == IntPtr.Zero) return IntPtr.Zero;
 
-            IntPtr getMainSceneMth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(gameClass, "get_main_scene", 0);
+            IntPtr getMainSceneMth = Il2CppApi.GetMethodFromName(gameClass, "get_main_scene", 0);
             if (getMainSceneMth == IntPtr.Zero)
             {
                 string[] altNames = { "GetMainScene", "get_MainScene", "main_scene", "get_instance", "get_Instance" };
                 foreach (var alt in altNames)
                 {
-                    getMainSceneMth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(gameClass, alt, 0);
+                    getMainSceneMth = Il2CppApi.GetMethodFromName(gameClass, alt, 0);
                     if (getMainSceneMth != IntPtr.Zero) break;
                 }
             }
@@ -1271,42 +1226,42 @@ internal static class EntityDestroyer
 
             IntPtr exception = IntPtr.Zero;
             IntPtr mainScene = IntPtr.Zero;
-            try { unsafe { mainScene = (IntPtr)Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(getMainSceneMth, IntPtr.Zero, null, ref exception); } }
+            try { unsafe { mainScene = (IntPtr)Il2CppApi.RuntimeInvoke(getMainSceneMth, IntPtr.Zero, null, ref exception); } }
             catch { }
             if (mainScene == IntPtr.Zero) return IntPtr.Zero;
 
-            IntPtr mainSceneClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(mainScene);
+            IntPtr mainSceneClass = Il2CppApi.GetClass(mainScene);
             IntPtr areaMapPtr = ReadFieldSafe(mainScene, mainSceneClass, "area_map");
             if (areaMapPtr == IntPtr.Zero) return IntPtr.Zero;
 
-            IntPtr areaMapClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(areaMapPtr);
+            IntPtr areaMapClass = Il2CppApi.GetClass(areaMapPtr);
             IntPtr territoryPtr = ReadFieldSafe(areaMapPtr, areaMapClass, "my_territory");
             if (territoryPtr == IntPtr.Zero)
                 territoryPtr = ReadFieldSafe(areaMapPtr, areaMapClass, "_my_territory");
 
             if (territoryPtr == IntPtr.Zero)
             {
-                IntPtr getMyTerritoryMth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(areaMapClass, "get_my_territory", 0);
+                IntPtr getMyTerritoryMth = Il2CppApi.GetMethodFromName(areaMapClass, "get_my_territory", 0);
                 if (getMyTerritoryMth == IntPtr.Zero)
                 {
                     string[] altNames = { "GetMyTerritory", "get_MyTerritory", "my_territory" };
                     foreach (var alt in altNames)
                     {
-                        getMyTerritoryMth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(areaMapClass, alt, 0);
+                        getMyTerritoryMth = Il2CppApi.GetMethodFromName(areaMapClass, alt, 0);
                         if (getMyTerritoryMth != IntPtr.Zero) break;
                     }
                 }
                 if (getMyTerritoryMth != IntPtr.Zero)
                 {
-                    try { exception = IntPtr.Zero; unsafe { territoryPtr = (IntPtr)Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(getMyTerritoryMth, areaMapPtr, null, ref exception); } }
+                    try { exception = IntPtr.Zero; unsafe { territoryPtr = (IntPtr)Il2CppApi.RuntimeInvoke(getMyTerritoryMth, areaMapPtr, null, ref exception); } }
                     catch { }
                 }
             }
 
             if (territoryPtr != IntPtr.Zero)
             {
-                IntPtr tc = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(territoryPtr);
-                string? tn = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_name(tc));
+                IntPtr tc = Il2CppApi.GetClass(territoryPtr);
+                string? tn = Il2CppApi.PtrToString(Il2CppApi.ClassGetName(tc));
                 Plugin.LogInfo($"[EntityEditor] ✓ Got Territory, class={tn}");
             }
             return territoryPtr;
@@ -1335,21 +1290,21 @@ internal static class EntityDestroyer
             // 列出 Game 类的静态方法
             IntPtr iter = IntPtr.Zero;
             IntPtr mth;
-            while ((mth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_methods(gameClass, ref iter)) != IntPtr.Zero)
+            while ((mth = Il2CppApi.ClassGetMethods(gameClass, ref iter)) != IntPtr.Zero)
             {
-                string? mName = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_name(mth));
-                uint pc = Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_param_count(mth);
+                string? mName = Il2CppApi.PtrToString(Il2CppApi.MethodGetName(mth));
+                uint pc = Il2CppApi.GetMethodParamCountRaw(mth);
                 if (mName != null && (mName.Contains("main_scene") || mName.Contains("MainScene") || mName.Contains("instance") || mName.Contains("Instance")))
                     Plugin.LogInfo($"[EntityEditor] Game.{mName}({pc}p)");
             }
 
-            IntPtr getMainSceneMth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(gameClass, "get_main_scene", 0);
+            IntPtr getMainSceneMth = Il2CppApi.GetMethodFromName(gameClass, "get_main_scene", 0);
             if (getMainSceneMth == IntPtr.Zero)
             {
                 string[] altNames = { "GetMainScene", "get_MainScene", "main_scene", "get_instance", "get_Instance" };
                 foreach (var alt in altNames)
                 {
-                    getMainSceneMth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(gameClass, alt, 0);
+                    getMainSceneMth = Il2CppApi.GetMethodFromName(gameClass, alt, 0);
                     if (getMainSceneMth != IntPtr.Zero)
                     {
                         Plugin.LogInfo($"[EntityEditor] Found Game.{alt}()");
@@ -1367,7 +1322,7 @@ internal static class EntityDestroyer
             IntPtr mainScene = IntPtr.Zero;
             try
             {
-                unsafe { mainScene = (IntPtr)Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(getMainSceneMth, IntPtr.Zero, null, ref exception); }
+                unsafe { mainScene = (IntPtr)Il2CppApi.RuntimeInvoke(getMainSceneMth, IntPtr.Zero, null, ref exception); }
             }
             catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] get_main_scene() CRASH: {ex.Message}"); }
             if (exception != IntPtr.Zero || mainScene == IntPtr.Zero)
@@ -1378,18 +1333,18 @@ internal static class EntityDestroyer
             Plugin.LogInfo($"[EntityEditor] main_scene={mainScene.ToInt64():X}");
 
             // Step 2: main_scene.fields.area_map (读偏移量，不直接解引用)
-            IntPtr mainSceneClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(mainScene);
+            IntPtr mainSceneClass = Il2CppApi.GetClass(mainScene);
             Plugin.LogInfo($"[EntityEditor] mainScene class={mainSceneClass.ToInt64():X}");
 
             // 列出 MainScene 的字段
             IntPtr fi2 = IntPtr.Zero;
             IntPtr f2;
-            while ((f2 = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_fields(mainSceneClass, ref fi2)) != IntPtr.Zero)
+            while ((f2 = Il2CppApi.ClassGetFields(mainSceneClass, ref fi2)) != IntPtr.Zero)
             {
-                string? fn = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_field_get_name(f2));
-                int offset = (int)Il2CppInterop.Runtime.IL2CPP.il2cpp_field_get_offset(f2);
-                IntPtr ft = Il2CppInterop.Runtime.IL2CPP.il2cpp_field_get_type(f2);
-                string? ftn = ft != IntPtr.Zero ? Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_type_get_name(ft)) : "?";
+                string? fn = Il2CppApi.PtrToString(Il2CppApi.FieldGetName(f2));
+                int offset = (int)Il2CppApi.FieldGetOffset(f2);
+                IntPtr ft = Il2CppApi.FieldGetType(f2);
+                string? ftn = ft != IntPtr.Zero ? Il2CppApi.PtrToString(Il2CppApi.TypeGetName(ft)) : "?";
                 if (fn != null && (fn.Contains("area") || fn.Contains("map") || fn.Contains("territory") || fn.Contains("build")))
                     Plugin.LogInfo($"[EntityEditor] MainScene.{fn} offset={offset} type={ftn}");
             }
@@ -1403,7 +1358,7 @@ internal static class EntityDestroyer
             }
 
             // Step 3: AreaMap.get_my_territory()
-            IntPtr areaMapClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(areaMapPtr);
+            IntPtr areaMapClass = Il2CppApi.GetClass(areaMapPtr);
             Plugin.LogInfo($"[EntityEditor] areaMap class={areaMapClass.ToInt64():X}");
 
             IntPtr territoryPtr = IntPtr.Zero;
@@ -1416,13 +1371,13 @@ internal static class EntityDestroyer
             // 如果字段读取失败，尝试方法
             if (territoryPtr == IntPtr.Zero)
             {
-                IntPtr getMyTerritoryMth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(areaMapClass, "get_my_territory", 0);
+                IntPtr getMyTerritoryMth = Il2CppApi.GetMethodFromName(areaMapClass, "get_my_territory", 0);
                 if (getMyTerritoryMth == IntPtr.Zero)
                 {
                     string[] altNames = { "GetMyTerritory", "get_MyTerritory", "my_territory" };
                     foreach (var alt in altNames)
                     {
-                        getMyTerritoryMth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(areaMapClass, alt, 0);
+                        getMyTerritoryMth = Il2CppApi.GetMethodFromName(areaMapClass, alt, 0);
                         if (getMyTerritoryMth != IntPtr.Zero) break;
                     }
                 }
@@ -1431,7 +1386,7 @@ internal static class EntityDestroyer
                     try
                     {
                         exception = IntPtr.Zero;
-                        unsafe { territoryPtr = (IntPtr)Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(getMyTerritoryMth, areaMapPtr, null, ref exception); }
+                        unsafe { territoryPtr = (IntPtr)Il2CppApi.RuntimeInvoke(getMyTerritoryMth, areaMapPtr, null, ref exception); }
                         Plugin.LogInfo($"[EntityEditor] get_my_territory() = {territoryPtr.ToInt64():X}, exception={exception != IntPtr.Zero}");
                     }
                     catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] get_my_territory() CRASH: {ex.Message}"); }
@@ -1445,7 +1400,7 @@ internal static class EntityDestroyer
             }
 
             // Step 4: territory.fields.build_helper
-            IntPtr territoryClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(territoryPtr);
+            IntPtr territoryClass = Il2CppApi.GetClass(territoryPtr);
             Plugin.LogInfo($"[EntityEditor] territory class={territoryClass.ToInt64():X}");
 
             IntPtr buildHelperPtr = ReadFieldSafe(territoryPtr, territoryClass, "build_helper");
@@ -1455,8 +1410,8 @@ internal static class EntityDestroyer
 
             if (buildHelperPtr != IntPtr.Zero)
             {
-                IntPtr bhClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(buildHelperPtr);
-                string? bhClassName = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_name(bhClass));
+                IntPtr bhClass = Il2CppApi.GetClass(buildHelperPtr);
+                string? bhClassName = Il2CppApi.PtrToString(Il2CppApi.ClassGetName(bhClass));
                 Plugin.LogInfo($"[EntityEditor] ✓ Got BuildHelper, class={bhClassName}");
             }
             return buildHelperPtr;
@@ -1480,13 +1435,13 @@ internal static class EntityDestroyer
             IntPtr gameClass = FindClassByName("Game");
             if (gameClass == IntPtr.Zero) return IntPtr.Zero;
 
-            IntPtr getMainSceneMth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(gameClass, "get_main_scene", 0);
+            IntPtr getMainSceneMth = Il2CppApi.GetMethodFromName(gameClass, "get_main_scene", 0);
             if (getMainSceneMth == IntPtr.Zero)
             {
                 string[] altNames = { "GetMainScene", "get_MainScene", "main_scene", "get_instance", "get_Instance" };
                 foreach (var alt in altNames)
                 {
-                    getMainSceneMth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(gameClass, alt, 0);
+                    getMainSceneMth = Il2CppApi.GetMethodFromName(gameClass, alt, 0);
                     if (getMainSceneMth != IntPtr.Zero) break;
                 }
             }
@@ -1496,23 +1451,23 @@ internal static class EntityDestroyer
             IntPtr mainScene = IntPtr.Zero;
             try
             {
-                unsafe { mainScene = (IntPtr)Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(getMainSceneMth, IntPtr.Zero, null, ref exception); }
+                unsafe { mainScene = (IntPtr)Il2CppApi.RuntimeInvoke(getMainSceneMth, IntPtr.Zero, null, ref exception); }
             }
             catch { return IntPtr.Zero; }
             if (mainScene == IntPtr.Zero) return IntPtr.Zero;
 
             // Step 2: main_scene.fields.area_map
-            IntPtr mainSceneClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(mainScene);
+            IntPtr mainSceneClass = Il2CppApi.GetClass(mainScene);
             IntPtr areaMapPtr = ReadFieldSafe(mainScene, mainSceneClass, "area_map");
             if (areaMapPtr == IntPtr.Zero) return IntPtr.Zero;
 
             // Step 3: area_map.fields.map_stuff_helper
-            IntPtr areaMapClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(areaMapPtr);
+            IntPtr areaMapClass = Il2CppApi.GetClass(areaMapPtr);
             IntPtr mapStuffHelperPtr = ReadFieldSafe(areaMapPtr, areaMapClass, "map_stuff_helper");
             if (mapStuffHelperPtr != IntPtr.Zero)
             {
-                IntPtr mshClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(mapStuffHelperPtr);
-                string? mshClassName = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_name(mshClass));
+                IntPtr mshClass = Il2CppApi.GetClass(mapStuffHelperPtr);
+                string? mshClassName = Il2CppApi.PtrToString(Il2CppApi.ClassGetName(mshClass));
                 Plugin.LogInfo($"[EntityEditor] ✓ Got MapStuffHelper, class={mshClassName}");
             }
             else
@@ -1531,7 +1486,7 @@ internal static class EntityDestroyer
     {
         try
         {
-            IntPtr listClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(listPtr);
+            IntPtr listClass = Il2CppApi.GetClass(listPtr);
             int size = ReadIntFieldSafe(listPtr, listClass, "_size", 0);
             Plugin.LogInfo($"[EntityEditor] RemoveFromListByPtr: _size={size}, target={targetPtr.ToInt64():X}");
 
@@ -1547,7 +1502,7 @@ internal static class EntityDestroyer
 
             // IL2CPP 数组: 对象头 0x10, 然后是元素指针
             // _items 是 System.Object[]，每个元素是 IntPtr 大小
-            IntPtr itemsClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(itemsPtr);
+            IntPtr itemsClass = Il2CppApi.GetClass(itemsPtr);
             int arrLen = ReadIntFieldSafe(itemsPtr, itemsClass, "_length", 0);
             Plugin.LogInfo($"[EntityEditor] RemoveFromListByPtr: _items._length={arrLen}");
 
@@ -1576,7 +1531,7 @@ internal static class EntityDestroyer
             Plugin.LogInfo($"[EntityEditor] RemoveFromListByPtr: found at index={matchIdx}, calling RemoveAt...");
 
             // 调用 RemoveAt(index)
-            IntPtr removeAtMth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(listClass, "RemoveAt", 1);
+            IntPtr removeAtMth = Il2CppApi.GetMethodFromName(listClass, "RemoveAt", 1);
             if (removeAtMth == IntPtr.Zero)
             {
                 Plugin.LogInfo($"[EntityEditor] RemoveFromListByPtr: RemoveAt method not found");
@@ -1589,7 +1544,7 @@ internal static class EntityDestroyer
                 int idx = matchIdx;
                 IntPtr* args = stackalloc IntPtr[1];
                 args[0] = (IntPtr)(&idx);
-                Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(removeAtMth, listPtr, (void**)args, ref exRemove);
+                Il2CppApi.RuntimeInvoke(removeAtMth, listPtr, (void**)args, ref exRemove);
             }
 
             int newSize = ReadIntFieldSafe(listPtr, listClass, "_size", -1);
@@ -1627,14 +1582,14 @@ internal static class EntityDestroyer
                 // 遍历管理器的所有字段，查找 List/Dictionary/数组
                 IntPtr fi = IntPtr.Zero;
                 IntPtr f;
-                while ((f = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_fields(mgrClass, ref fi)) != IntPtr.Zero)
+                while ((f = Il2CppApi.ClassGetFields(mgrClass, ref fi)) != IntPtr.Zero)
                 {
-                    string? fn = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_field_get_name(f));
-                    IntPtr ft = Il2CppInterop.Runtime.IL2CPP.il2cpp_field_get_type(f);
-                    string? ftn = ft != IntPtr.Zero ? Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_type_get_name(ft)) : null;
+                    string? fn = Il2CppApi.PtrToString(Il2CppApi.FieldGetName(f));
+                    IntPtr ft = Il2CppApi.FieldGetType(f);
+                    string? ftn = ft != IntPtr.Zero ? Il2CppApi.PtrToString(Il2CppApi.TypeGetName(ft)) : null;
                     if (fn == null || ftn == null) continue;
 
-                    int offset = (int)Il2CppInterop.Runtime.IL2CPP.il2cpp_field_get_offset(f);
+                    int offset = (int)Il2CppApi.FieldGetOffset(f);
                     if (offset < 0x10 || offset > 0x10000) continue;
 
                     // 检查是否是 List 或 Dictionary 类型
@@ -1649,8 +1604,8 @@ internal static class EntityDestroyer
                             if (listPtr == IntPtr.Zero) continue;
 
                             // 尝试调用 List.Remove(entity)
-                            IntPtr listClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(listPtr);
-                            IntPtr removeMth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(listClass, "Remove", 1);
+                            IntPtr listClass = Il2CppApi.GetClass(listPtr);
+                            IntPtr removeMth = Il2CppApi.GetMethodFromName(listClass, "Remove", 1);
                             if (removeMth != IntPtr.Zero)
                             {
                                 try
@@ -1664,7 +1619,7 @@ internal static class EntityDestroyer
                                         args[0] = (IntPtr)(&sp[0]);
                                         fixed (IntPtr* ap = args)
                                         {
-                                            Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(removeMth, listPtr, (void**)ap, ref ex);
+                                            Il2CppApi.RuntimeInvoke(removeMth, listPtr, (void**)ap, ref ex);
                                         }
                                     }
                                     Plugin.LogInfo($"[EntityEditor] Removed from {mgrName}.{fn} (List), ex={ex != IntPtr.Zero}");
@@ -1673,7 +1628,7 @@ internal static class EntityDestroyer
                             }
 
                             // 也尝试 RemoveAll(Predicate)
-                            IntPtr removeAllMth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(listClass, "RemoveAll", 1);
+                            IntPtr removeAllMth = Il2CppApi.GetMethodFromName(listClass, "RemoveAll", 1);
                             if (removeAllMth != IntPtr.Zero)
                             {
                                 Plugin.LogInfo($"[EntityEditor] {mgrName}.{fn} has RemoveAll(1p)");
@@ -1688,11 +1643,11 @@ internal static class EntityDestroyer
                             if (dictPtr == IntPtr.Zero) continue;
 
                             // 尝试读取实体的 guid/stuff_id 作为 key 来移除
-                            IntPtr dictClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(dictPtr);
+                            IntPtr dictClass = Il2CppApi.GetClass(dictPtr);
 
                             // 尝试调用 ContainsKey + Remove
-                            IntPtr containsKeyMth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(dictClass, "ContainsKey", 1);
-                            IntPtr removeMth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(dictClass, "Remove", 1);
+                            IntPtr containsKeyMth = Il2CppApi.GetMethodFromName(dictClass, "ContainsKey", 1);
+                            IntPtr removeMth = Il2CppApi.GetMethodFromName(dictClass, "Remove", 1);
 
                             if (containsKeyMth != IntPtr.Zero && removeMth != IntPtr.Zero)
                             {
@@ -1737,19 +1692,19 @@ internal static class EntityDestroyer
                         IntPtr compPtr = GetIl2CppPtr(comp);
                         if (compPtr == IntPtr.Zero) continue;
 
-                        IntPtr compClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(compPtr);
+                        IntPtr compClass = Il2CppApi.GetClass(compPtr);
 
                         // 查找并清理 List 字段
                         IntPtr fi = IntPtr.Zero;
                         IntPtr f;
-                        while ((f = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_fields(compClass, ref fi)) != IntPtr.Zero)
+                        while ((f = Il2CppApi.ClassGetFields(compClass, ref fi)) != IntPtr.Zero)
                         {
-                            string? fn = Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_field_get_name(f));
-                            IntPtr ft = Il2CppInterop.Runtime.IL2CPP.il2cpp_field_get_type(f);
-                            string? ftn = ft != IntPtr.Zero ? Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_type_get_name(ft)) : null;
+                            string? fn = Il2CppApi.PtrToString(Il2CppApi.FieldGetName(f));
+                            IntPtr ft = Il2CppApi.FieldGetType(f);
+                            string? ftn = ft != IntPtr.Zero ? Il2CppApi.PtrToString(Il2CppApi.TypeGetName(ft)) : null;
                             if (fn == null || ftn == null) continue;
 
-                            int offset = (int)Il2CppInterop.Runtime.IL2CPP.il2cpp_field_get_offset(f);
+                            int offset = (int)Il2CppApi.FieldGetOffset(f);
                             if (offset < 0x10 || offset > 0x10000) continue;
 
                             // 检查是否是 List 类型且包含实体类型名
@@ -1760,8 +1715,8 @@ internal static class EntityDestroyer
                                     IntPtr listPtr = *(IntPtr*)(compPtr + offset);
                                     if (listPtr == IntPtr.Zero) continue;
 
-                                    IntPtr listClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(listPtr);
-                                    IntPtr removeMth = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(listClass, "Remove", 1);
+                                    IntPtr listClass = Il2CppApi.GetClass(listPtr);
+                                    IntPtr removeMth = Il2CppApi.GetMethodFromName(listClass, "Remove", 1);
                                     if (removeMth != IntPtr.Zero)
                                     {
                                         try
@@ -1775,7 +1730,7 @@ internal static class EntityDestroyer
                                                 args[0] = (IntPtr)(&sp[0]);
                                                 fixed (IntPtr* ap = args)
                                                 {
-                                                    Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(removeMth, listPtr, (void**)ap, ref ex);
+                                                    Il2CppApi.RuntimeInvoke(removeMth, listPtr, (void**)ap, ref ex);
                                                 }
                                             }
                                             Plugin.LogInfo($"[EntityEditor] Cleaned {cn}.{fn} (List), ex={ex != IntPtr.Zero}");

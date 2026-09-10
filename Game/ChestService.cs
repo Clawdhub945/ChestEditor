@@ -476,33 +476,14 @@ internal static class ChestService
                 // 回退: IL2CPP 方式
                 IntPtr chPtr = GetIl2CppPtr(cameraHelper);
                 if (chPtr == IntPtr.Zero) { FallbackLocate(targetX, targetY); return; }
-                IntPtr chClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(chPtr);
+                IntPtr chClass = Il2CppApi.GetClass(chPtr);
 
                 // 尝试 CameraSetTo 3参数版本
-                IntPtr csMth = IntPtr.Zero;
-                {
-                    IntPtr iter = IntPtr.Zero;
-                    IntPtr m;
-                    while ((m = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_methods(chClass, ref iter)) != IntPtr.Zero)
-                    {
-                        string? mName = System.Runtime.InteropServices.Marshal.PtrToStringAnsi(Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_name(m));
-                        if (mName == "CameraSetTo" && Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_param_count(m) == 3)
-                        { csMth = m; break; }
-                    }
-                }
+                IntPtr csMth = FindMethodInHierarchy(chClass, "CameraSetTo", 3);
                 if (csMth != IntPtr.Zero)
                 {
-                    IntPtr ex = IntPtr.Zero;
-                    unsafe
-                    {
-                        int boolTrue = 1;
-                        IntPtr* args = stackalloc IntPtr[3];
-                        args[0] = (IntPtr)(&targetX);
-                        args[1] = (IntPtr)(&targetY);
-                        args[2] = (IntPtr)(&boolTrue);
-                        Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(csMth, chPtr, (void**)args, ref ex);
-                    }
-                    Plugin.LogInfo($"[Locate] CameraSetTo IL2CPP ex={ex != IntPtr.Zero}");
+                    InvokeVoid(csMth, chPtr, targetX, targetY, true);
+                    Plugin.LogInfo("[Locate] CameraSetTo IL2CPP 已调用");
                 }
                 else
                 {
@@ -687,18 +668,13 @@ internal static class ChestService
     {
         try
         {
-            if (facility is not Il2CppInterop.Runtime.InteropTypes.Il2CppObjectBase il2cppObj) return null;
-            IntPtr objPtr = Il2CppInterop.Runtime.IL2CPP.Il2CppObjectBaseToPtrNotNull(il2cppObj);
+            if (facility is not Il2CppInterop.Runtime.InteropTypes.Il2CppObjectBase) return null;
+            IntPtr objPtr = GetIl2CppPtr(facility);
+            if (objPtr == IntPtr.Zero) return null;
             var methodPtr = FindIl2CppMethod(facility, "GetStuffPlanDic");
             if (methodPtr == IntPtr.Zero) return null;
 
-            IntPtr dictPtr;
-            unsafe
-            {
-                IntPtr exception = IntPtr.Zero;
-                void** args = null;
-                dictPtr = Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(methodPtr, objPtr, args, ref exception);
-            }
+            IntPtr dictPtr = Invoke(methodPtr, objPtr);
             if (dictPtr == IntPtr.Zero) return null;
 
             var dict = new Il2CppSystem.Collections.Generic.Dictionary<int, int>(dictPtr);
@@ -714,54 +690,31 @@ internal static class ChestService
 
     internal static void Il2CppDictSetItem(IntPtr dictPtr, int key, int value)
     {
-        IntPtr dictClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(dictPtr);
-        string className = System.Runtime.InteropServices.Marshal.PtrToStringAnsi(
-            Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_name(dictClass)) ?? "?";
-        Plugin.LogInfo($"[Plan] dictClass={className}, dictPtr={dictPtr}");
+        IntPtr dictClass = Il2CppApi.GetClass(dictPtr);
+        Plugin.LogInfo($"[Plan] dictClass={Il2CppApi.GetClassName(dictClass) ?? "?"}, dictPtr={dictPtr}");
 
-        IntPtr iter = IntPtr.Zero;
-        IntPtr m;
-        while ((m = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_methods(dictClass, ref iter)) != IntPtr.Zero)
-        {
-            string mName = System.Runtime.InteropServices.Marshal.PtrToStringAnsi(
-                Il2CppInterop.Runtime.IL2CPP.il2cpp_method_get_name(m)) ?? "?";
-            if (mName.Contains("Item") || mName.Contains("Remove") || mName.Contains("Add") || mName.Contains("Set"))
-                Plugin.LogInfo($"[Plan] 方法: {mName}");
-        }
+        foreach (var m in EnumerateMethods(dictClass))
+            if (m.Name.Contains("Item") || m.Name.Contains("Remove") || m.Name.Contains("Add") || m.Name.Contains("Set"))
+                Plugin.LogInfo($"[Plan] 方法: {m.Name}");
 
-        IntPtr setItemMethod = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(dictClass, "set_Item", 2);
+        IntPtr setItemMethod = FindMethodInHierarchy(dictClass, "set_Item", 2);
         Plugin.LogInfo($"[Plan] set_Item ptr={setItemMethod}");
         if (setItemMethod == IntPtr.Zero) return;
 
-        unsafe
-        {
-            int k = key, v = value;
-            void** args = stackalloc void*[2];
-            args[0] = &k;
-            args[1] = &v;
-            IntPtr exception = IntPtr.Zero;
-            Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(setItemMethod, dictPtr, args, ref exception);
-            Plugin.LogInfo($"[Plan] set_Item({key},{value}) exception={exception}");
-        }
+        InvokeVoid(setItemMethod, dictPtr, key, value);
+        Plugin.LogInfo($"[Plan] set_Item({key},{value}) 已调用");
     }
 
 
     internal static void Il2CppDictRemove(IntPtr dictPtr, int key)
     {
-        IntPtr dictClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(dictPtr);
-        IntPtr removeMethod = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_method_from_name(dictClass, "Remove", 1);
+        IntPtr dictClass = Il2CppApi.GetClass(dictPtr);
+        IntPtr removeMethod = FindMethodInHierarchy(dictClass, "Remove", 1);
         Plugin.LogInfo($"[Plan] Remove ptr={removeMethod}");
         if (removeMethod == IntPtr.Zero) return;
 
-        unsafe
-        {
-            int k = key;
-            void** args = stackalloc void*[1];
-            args[0] = &k;
-            IntPtr exception = IntPtr.Zero;
-            Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(removeMethod, dictPtr, args, ref exception);
-            Plugin.LogInfo($"[Plan] Remove({key}) exception={exception}");
-        }
+        InvokeVoid(removeMethod, dictPtr, key);
+        Plugin.LogInfo($"[Plan] Remove({key}) 已调用");
     }
 
 
@@ -769,18 +722,13 @@ internal static class ChestService
     {
         try
         {
-            if (facility is not Il2CppInterop.Runtime.InteropTypes.Il2CppObjectBase il2cppObj) return;
-            IntPtr objPtr = Il2CppInterop.Runtime.IL2CPP.Il2CppObjectBaseToPtrNotNull(il2cppObj);
+            if (facility is not Il2CppInterop.Runtime.InteropTypes.Il2CppObjectBase) return;
+            IntPtr objPtr = GetIl2CppPtr(facility);
+            if (objPtr == IntPtr.Zero) return;
             var methodPtr = FindIl2CppMethod(facility, "GetStuffPlanDic");
             if (methodPtr == IntPtr.Zero) return;
 
-            IntPtr dictPtr;
-            unsafe
-            {
-                IntPtr exception = IntPtr.Zero;
-                void** args = null;
-                dictPtr = Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(methodPtr, objPtr, args, ref exception);
-            }
+            IntPtr dictPtr = Invoke(methodPtr, objPtr);
             if (dictPtr == IntPtr.Zero) return;
 
             if (count <= 0)

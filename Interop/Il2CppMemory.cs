@@ -20,16 +20,22 @@ internal static unsafe class Il2CppMemory
     internal static void WriteIl2CppInt(IntPtr objPtr, int offset, int value) => *(int*)(objPtr + offset) = value;
     internal static void WriteIl2CppFloat(IntPtr objPtr, int offset, float value) => *(float*)(objPtr + offset) = value;
 
-    internal static string? ReadIl2CppString(IntPtr objPtr, int offset)
+    /// <summary>读取 IL2CPP string 对象指针指向的字符串（长度非法时退化为以 NUL 结尾读取）</summary>
+    internal static string? ReadStringObject(IntPtr strObjPtr)
     {
+        if (strObjPtr == IntPtr.Zero) return null;
         try
         {
-            IntPtr strPtr = ReadIl2CppPointer(objPtr, offset);
-            if (strPtr == IntPtr.Zero) return null;
-            int len = *(int*)(strPtr + StringLengthOffset);
-            if (len <= 0 || len > 32768) return Marshal.PtrToStringUni(strPtr + StringCharsOffset);
-            return new string((char*)(strPtr + StringCharsOffset), 0, len);
+            int len = *(int*)(strObjPtr + StringLengthOffset);
+            if (len <= 0 || len > 32768) return Marshal.PtrToStringUni(strObjPtr + StringCharsOffset);
+            return new string((char*)(strObjPtr + StringCharsOffset), 0, len);
         }
+        catch { return null; }
+    }
+
+    internal static string? ReadIl2CppString(IntPtr objPtr, int offset)
+    {
+        try { return ReadStringObject(ReadIl2CppPointer(objPtr, offset)); }
         catch { return null; }
     }
 

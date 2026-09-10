@@ -48,13 +48,9 @@ internal static class NpcEditor
                 unsafe { moveAgentPtr = *(IntPtr*)(instancePtr + maFe.Offset); }
                 if (moveAgentPtr != IntPtr.Zero)
                 {
-                    IntPtr maClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(moveAgentPtr);
+                    IntPtr maClass = Il2CppApi.GetClass(moveAgentPtr);
                     IntPtr mth = Il2CppInvoke.FindMethodInHierarchy(maClass, "SetSpeed", 1);
-                    if (mth != IntPtr.Zero)
-                    {
-                        IntPtr ex = IntPtr.Zero;
-                        unsafe { float v = sp; void** p = stackalloc void*[1]; p[0] = &v; Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(mth, moveAgentPtr, p, ref ex); }
-                    }
+                    if (mth != IntPtr.Zero) Il2CppInvoke.Invoke(mth, moveAgentPtr, sp);
                 }
             }
 
@@ -192,18 +188,11 @@ internal static class NpcEditor
                     unsafe { moveAgentPtr = *(IntPtr*)(e.Ptr + maFe.Offset); }
                     if (moveAgentPtr != IntPtr.Zero)
                     {
-                        IntPtr maClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(moveAgentPtr);
+                        IntPtr maClass = Il2CppApi.GetClass(moveAgentPtr);
                         IntPtr setSpeedMth = Il2CppInvoke.FindMethodInHierarchy(maClass, "SetSpeed", 1);
                         if (setSpeedMth != IntPtr.Zero)
                         {
-                            IntPtr ex = IntPtr.Zero;
-                            unsafe
-                            {
-                                float v = value;
-                                void** p = stackalloc void*[1];
-                                p[0] = &v;
-                                Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(setSpeedMth, moveAgentPtr, p, ref ex);
-                            }
+                            Il2CppInvoke.Invoke(setSpeedMth, moveAgentPtr, value);
                             Plugin.LogInfo($"[ApplyNpcFieldChange] speed={value} -> move_agent.SetSpeed OK");
                         }
                     }
@@ -213,18 +202,11 @@ internal static class NpcEditor
             {
                 if (e.NpcId > 0) SetHpOverride(e.NpcId, value);
                 // 调用 SetHp(float) 方法
-                IntPtr compClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(e.Ptr);
+                IntPtr compClass = Il2CppApi.GetClass(e.Ptr);
                 IntPtr setHpMth = Il2CppInvoke.FindMethodInHierarchy(compClass, "SetHp", 1);
                 if (setHpMth != IntPtr.Zero)
                 {
-                    IntPtr ex = IntPtr.Zero;
-                    unsafe
-                    {
-                        float v = value;
-                        void** p = stackalloc void*[1];
-                        p[0] = &v;
-                        Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(setHpMth, e.Ptr, p, ref ex);
-                    }
+                    Il2CppInvoke.Invoke(setHpMth, e.Ptr, value);
                     Plugin.LogInfo($"[ApplyNpcFieldChange] hp={value} -> SetHp OK");
                 }
             }
@@ -232,12 +214,11 @@ internal static class NpcEditor
             {
                 if (e.NpcId > 0) SetHpTotalOverride(e.NpcId, value);
                 // 调用 UpdateHpProgressBarTotal()
-                IntPtr compClass = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(e.Ptr);
+                IntPtr compClass = Il2CppApi.GetClass(e.Ptr);
                 IntPtr mth = Il2CppInvoke.FindMethodInHierarchy(compClass, "UpdateHpProgressBarTotal", 0);
                 if (mth != IntPtr.Zero)
                 {
-                    IntPtr ex = IntPtr.Zero;
-                    unsafe { Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(mth, e.Ptr, (void**)0, ref ex); }
+                    Il2CppInvoke.Invoke(mth, e.Ptr);
                     Plugin.LogInfo($"[ApplyNpcFieldChange] hp_total={value} -> UpdateHpProgressBarTotal OK");
                 }
             }
