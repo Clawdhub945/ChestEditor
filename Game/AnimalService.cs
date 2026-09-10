@@ -174,7 +174,12 @@ internal static class AnimalService
         return (gx, gy);
     }
 
-    /// <summary>il2cpp_object_new 构造 Point 并直写 x/y（纯数据类；CreateAnimal 内部只调 Point.ToVector3 读 x/y）</summary>
+    /// <summary>
+    /// il2cpp_object_new 构造 Point 并调官方 ctor(int hash) 完成初始化：
+    /// <c>x = hash &amp; 0xFFFF, y = hash &gt;&gt; 16</c>（伪 C 证实）。
+    /// ⚠ 不要用"读字段偏移直写 x/y"——il2cpp_field_get_offset 的语义与对象头不匹配，
+    /// 实测写无效（x/y 留堆垃圾 → 动物生成在 1.3e9 的垃圾坐标）。
+    /// </summary>
     private static IntPtr NewPoint(int gx, int gy)
     {
         IntPtr pointCls = FindClassByName("Point");
@@ -183,11 +188,11 @@ internal static class AnimalService
         IntPtr obj = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_new(pointCls);
         if (obj == IntPtr.Zero)
             throw new InvalidOperationException("Point 对象创建失败");
-        var fm = GetClassFieldsCached(pointCls, "Point");
-        if (!fm.TryGetValue("x", out var xf) || !fm.TryGetValue("y", out var yf))
-            throw new InvalidOperationException("Point 缺少 x/y 字段");
-        WriteIl2CppInt(obj, xf.Offset, gx);
-        WriteIl2CppInt(obj, yf.Offset, gy);
+        IntPtr ctor = FindMethodInHierarchy(pointCls, ".ctor", 1);
+        if (ctor == IntPtr.Zero)
+            throw new InvalidOperationException("找不到 Point..ctor(int hash)");
+        int hash = ((gy & 0xFFFF) << 16) | (gx & 0xFFFF);
+        Invoke(ctor, obj, hash);
         return obj;
     }
 }
