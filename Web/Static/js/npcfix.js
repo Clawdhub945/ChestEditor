@@ -608,9 +608,10 @@ function npcfixParseSpec(spec) {
     : scope === 'all' ? '全部阵营'
     : scope === 'enemy' ? '敌方全部阵营'
       : scope === 'ours' ? '我方' : ('阵营' + scope);
-  // keyField='guid' 的种类（掉落物）按 guid 收集，走专属接口；其余按 ptrHash
+  // keyField='guid' 的种类（掉落物）按 guid 收集，走专属接口；其余按 ptrHash。
+  // test 一并返回：拾取进国库按 ptrHash 收集（后端要拿实体读 count），不复用 pick。
   const key = def.keyField || 'ptrHash';
-  return { def: def, where: where, pick: () => entityEditorData.filter(test).map(e => e[key]) };
+  return { def: def, where: where, pick: () => entityEditorData.filter(test).map(e => e[key]), test: test };
 }
 
 // 拼 spec（按钮工厂共用）
@@ -1145,9 +1146,10 @@ async function npcfixScale(spec, factor) {
 const NPCFIX_BOX3_CARD_LIMIT = 24;   // 每组最多渲染的卡片数，超出显示"还有 N 个"
 let npcfixBox3Query = '';            // 搜索词（仅前端过滤已扫描数据，不触发扫描）
 
-// 设施分组卡：与 npcfixEntityGroupCard 的区别 —— 网格限量 + "还有 N 个"提示 + 组级一键清除。
+// 设施分组卡：与 npcfixEntityGroupCard 的区别 —— 网格限量 + "还有 N 个"提示 + 组级按钮。
+// clearSpec/pickupSpec 可选（盒子3 建筑只给清除；盒子5 掉落物清除+拾取进国库都给）。
 // 展开状态由 data-g 记录（搜索重绘后恢复，见 npcfixBox3RenderBody）。
-function npcfixFacilityGroupCard(label, color, icon, list, clearSpec) {
+function npcfixFacilityGroupCard(label, color, icon, list, clearSpec, pickupSpec) {
   if (!list || list.length === 0) return '';
   const shown = list.slice(0, NPCFIX_BOX3_CARD_LIMIT);
   let h = '<details class="npcfix-group" style="--gc:' + color + '" data-g="' + esc(label) + '">';
@@ -1155,6 +1157,7 @@ function npcfixFacilityGroupCard(label, color, icon, list, clearSpec) {
   h += '<span class="npcfix-chev">&#x25B6;</span>';
   h += '<span>' + icon + '</span><span>' + esc(label) + '</span>';
   h += '<span class="npcfix-count">' + list.length + ' 个</span>';
+  if (pickupSpec) h += npcfixMiniBtn('拾取', NPCFIX_BIFF_COLOR, "npcfixPickup('" + pickupSpec + "')");
   if (clearSpec) h += npcfixMiniBtn('一键清除', NPCFIX_CLEAR_COLOR, "npcfixClear('" + clearSpec + "')");
   h += '</summary>';
   h += npcfixEntityGrid(shown, {});
@@ -1276,7 +1279,8 @@ async function renderNpcfixBox5(forceScan) {
   html += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-shrink:0">';
   html += '<h2 style="color:var(--accent-light);margin:0;font-size:18px">&#x1F4B0; 掉落物</h2>';
   html += '<span style="color:var(--text-muted);font-size:13px">掉在地图上的物品堆 · 按物品名分组（大分组限量显示，用搜索框过滤）</span>';
-  html += npcfixBoxClearBtn('stuff', 'all');
+  html += npcfixBoxBtn('拾取进国库', NPCFIX_BIFF_COLOR, "npcfixPickup('stuff:all')")
+    + npcfixBoxClearBtn('stuff', 'all');
   html += '<button onclick="renderNpcfixBox5(true)" style="padding:6px 16px;background:var(--accent);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;font-size:13px;margin-left:auto">重新扫描</button>';
   html += '</div>';
   html += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-shrink:0">';
@@ -1335,7 +1339,36 @@ function npcfixBox5RenderBody() {
       if (list.length === 0) continue;
     }
     h += npcfixFacilityGroupCard(name, 'var(--warning, #e67e22)', '&#x1F4B0;', list,
-      npcfixSpecOf('stuff', 'all', name));
+      npcfixSpecOf('stuff', 'all', name), npcfixSpecOf('stuff', 'all', name));
   }
   body.innerHTML = h || npcfixEmptyHint('没有匹配的掉落物（共 ' + total + ' 堆）');
+}
+
+// 拾取进国库（spec = 'stuff:all[:g=组名]'）：按范围收集 → 分批 入库+移除 → 重扫刷新。
+// 与一键清除的区别：物品先 AddStuff 进「国王宝箱」的 Bag 再从地图移除 —— 是入账，不是消失。
+async function npcfixPickup(spec) {
+  const p = npcfixParseSpec(spec);
+  if (!p) return;
+  const hashes = entityEditorData.filter(e => p.test(e)).map(e => e.ptrHash);
+  if (hashes.length === 0) { toast('没有可拾取的掉落物', true); return; }
+  const g = spec.indexOf(':g=') >= 0 ? '该物品' : '全部';
+  if (!confirm('确定把' + g + ' ' + hashes.length + ' 堆掉落物拾取进国库？')) return;
+  toast('拾取中...', false);
+  let picked = 0, skipped = 0;
+  for (let i = 0; i < hashes.length; i += NPCFIX_KILL_CHUNK) {
+    const part = hashes.slice(i, i + NPCFIX_KILL_CHUNK);
+    try {
+      const r = await fetch('/api/editor/stuff/pickup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ptrHashes: part })
+      }).then(x => x.json());
+      picked += (r && r.picked) || 0;
+      skipped += (r && r.skipped) || 0;
+    } catch (e) { skipped += part.length; }
+    await new Promise(r => setTimeout(r, 60));
+  }
+  toast('拾取完成: ' + picked + ' 堆入国库' + (skipped > 0 ? '（跳过 ' + skipped + ' 堆空堆/失效）' : ''));
+  await npcfixScan();
+  npcfixRefreshView();
 }

@@ -41,7 +41,7 @@ function mkEl() {
     get innerHTML() { return this._h; }, set innerHTML(v) { this._h = v; },
     querySelector: () => null, querySelectorAll: () => [],
     closest: () => null, getAttribute: () => null, setAttribute() {},
-    appendChild() {}, addEventListener() {},
+    appendChild() {}, addEventListener() {}, remove() {},
     set textContent(v) { this._t = v; }, get textContent() { return this._t; },
   };
 }
@@ -485,6 +485,24 @@ const src = fs.readFileSync(path.join(dir, 'npcfix.js'), 'utf8');
   ctx.fetch = origFetch;
   ok(calls.some(u => u.indexOf('/api/editor/stuff/batch') >= 0), '销毁请求走 /api/editor/stuff/batch');
   ok(!calls.some(u => u.indexOf('/api/editor/destroy/batch') >= 0), '不走 destroy/batch（ptrHash 只销 GO 不清注册表）');
+
+  // 拾取进国库：按钮落位 + 接口路由
+  setData(DATA);
+  await ctx.renderNpcfixBox5(false);
+  const H5p = els['npcfixBox5Body'].innerHTML;
+  ok(H5p.indexOf("npcfixPickup('stuff:all:g=") >= 0, '组级有「拾取」按钮（stuff:all:g=<物品名>）');
+  ok(els['content'].innerHTML.indexOf("npcfixPickup('stuff:all')") >= 0, '标题栏有「拾取进国库」（stuff:all）');
+  let cap6 = null;
+  ctx.confirm = m => { cap6 = m; return true; };   // 同意执行
+  const calls2 = [];
+  ctx.fetch = (u, o) => { calls2.push(String(u)); return origFetch(u, o); };
+  await ctx.npcfixPickup('stuff:all');
+  ctx.fetch = origFetch;
+  console.log('  [拾取确认] ' + String(cap6).replace(/\n/g, ' ⏎ '));
+  ok(/拾取进国库/.test(cap6) && /\d+ 堆/.test(cap6), '拾取确认框含数量与去向');
+  ok(calls2.some(u => u.indexOf('/api/editor/stuff/pickup') >= 0), '拾取请求走 /api/editor/stuff/pickup');
+  ok(!calls2.some(u => u.indexOf('/api/editor/destroy/batch') >= 0) && !calls2.some(u => u.indexOf('/api/editor/stuff/batch') >= 0),
+    '拾取不走销毁接口');
 
   console.log('\n' + (fails === 0 ? 'ALL PASS' : (fails + ' FAILED')));
   process.exit(fails === 0 ? 0 : 1);
