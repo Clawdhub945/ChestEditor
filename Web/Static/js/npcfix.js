@@ -493,10 +493,43 @@ function npcfixEntityGroupCard(label, color, icon, list, opts, trailingHtml) {
   return h;
 }
 
-// 怪物组的「一键清除」按钮：长在 <summary> 里，必须阻止冒泡，否则点它会把分组一起开合
-function npcfixKillBtn(kid) {
+// ===== 一键清除 =====
+// 清除范围用「种类 + 范围」描述，写成 '<kind>:<scope>'：
+//   kind  = monster(怪物) / humanoid(小人) / ship(战舰)
+//   scope = 'all'(不限阵营) / 'enemy'(阵营 ≠ 1) / 具体阵营号
+// 只传字符串，因为要嵌进 onclick 属性里。
+// 「是战舰」判据：必须与 npcfixCombatClassify 完全一致 ——
+// 类名含 Ship **且** stuff_id 在战舰白名单内（货船 706001 / 其它船型不计）。
+// 只判类名会让一键清除连商船一起清掉，和盒子里显示的东西对不上。
+function npcfixIsWarship(e) {
+  return (e.className || '').indexOf('Ship') >= 0 && NPCFIX_WAR_SHIPS.indexOf(e.stuffId) >= 0;
+}
+
+// 人形单位（与 npcfixCombatClassify 一致：排除怪物与所有船）
+function npcfixIsHumanEntity(e) {
+  const cn = e.className || '';
+  return npcfixIsHumanUnit(cn) && cn.indexOf('Monster') !== 0 && cn.indexOf('Ship') < 0;
+}
+
+const NPCFIX_CLEAR_KINDS = {
+  monster: { name: '怪物', test: e => (e.className || '').indexOf('Monster') === 0 },
+  humanoid: { name: '小人', test: npcfixIsHumanEntity },
+  ship: { name: '战舰', test: npcfixIsWarship },
+};
+
+// 二级分组卡片标题栏上的「一键清除」：清除本组（通常是一个阵营）
+function npcfixClearBtn(kind, scope) {
   const s = 'padding:2px 8px;background:var(--danger,#e74c3c);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px';
-  return '<span style="margin-left:8px"><button onclick="event.preventDefault();event.stopPropagation();npcfixKillMonsters(' + kid + ')" style="' + s + '">一键清除(2遍)</button></span>';
+  return '<span style="margin-left:8px"><button onclick="event.preventDefault();event.stopPropagation();npcfixClear(\''
+    + kind + ':' + scope + '\')" style="' + s + '">一键清除</button></span>';
+}
+
+// 一级盒子标题栏上的「一键清除」：清除整个盒子（跨阵营）
+function npcfixBoxClearBtn(kind, scope) {
+  const s = 'padding:2px 10px;background:var(--danger,#e74c3c);color:#fff;border:1px solid var(--danger,#e74c3c)'
+    + ';border-radius:4px;cursor:pointer;font-size:11px;font-weight:400;margin-left:6px';
+  return '<button onclick="event.preventDefault();event.stopPropagation();npcfixClear(\''
+    + kind + ':' + scope + '\')" style="' + s + '">一键清除</button>';
 }
 
 // 按阵营铺二级分组（敌方-小人 / 敌方-怪物 / 敌方舰队 共用）
@@ -558,49 +591,58 @@ async function renderNpcfixBox2(forceScan) {
       c.ours.length + ' 个', inner, null, npcfixBoxBtns());
   }
 
-  // ===== 敌方-小人（按阵营） =====
+  // ===== 敌方-小人（按阵营；一级/二级都可一键清除） =====
   if (Object.keys(c.humanoids).length > 0) {
     const n = npcfixSumKinds(c.humanoids);
     h += htmlDetailsGroup('敌方-小人 (' + n + ')', '#c0392b', '&#x1F464;', n + ' 个',
-      '<div class="npcfix-box-body">' + npcfixKingdomGroups(c.humanoids, 'var(--text-muted)', '&#x1F464;') + '</div>',
-      null, npcfixBoxBtns());
+      '<div class="npcfix-box-body">' + npcfixKingdomGroups(c.humanoids, 'var(--text-muted)', '&#x1F464;',
+        kid => npcfixClearBtn('humanoid', kid)) + '</div>',
+      null, npcfixBoxBtns() + npcfixBoxClearBtn('humanoid', 'enemy'));
   }
 
   // ===== 我方-怪物（阵营1 地界刷出的怪物：蚁巢工蚁 / 龙…，按种类二级分组） =====
   if (c.monstersOurs.length > 0) {
-    // 分组名用中文：后端 name = DataTables.ItemName(stuff_id)，怪物就是「5级工蚁 / 5级骷髅战士 / 10级圣盾龙」；
+    // 分组名用中文：后端 name = DataTables.ItemName(stuff_id)，怪物就是「5级工蚁 / 5级骷髅战士」；
     // 类名（MonsterAntWorker / Monster3 / Monster23…）只是预制体名，用户看不懂，仅作兜底。
+    // 龙单独并成一张卡：每种龙都是个位数、又按「N级X龙」拆开，不合并会铺出十几张卡片，太碎。
     const kinds = {};
     for (const e of c.monstersOurs) {
-      const k = e.name || e.className || '未知怪物';
+      const cn = e.className || '';
+      const k = cn.indexOf('Dragon') >= 0 ? '龙' : (e.name || cn || '未知怪物');
       (kinds[k] = kinds[k] || []).push(e);
     }
     const entries = Object.keys(kinds).sort((a, b) => kinds[b].length - kinds[a].length);
     let inner = '<div class="npcfix-box-body">';
-    for (const name of entries)
-      inner += npcfixEntityGroupCard(name, 'var(--warning, #e67e22)', '&#x1F47E;', kinds[name], {}, npcfixKillBtn(1));
+    for (const name of entries) {
+      const isDragon = (name === '龙');
+      inner += npcfixEntityGroupCard(name, 'var(--warning, #e67e22)', isDragon ? '&#x1F409;' : '&#x1F47E;',
+        kinds[name], {}, npcfixClearBtn('monster', 1));
+    }
     inner += '</div>';
     h += htmlDetailsGroup('我方-怪物 (' + c.monstersOurs.length + ')', 'var(--warning, #e67e22)', '&#x1F47E;',
       c.monstersOurs.length + ' 个', inner, null, npcfixBoxBtns());
   }
 
-  // ===== 敌方-怪物（按阵营，每组带一键清除） =====
+  // ===== 敌方-怪物（按阵营；一级/二级都可一键清除） =====
   if (Object.keys(c.monstersEnemy).length > 0) {
     const n = npcfixSumKinds(c.monstersEnemy);
     h += htmlDetailsGroup('敌方-怪物 (' + n + ')', 'var(--danger, #e74c3c)', '&#x1F47E;', n + ' 个',
-      '<div class="npcfix-box-body">' + npcfixKingdomGroups(c.monstersEnemy, 'var(--danger, #e74c3c)', '&#x1F47E;', npcfixKillBtn) + '</div>',
-      null, npcfixBoxBtns());
+      '<div class="npcfix-box-body">' + npcfixKingdomGroups(c.monstersEnemy, 'var(--danger, #e74c3c)', '&#x1F47E;',
+        kid => npcfixClearBtn('monster', kid)) + '</div>',
+      null, npcfixBoxBtns() + npcfixBoxClearBtn('monster', 'enemy'));
   }
 
-  // ===== 船：只列战舰，区分敌我（货船/商船不计） =====
+  // ===== 船：只列战舰，区分敌我（货船/商船不计）；一级/二级都可一键清除 =====
   if (c.shipsOurs.length > 0 || Object.keys(c.shipsEnemy).length > 0) {
     let inner = '<div class="npcfix-box-body">';
     if (c.shipsOurs.length > 0)
-      inner += npcfixEntityGroupCard('我方舰队', 'var(--success-dark, #27ae60)', '&#x1F6A2;', c.shipsOurs, {});
-    inner += npcfixKingdomGroups(c.shipsEnemy, '#3498db', '&#x1F6A2;');
+      inner += npcfixEntityGroupCard('我方舰队', 'var(--success-dark, #27ae60)', '&#x1F6A2;', c.shipsOurs, {},
+        npcfixClearBtn('ship', 1));
+    inner += npcfixKingdomGroups(c.shipsEnemy, '#3498db', '&#x1F6A2;', kid => npcfixClearBtn('ship', kid));
     inner += '</div>';
     const n = c.shipsOurs.length + npcfixSumKinds(c.shipsEnemy);
-    h += htmlDetailsGroup('船 · 战舰 (' + n + ')', '#3498db', '&#x1F6A2;', n + ' 个', inner, null, npcfixBoxBtns());
+    h += htmlDetailsGroup('船 · 战舰 (' + n + ')', '#3498db', '&#x1F6A2;', n + ' 个', inner, null,
+      npcfixBoxBtns() + npcfixBoxClearBtn('ship', 'all'));
   }
 
   body.innerHTML = h || '<div style="padding:40px;text-align:center;color:var(--text-muted)">没有匹配的战斗单位</div>';
@@ -655,19 +697,32 @@ async function npcfixKillInChunks(hashes) {
   return { destroyed: destroyed, failed: failed };
 }
 
-// 怪物一键清除：分批销毁 → 等1秒 → 重扫 → 再清一遍（覆盖分裂怪）→ 刷新
-// 后端对 Monster* 走"静默移除"（skip_show_dead_anim + DeadOnBattle(null,false)），不播死亡动画、不掉东西
-async function npcfixKillMonsters(kid) {
-  if (!confirm('确定清除该阵营全部怪物？（将分批执行2遍，覆盖分裂怪）')) return;
-  toast('清除中...', false);
-  const pick = () => entityEditorData
-    .filter(e => (e.className || '').indexOf('Monster') === 0 && npcfixUnitKingdom(e) === kid)
-    .map(e => e.ptrHash);
+// 一键清除（spec = '<kind>:<scope>'，见文件上方 NPCFIX_CLEAR_KINDS）：
+// 按范围收集 → 分批销毁 → 等1秒 → 重扫 → 再清一遍（覆盖分裂怪）→ 刷新。
+// 后端对 Monster* 走"静默移除"（skip_show_dead_anim + DeadOnBattle(null,false)），不播死亡动画、不掉东西。
+async function npcfixClear(spec) {
+  const parts = String(spec).split(':');
+  const def = NPCFIX_CLEAR_KINDS[parts[0]];
+  const scope = parts[1];
+  if (!def) return;
+  const inScope = e => {
+    const kid = npcfixUnitKingdom(e);
+    if (scope === 'all') return true;
+    if (scope === 'enemy') return kid !== 1;
+    return kid === Number(scope);
+  };
+  // 先算数量：确认框要按数量决定是否追加"可能卡顿"提示
+  const pick = () => entityEditorData.filter(e => def.test(e) && inScope(e)).map(e => e.ptrHash);
   const hashes = pick();
-  if (hashes.length === 0) { toast('没有怪物', true); return; }
+  if (hashes.length === 0) { toast('没有可清除的' + def.name, true); return; }
+  const where = scope === 'all' ? '全部阵营' : (scope === 'enemy' ? '敌方全部阵营' : ('阵营' + scope));
+  let msg = '确定清除' + where + '的 ' + hashes.length + ' 个' + def.name + '？\n（将分批执行2遍，覆盖分裂怪）';
+  if (hashes.length > 100) msg += '\n\n数量过多可能卡顿2-5s';
+  if (!confirm(msg)) return;
+  toast('清除中...', false);
   const d1 = await npcfixKillInChunks(hashes);
   await new Promise(r => setTimeout(r, 1000));
-  // 重扫拿到分裂新生成的怪物，再清一遍
+  // 重扫拿到分裂新生成的目标，再清一遍
   await entityEditorScan();
   const hashes2 = pick();
   let d2 = { destroyed: 0 };
