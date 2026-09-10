@@ -276,14 +276,15 @@ const src = fs.readFileSync(path.join(dir, 'npcfix.js'), 'utf8');
   // 战斗力缩放用的是新后端接口
   ok(/\/api\/editor\/scale\/batch/.test(src), '前端调 /api/editor/scale/batch');
 
-  // ---------- 9) 安全发展模式（独立盒子 + 每秒数量可调 + 各种判断） ----------
-  console.log('\n== 9) 安全发展模式 ==');
-  ok(/npcfixSafeBox\(\)/.test(src), '安全发展模式渲染成独立一行盒子（npcfixSafeBox）');
-  ok(H.indexOf('安全发展模式') >= 0 && H.indexOf('安全发展模式') < H.indexOf('>我方单位<'),
-    '安全发展模式盒子在「我方单位」之前（独立一行）');
+  // ---------- 9) 定期清理（独立盒子 + 每秒数量可调 + 各种判断） ----------
+  console.log('\n== 9) 定期清理 ==');
+  ok(/npcfixSafeBox\(\)/.test(src), '定期清理渲染成独立一行盒子（npcfixSafeBox）');
+  ok(/安全发展模式/.test(H) === false && /定期清理/.test(H), '已改名为「定期清理」');
+  const iSafeBox = H.indexOf('定期清理');
+  console.log('  下标: 敌方单位=' + iEnemy + ' 定期清理=' + iSafeBox + ' 敌方-小人=' + iEnemyMan);
+  ok(iSafeBox > iEnemy && iSafeBox < iEnemyMan, '定期清理盒在「敌方单位」横线之下、敌方-小人之上');
   ok(H.indexOf('npcfixSafeBatchChange(this)') >= 0, '有"每秒清除 N 个"的数字输入框');
   ok(H.indexOf('npcfixSafeToggle()') >= 0, '有开/关按钮');
-  ok(/npcfixSafeModeBtn/.test(H) === false, '「敌方单位」标题条上不再挂安全发展模式');
   ok(ev('NPCFIX_SAFE_INTERVAL') === 1000, '节奏固定 1 秒一拍（时间不可改）');
   console.log('  默认每秒', ev('NPCFIX_SAFE_BATCH_DEFAULT'), '个 / 上限', ev('NPCFIX_SAFE_BATCH_MAX'),
     '个 / 间隔', ev('NPCFIX_SAFE_INTERVAL') + 'ms / 每', ev('NPCFIX_SAFE_RESCAN_EVERY'), '拍重扫');

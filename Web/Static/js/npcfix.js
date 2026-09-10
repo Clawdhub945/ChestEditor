@@ -496,7 +496,7 @@ function npcfixEntityGroupCard(label, color, icon, list, opts, trailingHtml) {
   return h;
 }
 
-// ===== 一键清除 / 战斗力缩放 / 安全发展模式 =====
+// ===== 一键清除 / 战斗力缩放 / 定期清理 =====
 // 目标范围统一用 spec 描述：'<kind>:<scope>[:g=<分组名>]'
 //   kind  = monster(怪物) / humanoid(小人) / ship(战舰) / enemyAll(敌方单位) /
 //           ourCombat(我方战斗单位) / oursAll(我方单位)
@@ -628,7 +628,7 @@ function npcfixDestroyAllBtn() {
   return npcfixSectionBtn('毁灭吧！！！', NPCFIX_CLEAR_COLOR, 'npcfixClear(\'enemyAll:enemy\')', true);
 }
 
-// ===== 安全发展模式（独立一行盒子）：地图上出现敌方单位就慢慢清掉，不卡帧 =====
+// ===== 定期清理（独立一行盒子）：地图上出现敌方单位就慢慢清掉，不卡帧 =====
 // 节奏固定为「每 1 秒一批」，每批数量用户可调（默认 20，最大 100）——时间不能改，数量能改。
 let npcfixSafeOn = false;
 let npcfixSafeTimer = null;
@@ -643,7 +643,7 @@ const NPCFIX_SAFE_BATCH_MAX = 100;
 const NPCFIX_SAFE_RESCAN_EVERY = 12; // 每 N 拍重扫一次（拿新刷出来的敌人）
 
 // 包一层重扫：标记"正在扫描"。分片扫描要好几秒，
-// 这期间让安全发展模式先别发销毁请求（名单会整体替换，中途发只是白跑一趟）。
+// 这期间让定期清理先别发销毁请求（名单会整体替换，中途发只是白跑一趟）。
 async function npcfixScan() {
   npcfixScanning = true;
   try { await entityEditorScan(); } finally { npcfixScanning = false; }
@@ -651,7 +651,7 @@ async function npcfixScan() {
 
 // 每秒清除数量：localStorage 记忆 + 夹在 1..100
 function npcfixSafeGetBatch() {
-  const v = parseInt(localStorage.getItem('chesteditor.safeBatch') || '', 10);
+  const v = parseInt(localStorage.getItem('chesteditor.cleanBatch') || '', 10);
   if (isNaN(v)) return NPCFIX_SAFE_BATCH_DEFAULT;
   return Math.min(NPCFIX_SAFE_BATCH_MAX, Math.max(1, v));
 }
@@ -660,8 +660,8 @@ function npcfixSafeBatchChange(inp) {
   if (isNaN(v)) v = NPCFIX_SAFE_BATCH_DEFAULT;
   v = Math.min(NPCFIX_SAFE_BATCH_MAX, Math.max(1, v));
   inp.value = v;
-  localStorage.setItem('chesteditor.safeBatch', String(v));
-  toast('安全发展模式：每秒清除 ' + v + ' 个');
+  localStorage.setItem('chesteditor.cleanBatch', String(v));
+  toast('定期清理：每秒清除 ' + v + ' 个');
 }
 
 function npcfixSafeStateText() {
@@ -672,7 +672,7 @@ function npcfixSafeBox() {
   const on = npcfixSafeOn;
   let h = '<div style="margin:0 0 12px;padding:10px 14px;border:1px solid var(--border);'
     + 'border-radius:var(--radius-sm);background:var(--bg-card);display:flex;align-items:center;gap:10px;flex-wrap:wrap">';
-  h += '<span style="font-size:13px;font-weight:700;color:var(--text-primary)">&#x1F6E1; 安全发展模式</span>';
+  h += '<span style="font-size:13px;font-weight:700;color:var(--text-primary)">&#x1F5D1; 定期清理</span>';
   h += '<span id="npcfixSafeState" style="font-size:12px;color:'
     + (on ? 'var(--success-dark,#27ae60)' : 'var(--text-muted)') + '">' + esc(npcfixSafeStateText()) + '</span>';
   h += '<span style="flex:1"></span>';
@@ -686,7 +686,7 @@ function npcfixSafeBox() {
     + (on ? 'background:var(--success-dark,#27ae60);color:#fff' : 'background:var(--bg-input);color:var(--text-secondary)')
     + ';border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:13px;font-weight:700">'
     + (on ? '关闭' : '开启') + '</button>';
-  h += '<span style="font-size:11px;color:var(--text-muted)">只清敌方 · 读取存档时自动关闭</span>';
+  h += '<span style="font-size:11px;color:var(--text-muted)">只清敌方单位 · 读取存档时自动关闭</span>';
   h += '</div>';
   return h;
 }
@@ -707,11 +707,11 @@ async function npcfixFetchState() {
 function npcfixSafeCheckState(st) {
   if (!st) return false;                                  // 连不上就不动，别误关
   if (st.loading || (typeof st.saveLoads === 'number' && st.saveLoads !== npcfixSafeSaveLoads)) {
-    npcfixSafeAutoOff('检测到读取存档，安全发展模式已自动关闭');
+    npcfixSafeAutoOff('检测到读取存档，定期清理已自动关闭');
     return true;
   }
   if (st.inSave === false) {
-    npcfixSafeAutoOff('已退出存档，安全发展模式已自动关闭');
+    npcfixSafeAutoOff('已退出存档，定期清理已自动关闭');
     return true;
   }
   return false;
@@ -726,7 +726,7 @@ async function npcfixSafeToggle() {
   if (npcfixSafeOn) {          // 关闭
     npcfixSafeOn = false;
     if (npcfixSafeTimer) { clearTimeout(npcfixSafeTimer); npcfixSafeTimer = null; }
-    toast('安全发展模式已关闭（累计清除 ' + npcfixSafeCount + '）');
+    toast('定期清理已关闭（累计清除 ' + npcfixSafeCount + '）');
     npcfixSafeUpdateBtn();
     return;
   }
@@ -742,7 +742,7 @@ async function npcfixSafeToggle() {
   npcfixSafeTicks = 0;
   npcfixSafeDone = new Set();
   npcfixSafeSaveLoads = (typeof st.saveLoads === 'number') ? st.saveLoads : 0;
-  toast('安全发展模式已开启（每秒清除 ' + npcfixSafeGetBatch() + ' 个敌方单位）');
+  toast('定期清理已开启（每秒清除 ' + npcfixSafeGetBatch() + ' 个敌方单位）');
   npcfixSafeUpdateBtn();
   npcfixSafeTick();
 }
@@ -903,17 +903,17 @@ async function renderNpcfixBox2(forceScan) {
   // ===== 组装：两条分区线**一直显示**（没有单位也要在），右侧挂分区级按钮 =====
   //   我方单位 ── [战斗力×10]
   //   敌方单位 ── [战斗力÷10] [毁灭吧！！！]
-  //   （安全发展模式独立成一行盒子，放在最上面）
+  //   （定期清理独立成一行盒子，放在「敌方单位」横线下）
   const nOurs = c.ours.length + c.monstersOurs.length + c.shipsOurs.length;
   const nEnemy = npcfixSumKinds(c.humanoids) + npcfixSumKinds(c.monstersEnemy) + npcfixSumKinds(c.shipsEnemy);
   let h = '';
-  h += npcfixSafeBox();
   h += npcfixSectionTitle('我方单位', GREEN,
     npcfixSectionBtn('战斗力×10', NPCFIX_BIFF_COLOR, 'npcfixScale(\'oursAll:ours\',10)'))
     + (oursHtml || npcfixEmptyHint('暂无我方单位（' + nOurs + ' 个）'));
   h += npcfixSectionTitle('敌方单位', 'var(--danger, #e74c3c)',
     npcfixSectionBtn('战斗力÷10', NPCFIX_NERF_COLOR, 'npcfixScale(\'enemyAll:enemy\',0.1)')
     + npcfixDestroyAllBtn())
+    + npcfixSafeBox()                                    // ← 定期清理：紧跟「敌方单位」横线之下
     + (enemyHtml || npcfixEmptyHint('暂无敌方单位（' + nEnemy + ' 个）'));
 
   body.innerHTML = h;
