@@ -121,8 +121,8 @@ internal static class AnimalService
     /// </summary>
     /// <param name="stuffId">动物种类（animal.json 的 animal_id，如 501005=猪）</param>
     /// <param name="count">数量（前端夹取 1..10）</param>
-    /// <returns>(gx, gy) 实际召唤的格子坐标（= 参考实体所在格）</returns>
-    internal static (int gx, int gy) Spawn(int stuffId, int count)
+    /// <returns>(gx, gy) 实际召唤的格子坐标；newGuids = 新动物 guid 列表（用于前端定位）</returns>
+    internal static (int gx, int gy, List<int> newGuids) Spawn(int stuffId, int count)
     {
         IntPtr helper = GameChainLocator.GetAnimalHelper();
         if (helper == IntPtr.Zero)
