@@ -1,4 +1,9 @@
 // ui — 通用 UI 构造器 + 侧栏 + 工具函数
+
+// 旧面板开关：「NPC」「实体扫描」两个侧栏分类已被「NPC修改」的盒子1/盒子2 取代，默认隐藏。
+// 功能与接口都还在（openNpcPanel / selectNpcView('editor')），想恢复把它改成 false 即可。
+const HIDE_LEGACY_PANELS = true;
+
 // ===== 通用 HTML 片段（消除各面板的复制粘贴模板） =====
 
 // 侧栏分类块：标题 + 展开箭头 + 可选计数 + 内容
@@ -123,17 +128,21 @@ function renderSidebar() {
     "selectDragonView('summon')", dragonView === 'summon', MENU_ICON_FLEX);
   html += htmlCategory(dragonMainOpen, 'toggleDragonMain', '驯龙', null, dragonHtml);
 
-  // NPC 分类
-  const npcItem = htmlMenuItem('&#x1F464;', '我方 NPC',
-    (npcListData.length > 0 ? npcListData.length + ' 个' : '点击扫描'),
-    'openNpcPanel()', npcPanelOpen, 'font-size:20px;' + MENU_ICON_FLEX);
-  html += htmlCategory(npcPanelOpen, 'toggleNpcPanel', 'NPC', npcListData.length, npcItem);
+  // NPC 分类（默认隐藏，见文件顶部 HIDE_LEGACY_PANELS）
+  if (!HIDE_LEGACY_PANELS) {
+    const npcItem = htmlMenuItem('&#x1F464;', '我方 NPC',
+      (npcListData.length > 0 ? npcListData.length + ' 个' : '点击扫描'),
+      'openNpcPanel()', npcPanelOpen, 'font-size:20px;' + MENU_ICON_FLEX);
+    html += htmlCategory(npcPanelOpen, 'toggleNpcPanel', 'NPC', npcListData.length, npcItem);
+  }
 
-  // 实体扫描分类
-  const editorItem = htmlMenuItem('&#x270F;', '修改',
-    (entityEditorData.length > 0 ? entityEditorData.length + ' 个实体' : '0 个'),
-    "selectNpcView('editor')", npcView === 'editor', 'font-size:20px;' + MENU_ICON_FLEX);
-  html += htmlCategory(npcMainOpen, 'toggleNpcMain', '实体扫描', null, editorItem);
+  // 实体扫描分类（默认隐藏，见文件顶部 HIDE_LEGACY_PANELS）
+  if (!HIDE_LEGACY_PANELS) {
+    const editorItem = htmlMenuItem('&#x270F;', '修改',
+      (entityEditorData.length > 0 ? entityEditorData.length + ' 个实体' : '0 个'),
+      "selectNpcView('editor')", npcView === 'editor', 'font-size:20px;' + MENU_ICON_FLEX);
+    html += htmlCategory(npcMainOpen, 'toggleNpcMain', '实体扫描', null, editorItem);
+  }
 
   // NPC修改 分类（盒子1 小人数值修改 / 盒子2 战斗单位 / 盒子3-5 预留）
   let npcfixHtml = '';

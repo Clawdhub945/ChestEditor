@@ -358,6 +358,17 @@ const src = fs.readFileSync(path.join(dir, 'npcfix.js'), 'utf8');
   ok(/npcfixScale\('oursAll:ours',10\)/.test(H2) && /npcfixScale\('enemyAll:enemy',0\.1\)/.test(H2),
     '空数据时分区按钮仍在');
 
+  // ---------- 11) 侧边栏：旧面板已隐藏 ----------
+  console.log('\n== 11) 侧边栏 ==');
+  await ctx.renderSidebar();
+  const sb = els['chestList'].innerHTML;
+  ok(sb.indexOf('>NPC<') < 0, '侧边栏已隐藏「NPC」分类');
+  ok(sb.indexOf('实体扫描') < 0, '侧边栏已隐藏「实体扫描」分类');
+  ok(sb.indexOf('NPC修改') >= 0 && sb.indexOf('盒子1 小人数值修改') >= 0, '「NPC修改」分类仍在（盒子1/盒子2）');
+  ok(sb.indexOf('>容器<') >= 0 && sb.indexOf('>驯龙<') >= 0 && sb.indexOf('>科技树<') >= 0,
+    '容器 / 驯龙 / 科技树 不受影响');
+  ok(ev('HIDE_LEGACY_PANELS') === true, 'HIDE_LEGACY_PANELS = true（想恢复改 false）');
+
   console.log('\n' + (fails === 0 ? 'ALL PASS' : (fails + ' FAILED')));
   process.exit(fails === 0 ? 0 : 1);
 })();
