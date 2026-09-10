@@ -35,6 +35,16 @@ function selectNpcfixView(view) {
 
 // ===== 盒子1 小人数值修改 =====
 
+// 我方单类别盒子：类内直接铺卡片（俘虏 / 外来者 / 其他 复用；空则不输出）
+function npcfixSimpleGroup(label, color, icon, list, groupKey) {
+  if (!list || list.length === 0) return '';
+  let cards = '<div style="padding:4px 0">';
+  for (const npc of list)
+    cards += '<div style="margin-bottom:6px">' + renderNpcCard(npc, {groupKey: groupKey}) + '</div>';
+  cards += '</div>';
+  return htmlDetailsGroup(label + ' (' + list.length + ')', color, icon, list.length + ' 个', cards);
+}
+
 async function renderNpcfixBox1(forceScan) {
   const el = document.getElementById('content');
   // 首次进入（无缓存）或显式刷新时才真正扫描；其余情况复用已扫描数据直接渲染
@@ -132,15 +142,35 @@ async function renderNpcfixBox1(forceScan) {
   if (citizenCount > 0)
     html2 += htmlDetailsGroup('市民 (' + citizenCount + ')', '#3498db', '&#x1F3E0;', citizenCount + ' 个', citizenInner);
 
-  // 其他（未归类的我方 NPC，保持独立盒子）
-  const othersList = oursByType.others;
-  if (othersList && othersList.length > 0) {
+  // 俘虏
+  html2 += npcfixSimpleGroup('俘虏', '#7f8c8d', '&#x1F512;', oursByType.prisoners, 'prisoners');
+
+  // 贵族：贵族 + 领主 归入同一个盒子（二级菜单）
+  const nobleGroups = [
+    { key: 'nobles', label: '贵族', icon: '&#x1F451;', color: '#f1c40f' },
+    { key: 'lords', label: '领主', icon: '&#x1F3F0;', color: '#e67e22' },
+  ];
+  let nobleInner = '<div style="padding:2px 0 2px 10px">';
+  let nobleCount = 0;
+  for (const g of nobleGroups) {
+    const list = oursByType[g.key];
+    if (!list || list.length === 0) continue;
+    nobleCount += list.length;
     let cards = '<div style="padding:4px 0">';
-    for (const npc of othersList)
-      cards += '<div style="margin-bottom:6px">' + renderNpcCard(npc, {groupKey: 'others'}) + '</div>';
+    for (const npc of list)
+      cards += '<div style="margin-bottom:6px">' + renderNpcCard(npc, {groupKey: g.key}) + '</div>';
     cards += '</div>';
-    html2 += htmlDetailsGroup('其他 (' + othersList.length + ')', '#34495e', '&#x2753;', othersList.length + ' 个', cards);
+    nobleInner += htmlDetailsGroup(g.label + ' (' + list.length + ')', g.color, g.icon, list.length + ' 个', cards);
   }
+  nobleInner += '</div>';
+  if (nobleCount > 0)
+    html2 += htmlDetailsGroup('贵族 (' + nobleCount + ')', '#f1c40f', '&#x1F451;', nobleCount + ' 个', nobleInner);
+
+  // 外来者：旅客 / 商人 / 外乡人 等（npcType -15 ~ -5）
+  html2 += npcfixSimpleGroup('外来者', '#9b59b6', '&#x1F464;', oursByType.outsiders, 'outsiders');
+
+  // 其他（未归类的我方 NPC，保持独立盒子）
+  html2 += npcfixSimpleGroup('其他', '#34495e', '&#x2753;', oursByType.others, 'others');
 
   // ===== 敌方士兵（按阵营） =====
   const enemyKinds = Object.keys(enemyByKingdom).map(Number).sort((a, b) => b - a);
@@ -183,7 +213,7 @@ async function loadNpcfixCard(details, ptrHash, groupKey) {
 
     const keys = [...NPCFIX_COMMON_FIELDS, ...(NPCFIX_FIELD_SETS[groupKey] || [])];
     const seen = new Set();
-    const groupLabel = { soldiers: '士兵', workers: '工作者', laborers: '杂工', children: '儿童', others: '其他' }[groupKey] || groupKey;
+    const groupLabel = { soldiers: '士兵', workers: '工作者', laborers: '杂工', children: '儿童', prisoners: '俘虏', nobles: '贵族', lords: '领主', outsiders: '外来者', others: '其他' }[groupKey] || groupKey;
     let quick = '<div style="font-size:11px;color:var(--accent-light);margin-bottom:4px">常用字段（' + groupLabel + '）</div>' + npcTableHeader(ptrHash, false);
     for (const key of keys) {
       if (seen.has(key)) continue;
