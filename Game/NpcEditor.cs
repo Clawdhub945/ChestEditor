@@ -128,6 +128,11 @@ internal static class NpcEditor
                 if (e.FieldMeta.TryGetValue("_npc_type", out var npcTypeFe) && !npcTypeFe.IsString && !npcTypeFe.IsPointer)
                     jw.WriteNumber("npcType", ReadIl2CppInt(e.Ptr, npcTypeFe.Offset));
 
+                // 王室身份：Npc.is_royal (bool)。前端「贵族」盒子据此分出「王室成员」
+                // （Npc.cs: IsRoyal => is_royal；被贬为平民时游戏会把它清零）
+                if (e.FieldMeta.TryGetValue("is_royal", out var royalFe) && !royalFe.IsString && !royalFe.IsPointer)
+                    jw.WriteBoolean("isRoyal", ReadIl2CppByte(e.Ptr, royalFe.Offset) != 0);
+
                 // 阵营判断辅助字段
                 jw.WriteNumber("hometownKingdomId", e.HometownKingdomId);
 

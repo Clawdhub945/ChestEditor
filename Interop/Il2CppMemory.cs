@@ -14,6 +14,8 @@ internal static unsafe class Il2CppMemory
     private const int ArrayDataOffset = 0x20; // Il2CppArray: klass(8)+monitor(8)+bounds(8)+max_length(4)+pad(4)+data
 
     internal static int ReadIl2CppInt(IntPtr objPtr, int offset) => *(int*)(objPtr + offset);
+    /// <summary>读 1 字节（bool/byte）——勿用 ReadIl2CppInt 代替：bool 只占 1 字节，读 4 字节会吞掉后续字段。</summary>
+    internal static byte ReadIl2CppByte(IntPtr objPtr, int offset) => *(byte*)(objPtr + offset);
     internal static float ReadIl2CppFloat(IntPtr objPtr, int offset) => *(float*)(objPtr + offset);
     internal static IntPtr ReadIl2CppPointer(IntPtr objPtr, int offset) => *(IntPtr*)(objPtr + offset);
 

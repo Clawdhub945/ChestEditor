@@ -12,6 +12,7 @@ const NPCFIX_FIELD_SETS = {
   children: [],
   prisoners: [],
   nobles: [],
+  royals: [],                        // 王室成员：仅共同字段
   lords: NPCFIX_SOLDIER_FIELDS,
   misc: [],
   outsiders: [],
@@ -81,8 +82,18 @@ async function renderNpcfixBox1(forceScan) {
   const ours = npcListData.filter(n => (n.hometownKingdomId || 0) === 1);
   const enemySoldiers = npcListData.filter(n => (n.hometownKingdomId || 0) !== 1 && (n.soldierTypeId || 0) > 0);
 
+  // 贵族线先摘出来（三类互斥，优先级 领主 > 王室成员 > 贵族），其余再按职业分类：
+  //   领主     = npcType 70（Npc.is_lord_class 派生的职业）
+  //   王室成员 = is_royal 标记（后端读 Npc.is_royal），且非领主
+  //   贵族     = classifyNpcByType 的 nobles 桶（npcType 61），此时已不含王室成员
+  // 王室成员优先归贵族盒，不再落进 儿童/工作者 等桶，避免同一人出现在两个盒子。
+  const lords = ours.filter(n => (n.npcType || 0) === 70);
+  const royals = ours.filter(n => n.isRoyal === true && (n.npcType || 0) !== 70);
+  const noblePtrs = new Set(lords.concat(royals).map(n => n.ptrHash));
+  const oursCommon = ours.filter(n => !noblePtrs.has(n.ptrHash));
+
   // 我方士兵再按职业（兵种名）细分
-  const oursByType = classifyNpcByType(ours);
+  const oursByType = classifyNpcByType(oursCommon);
   const professions = {};
   for (const n of oursByType.soldiers) {
     const prof = n.soldierTypeName || '未知兵种';
@@ -145,15 +156,16 @@ async function renderNpcfixBox1(forceScan) {
   // 俘虏
   html2 += npcfixSimpleGroup('俘虏', '#7f8c8d', '&#x1F512;', oursByType.prisoners, 'prisoners');
 
-  // 贵族：贵族 + 领主 归入同一个盒子（二级菜单）
+  // 贵族：领主 / 贵族 / 王室成员 三类归入同一个盒子（二级菜单）
   const nobleGroups = [
-    { key: 'nobles', label: '贵族', icon: '&#x1F451;', color: '#f1c40f' },
-    { key: 'lords', label: '领主', icon: '&#x1F3F0;', color: '#e67e22' },
+    { key: 'lords', label: '领主', icon: '&#x1F3F0;', color: '#e67e22', list: lords },
+    { key: 'nobles', label: '贵族', icon: '&#x1F451;', color: '#f1c40f', list: oursByType.nobles },
+    { key: 'royals', label: '王室成员', icon: '&#x1F934;', color: '#8e44ad', list: royals },
   ];
   let nobleInner = '<div style="padding:2px 0 2px 10px">';
   let nobleCount = 0;
   for (const g of nobleGroups) {
-    const list = oursByType[g.key];
+    const list = g.list;
     if (!list || list.length === 0) continue;
     nobleCount += list.length;
     let cards = '<div style="padding:4px 0">';
@@ -213,7 +225,7 @@ async function loadNpcfixCard(details, ptrHash, groupKey) {
 
     const keys = [...NPCFIX_COMMON_FIELDS, ...(NPCFIX_FIELD_SETS[groupKey] || [])];
     const seen = new Set();
-    const groupLabel = { soldiers: '士兵', workers: '工作者', laborers: '杂工', children: '儿童', prisoners: '俘虏', nobles: '贵族', lords: '领主', outsiders: '外来者', others: '其他' }[groupKey] || groupKey;
+    const groupLabel = { soldiers: '士兵', workers: '工作者', laborers: '杂工', children: '儿童', prisoners: '俘虏', nobles: '贵族', royals: '王室成员', lords: '领主', outsiders: '外来者', others: '其他' }[groupKey] || groupKey;
     let quick = '<div style="font-size:11px;color:var(--accent-light);margin-bottom:4px">常用字段（' + groupLabel + '）</div>' + npcTableHeader(ptrHash, false);
     for (const key of keys) {
       if (seen.has(key)) continue;
