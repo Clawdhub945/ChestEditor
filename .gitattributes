@@ -1,0 +1,13 @@
+# 换行规范化
+# 本仓库源码（C# / 前端资源 / 数据表脚本）统一按 UTF-8 无 BOM + LF 维护；
+# 若不做声明，Windows 上 core.autocrlf=true 会在 checkout 时把工作区文件改成 CRLF，
+# 而前端 JS/CSS 是以 EmbeddedResource 形式打进 DLL 的，工作区换行会连带改掉产物。
+* text=auto eol=lf
+
+# 二进制文件不做任何转换
+*.dll binary
+*.pdb binary
+*.png binary
+*.jpg binary
+*.ico binary
+*.zip binary
