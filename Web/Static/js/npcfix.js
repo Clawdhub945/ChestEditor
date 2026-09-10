@@ -109,15 +109,17 @@ async function renderNpcfixBox1(forceScan) {
   }
 
   // 市民：工作者 / 杂工 / 儿童 归入同一个盒子（二级菜单）
+  // 杂工组额外并入「小精灵 / 石头人」（npcType 23/30，classifyNpcByType 归入 misc）：
+  // 它们同为我方平民单位，单独成组会从市民计数里漏掉（我方总数 > 各盒子之和）。
   const citizenGroups = [
-    { key: 'workers', label: '工作者', icon: '&#x1F527;', color: '#f39c12' },
-    { key: 'laborers', label: '杂工', icon: '&#x1F6E0;', color: '#95a5a6' },
-    { key: 'children', label: '儿童', icon: '&#x1F476;', color: '#e91e63' },
+    { key: 'workers', label: '工作者', icon: '&#x1F527;', color: '#f39c12', list: oursByType.workers },
+    { key: 'laborers', label: '杂工', icon: '&#x1F6E0;', color: '#95a5a6', list: (oursByType.laborers || []).concat(oursByType.misc || []) },
+    { key: 'children', label: '儿童', icon: '&#x1F476;', color: '#e91e63', list: oursByType.children },
   ];
   let citizenInner = '<div style="padding:2px 0 2px 10px">';
   let citizenCount = 0;
   for (const g of citizenGroups) {
-    const list = oursByType[g.key];
+    const list = g.list;
     if (!list || list.length === 0) continue;
     citizenCount += list.length;
     let cards = '<div style="padding:4px 0">';
