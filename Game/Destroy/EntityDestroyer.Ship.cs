@@ -1,0 +1,204 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Reflection;
+using System.Runtime.InteropServices;
+using UnityEngine;
+using static ChestEditor.Interop.Il2CppApi;
+using static ChestEditor.Interop.Il2CppInvoke;
+using static ChestEditor.Interop.Il2CppMemory;
+using static ChestEditor.Interop.ManagedReflect;
+
+namespace ChestEditor.Game;
+
+internal static partial class EntityDestroyer
+{
+    /// <summary>Ship 策略：从船自身 territory 的 ship_list/ship_dic 移除，调用 ShipHelper.DestroyShip 或自身 DestroySelf</summary>
+    private static bool TryDestroyShip(EntityScan.EditorEntity e, IntPtr classPtr, string className, string name)
+    {
+        bool called = false;
+        if (!called && (className.Contains("Ship") || className.Contains("BattleUnit") || className.Contains("Soldier")))
+        {
+            Plugin.LogInfo($"[EntityEditor] [Ship] Ship destroy start...");
+            bool shipDestroyed = false;
+
+            int guid = 0;
+            if (e.FieldMeta.TryGetValue("guid", out var guidFe))
+                try { guid = ReadIl2CppInt(e.Ptr, guidFe.Offset); } catch { }
+            Plugin.LogInfo($"[EntityEditor] [Ship] entity guid={guid}");
+
+            // 从船对象自身读取 territory 字段（Ship 继承自 MyMonoBehaviour，有 territory 引用）
+            IntPtr shipTerritoryPtr = ReadFieldSafe(e.Ptr, classPtr, "territory");
+            if (shipTerritoryPtr == IntPtr.Zero)
+            {
+                // 递归搜索父类找 territory 字段
+                IntPtr searchCls = classPtr;
+                int depth = 0;
+                while (searchCls != IntPtr.Zero && depth < 10)
+                {
+                    IntPtr fi = IntPtr.Zero;
+                    IntPtr f;
+                    while ((f = Il2CppApi.ClassGetFields(searchCls, ref fi)) != IntPtr.Zero)
+                    {
+                        string? fn = Il2CppApi.PtrToString(Il2CppApi.FieldGetName(f));
+                        if (fn == "territory" || fn == "_territory")
+                        {
+                            int offset = (int)Il2CppApi.FieldGetOffset(f);
+                            if (offset >= 0x10 && offset < 0x10000)
+                                unsafe { shipTerritoryPtr = *(IntPtr*)(e.Ptr + offset); }
+                            if (shipTerritoryPtr != IntPtr.Zero) break;
+                        }
+                    }
+                    if (shipTerritoryPtr != IntPtr.Zero) break;
+                    searchCls = Il2CppApi.GetParent(searchCls);
+                    depth++;
+                }
+            }
+
+            if (shipTerritoryPtr != IntPtr.Zero)
+            {
+                IntPtr shipTerritoryClass = Il2CppApi.GetClass(shipTerritoryPtr);
+                string? territoryName = Il2CppApi.PtrToString(Il2CppApi.ClassGetName(shipTerritoryClass));
+                Plugin.LogInfo($"[EntityEditor] [Ship] Ship's territory class={territoryName}, ptr={shipTerritoryPtr.ToInt64():X}");
+
+                // 从船的所属 territory 读取 ship_list 和 ship_dic
+                IntPtr shipListPtr = ReadFieldSafe(shipTerritoryPtr, shipTerritoryClass, "ship_list");
+                IntPtr shipDicPtr = ReadFieldSafe(shipTerritoryPtr, shipTerritoryClass, "ship_dic");
+                Plugin.LogInfo($"[EntityEditor] [Ship] ship_list={shipListPtr.ToInt64():X}, ship_dic={shipDicPtr.ToInt64():X}");
+
+                // 按指针从 ship_list 中找到并移除
+                if (shipListPtr != IntPtr.Zero)
+                {
+                    Plugin.LogInfo($"[EntityEditor] [Ship] Removing from ship_list by pointer match...");
+                    shipDestroyed = RemoveFromListByPtr(shipListPtr, e.Ptr);
+                    Plugin.LogInfo($"[EntityEditor] [Ship] RemoveFromListByPtr result={shipDestroyed}");
+                }
+
+                // 从 ship_dic 按 guid 移除
+                if (shipDicPtr != IntPtr.Zero && guid != 0)
+                {
+                    IntPtr dicClass = Il2CppApi.GetClass(shipDicPtr);
+                    IntPtr removeMth = Il2CppApi.GetMethodFromName(dicClass, "Remove", 1);
+                    if (removeMth != IntPtr.Zero)
+                    {
+                        try
+                        {
+                            IntPtr exRm = IntPtr.Zero;
+                            unsafe
+                            {
+                                int guidArg = guid;
+                                IntPtr* rmArgs = stackalloc IntPtr[1];
+                                rmArgs[0] = (IntPtr)(&guidArg);
+                                Il2CppApi.RuntimeInvoke(removeMth, shipDicPtr, (void**)rmArgs, ref exRm);
+                            }
+                            Plugin.LogInfo($"[EntityEditor] [Ship] ship_dic.Remove({guid}) ex={exRm != IntPtr.Zero}");
+                        }
+                        catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] [Ship] ship_dic.Remove failed: {ex.Message}"); }
+                    }
+                }
+
+                // 调用 ShipHelper.DestroyShip 做完整清理
+                IntPtr shipHelperPtr = ReadFieldSafe(shipTerritoryPtr, shipTerritoryClass, "ship_helper");
+                if (shipHelperPtr != IntPtr.Zero)
+                {
+                    IntPtr shClass = Il2CppApi.GetClass(shipHelperPtr);
+                    IntPtr destroyShipMth = IntPtr.Zero;
+                    {
+                        IntPtr shIter = IntPtr.Zero;
+                        IntPtr shM;
+                        while ((shM = Il2CppApi.ClassGetMethods(shClass, ref shIter)) != IntPtr.Zero)
+                        {
+                            string? shName = Il2CppApi.PtrToString(Il2CppApi.MethodGetName(shM));
+                            if (shName == "DestroyShip") { destroyShipMth = shM; break; }
+                        }
+                    }
+                    if (destroyShipMth != IntPtr.Zero)
+                    {
+                        try
+                        {
+                            IntPtr exDestroy = IntPtr.Zero;
+                            unsafe
+                            {
+                                int boolArg = 0;
+                                IntPtr* destroyArgs = stackalloc IntPtr[2];
+                                destroyArgs[0] = e.Ptr;
+                                destroyArgs[1] = (IntPtr)(&boolArg);
+                                Il2CppApi.RuntimeInvoke(destroyShipMth, shipHelperPtr, (void**)destroyArgs, ref exDestroy);
+                            }
+                            Plugin.LogInfo($"[EntityEditor] [Ship] DestroyShip call ex={exDestroy != IntPtr.Zero}");
+                        }
+                        catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] [Ship] DestroyShip failed: {ex.Message}"); }
+                    }
+                    else
+                    {
+                        CallVoidMethod(classPtr, e.Ptr, "StopMove", 0);
+                        CallVoidMethod(classPtr, e.Ptr, "CloseWindow", 0);
+                        CallVoidMethod(classPtr, e.Ptr, "DestroySelf", 0);
+                    }
+                }
+                else
+                {
+                    CallVoidMethod(classPtr, e.Ptr, "StopMove", 0);
+                    CallVoidMethod(classPtr, e.Ptr, "CloseWindow", 0);
+                    CallVoidMethod(classPtr, e.Ptr, "DestroySelf", 0);
+                }
+
+                // 最终验证
+                if (shipListPtr != IntPtr.Zero)
+                {
+                    IntPtr listClass = Il2CppApi.GetClass(shipListPtr);
+                    int finalSize = ReadIntFieldSafe(shipListPtr, listClass, "_size", -1);
+                    Plugin.LogInfo($"[EntityEditor] [Ship] Final: ship_list._size={finalSize}");
+                }
+            }
+            else
+            {
+                Plugin.LogInfo($"[EntityEditor] [Ship] Could not find territory field on ship, trying FindTerritory fallback...");
+                // 回退到 FindTerritory
+                IntPtr territoryPtr = GameChainLocator.GetTerritory();
+                if (territoryPtr != IntPtr.Zero)
+                {
+                    IntPtr tc = Il2CppApi.GetClass(territoryPtr);
+                    IntPtr shipListPtr = ReadFieldSafe(territoryPtr, tc, "ship_list");
+                    if (shipListPtr != IntPtr.Zero)
+                        shipDestroyed = RemoveFromListByPtr(shipListPtr, e.Ptr);
+                }
+                CallVoidMethod(classPtr, e.Ptr, "DestroySelf", 0);
+            }
+
+            // 兜底清理
+            if (!shipDestroyed)
+            {
+                Plugin.LogInfo($"[EntityEditor] [Ship] Fallback cleanup...");
+                CallVoidMethod(classPtr, e.Ptr, "UnIndexUnitByPos", 0);
+                CallVoidMethod(classPtr, e.Ptr, "BeforeDestroy", 0);
+                // is_dead
+                {
+                    IntPtr idCls = classPtr;
+                    int idD = 0;
+                    while (idCls != IntPtr.Zero && idD < 10)
+                    {
+                        IntPtr fi = IntPtr.Zero;
+                        IntPtr f;
+                        while ((f = Il2CppApi.ClassGetFields(idCls, ref fi)) != IntPtr.Zero)
+                        {
+                            string? fn = Il2CppApi.PtrToString(Il2CppApi.FieldGetName(f));
+                            if (fn == "is_dead")
+                            {
+                                int offset = (int)Il2CppApi.FieldGetOffset(f);
+                                if (offset >= 0x10 && offset < 0x10000)
+                                    unsafe { *(int*)(e.Ptr + offset) = 1; }
+                                break;
+                            }
+                        }
+                        idCls = Il2CppApi.GetParent(idCls);
+                        idD++;
+                    }
+                }
+                try { e.GoRef!.SetActive(false); } catch { }
+            }
+            called = true;
+        }
+        return called;
+    }
+}
