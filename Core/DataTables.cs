@@ -27,6 +27,7 @@ internal static class DataTables
     private static Dictionary<int, string>? _soldierTypes;
     private static (string Name, string Cn, int BaseId)[]? _dragonTypes;
     private static (int Id, string Name)[]? _dragonNatures;
+    private static (int Id, string Name)[]? _animals;
 
     // ==================== 资源解析 ====================
 
@@ -168,6 +169,30 @@ internal static class DataTables
                         list.Add((row[0].GetInt32(), row[1].GetString() ?? ""));
                 }
                 return _dragonNatures = list.ToArray();
+            }
+        }
+    }
+
+    // ==================== 动物表 ====================
+
+    /// <summary>可召唤的陆地动物（animal_type=0 为水生如大鱼，召唤列表排除）</summary>
+    internal static (int Id, string Name)[] Animals
+    {
+        get
+        {
+            lock (Lock)
+            {
+                if (_animals != null) return _animals;
+                var list = new List<(int, string)>();
+                using var doc = TryOpen("animals.json");
+                if (doc != null)
+                {
+                    foreach (var row in doc.RootElement.EnumerateArray())
+                        if (row[2].GetInt32() != 0)
+                            list.Add((row[0].GetInt32(), row[1].GetString() ?? ""));
+                }
+                Plugin.LogInfo($"[DataTables] animals 载入 {list.Count} 种（已排除水生）");
+                return _animals = list.ToArray();
             }
         }
     }

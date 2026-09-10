@@ -1592,6 +1592,18 @@ async function renderNpcfixBox4(forceScan) {
   html += '<span style="color:var(--text-muted);font-size:13px">牲畜与野生动物 · 按种类分组（尸体单独一组；大分组限量显示）</span>';
   html += '<button onclick="renderNpcfixBox4(true)" style="padding:6px 16px;background:var(--accent);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;font-size:13px;margin-left:auto">重新扫描</button>';
   html += '</div>';
+  // 召唤行：下拉选动物（默认猪）× 数量输入框（默认1，1~10）→ 随机陆地格生成
+  html += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-shrink:0;flex-wrap:wrap">';
+  html += '<span style="font-size:13px;color:var(--text-secondary);font-weight:700">✨ 召唤动物</span>';
+  html += '<select id="npcfixBox4SpawnAnimal" style="padding:5px 8px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px"></select>';
+  html += '<span style="font-size:13px;color:var(--text-muted)">× </span>';
+  html += '<input type="number" id="npcfixBox4SpawnCount" min="1" max="10" value="1"'
+    + ' onchange="npcfixBox4SpawnCountChange(this)"'
+    + ' style="width:60px;padding:5px 8px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px">';
+  html += '<button onclick="npcfixBox4Spawn()"'
+    + ' style="padding:5px 14px;background:var(--accent);color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:700">召唤</button>';
+  html += '<span style="font-size:11px;color:var(--text-muted)">数量 1~10 · 生成在地图随机陆地</span>';
+  html += '</div>';
   html += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-shrink:0">';
   html += '<input id="npcfixBox4Search" value="' + esc(npcfixBox4Query) + '"'
     + ' placeholder="搜索动物名，如：猪 / 鹿（留空显示全部）"'
@@ -1614,6 +1626,9 @@ async function renderNpcfixBox4(forceScan) {
     }
   }
   npcfixBox4RenderBody();
+  // 召唤下拉：种类列表只拉一次（后端 animal.json + 官方中文名），每次渲染重填并恢复默认选中
+  await npcfixLoadAnimals();
+  npcfixBox4FillSpawnSelect();
 }
 
 let npcfixBox4Query = '';   // 搜索词（纯前端过滤已扫描数据，不触发扫描）
@@ -1652,4 +1667,59 @@ function npcfixBox4RenderBody() {
     h += npcfixFacilityGroupCard(name, color, icon, list, npcfixSpecOf('animal', 'all', name));
   }
   body.innerHTML = h || npcfixEmptyHint('没有匹配的动物（共 ' + total + ' 只/具）');
+}
+
+// ===== 盒子4 召唤动物 =====
+// 种类来自后端 /api/editor/animals（animal.json 陆地动物 + 官方中文名，默认选中猪 501005）。
+// 创建走游戏自己的 AnimalHelper.CreateAnimal(随机陆地格, stuffId, 1)，位置与野生动物刷新同源。
+let npcfixAnimalList = null;   // [{id, name}] 缓存
+
+async function npcfixLoadAnimals() {
+  if (npcfixAnimalList) return npcfixAnimalList;
+  try {
+    const r = await fetch('/api/editor/animals').then(x => x.json());
+    npcfixAnimalList = (r && r.animals) || [];
+  } catch (e) { npcfixAnimalList = []; }
+  return npcfixAnimalList;
+}
+
+function npcfixBox4FillSpawnSelect() {
+  const sel = document.getElementById('npcfixBox4SpawnAnimal');
+  if (!sel || npcfixAnimalList.length === 0) return;
+  sel.innerHTML = npcfixAnimalList
+    .map(a => '<option value="' + a.id + '">' + esc(a.name) + '</option>').join('');
+  // 默认 = 猪（501005）
+  const pig = npcfixAnimalList.find(a => a.id === 501005);
+  if (pig) sel.value = String(pig.id);
+}
+
+function npcfixBox4SpawnCountChange(el) {
+  let v = parseInt(el.value, 10);
+  if (isNaN(v)) v = 1;
+  v = Math.min(10, Math.max(1, v));
+  el.value = v;
+}
+
+async function npcfixBox4Spawn() {
+  const sel = document.getElementById('npcfixBox4SpawnAnimal');
+  const cnt = document.getElementById('npcfixBox4SpawnCount');
+  if (!sel || !cnt) return;
+  const stuffId = parseInt(sel.value, 10);
+  let count = parseInt(cnt.value, 10);
+  if (isNaN(stuffId) || stuffId <= 0) { toast('请选择动物种类', true); return; }
+  if (isNaN(count)) count = 1;
+  count = Math.min(10, Math.max(1, count));
+  const name = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : ('#' + stuffId);
+  if (!confirm('确定召唤 ' + count + ' 只「' + name + '」？（生成在地图随机陆地）')) return;
+  toast('召唤中...', false);
+  try {
+    const r = await fetch('/api/editor/animal/spawn', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stuffId: stuffId, count: count })
+    }).then(x => x.json());
+    toast('召唤完成: ' + ((r && r.spawned) || 0) + ' 只「' + name + '」已出现在地图随机位置');
+  } catch (e) { toast('召唤失败: ' + esc(String((e && e.message) || e)), true); return; }
+  await npcfixScan();
+  npcfixRefreshView();
 }

@@ -58,4 +58,38 @@ internal static class AnimalService
         Invoke(_destroyAnimal, _animalHelper, e.Ptr);
         return true;
     }
+
+    /// <summary>
+    /// 召唤动物：照抄游戏创建路径 <c>AnimalHelper.CreateAnimal(Point pos, int stuff_id, int count)</c>
+    /// （3 参重载，伪 C 证实内部循环 count 次、按 AnimalInfo 默认年龄/寿命）。
+    /// 位置 = <c>AreaMap.GetRandomLandPoint()</c>（地图随机陆地格，与野生动物刷新同源思路）。
+    /// </summary>
+    /// <param name="stuffId">动物种类（animal.json 的 animal_id，如 501005=猪）</param>
+    /// <param name="count">数量（前端夹取 1..10）</param>
+    internal static void Spawn(int stuffId, int count)
+    {
+        IntPtr helper = GameChainLocator.GetAnimalHelper();
+        if (helper == IntPtr.Zero)
+            throw new InvalidOperationException("找不到 AnimalHelper（未进存档？）");
+        IntPtr createAnimal = FindMethodInHierarchy(GetClass(helper), "CreateAnimal", 3);
+        if (createAnimal == IntPtr.Zero)
+            throw new InvalidOperationException("找不到 AnimalHelper.CreateAnimal(pos, stuff_id, count)");
+
+        IntPtr areaMap = GameChainLocator.GetAreaMap();
+        if (areaMap == IntPtr.Zero)
+            throw new InvalidOperationException("未进入存档，找不到 AreaMap");
+        IntPtr getLandPoint = FindMethodInHierarchy(GetClass(areaMap), "GetRandomLandPoint", 0);
+        if (getLandPoint == IntPtr.Zero)
+            throw new InvalidOperationException("找不到 AreaMap.GetRandomLandPoint()");
+
+        // 每只独立随机陆地格（比 count 只叠在同一点自然）
+        for (int i = 0; i < count; i++)
+        {
+            // runtime_invoke 对引用类型返回值直接给对象指针（Point 是引用类型）
+            IntPtr pos = Invoke(getLandPoint, areaMap);
+            if (pos == IntPtr.Zero)
+                throw new InvalidOperationException("GetRandomLandPoint 返回空（地图满了？）");
+            Invoke(createAnimal, helper, pos, stuffId, 1);
+        }
+    }
 }

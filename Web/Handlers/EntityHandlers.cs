@@ -228,6 +228,35 @@ internal static class EntityHandlers
             });
         });
 
+        // 可召唤动物列表（盒子4 召唤下拉）：animal.json 陆地动物 + 官方中文名
+        Router.Add("GET", "/api/editor/animals", _ => MainThread.Run(() => JsonBuilder.Object(w =>
+        {
+            w.WriteStartArray("animals");
+            foreach (var (id, name) in DataTables.Animals)
+            {
+                w.WriteStartObject();
+                w.WriteNumber("id", id);
+                w.WriteString("name", name);
+                w.WriteEndObject();
+            }
+            w.WriteEndArray();
+        }), 10000));
+
+        // 召唤动物（盒子4）：AnimalHelper.CreateAnimal(随机陆地格, stuffId, 1) × count
+        Router.Add("POST", "/api/editor/animal/spawn", ctx =>
+        {
+            int stuffId = ctx.Json?["stuffId"]?.GetValue<int>() ?? 0;
+            int count = ctx.Json?["count"]?.GetValue<int>() ?? 1;
+            if (stuffId <= 0) throw new HttpError(400, "invalid stuffId");
+            if (count < 1) count = 1;
+            if (count > 10) count = 10;
+            return MainThread.Run(() =>
+            {
+                AnimalService.Spawn(stuffId, count);
+                return JsonBuilder.Object(w => { w.WriteBoolean("ok", true); w.WriteNumber("spawned", count); });
+            }, 30000);
+        });
+
         // 战斗力批量缩放（×10 / ÷10；一次主线程任务循环执行，界面上的「战斗力×10 / ÷10」用）
         Router.Add("POST", "/api/editor/scale/batch", ctx =>
         {

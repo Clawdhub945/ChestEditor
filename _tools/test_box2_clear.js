@@ -39,7 +39,7 @@ const DATA = LIVE.concat(SYNTH);
 // ---- 最小 DOM / 环境 mock ----
 function mkEl() {
   return {
-    _h: '', value: '', checked: false, open: false, dataset: {}, style: {},
+    _h: '', value: '', checked: false, open: false, dataset: {}, style: {}, options: [], selectedIndex: -1,
     classList: { add() {}, remove() {}, toggle() {} },
     get innerHTML() { return this._h; }, set innerHTML(v) { this._h = v; },
     querySelector: () => null, querySelectorAll: () => [],
@@ -60,7 +60,7 @@ const ctx = {
     getItem: k => (k in lsStore ? lsStore[k] : null),
     setItem: (k, v) => { lsStore[k] = String(v); }, removeItem: k => { delete lsStore[k]; },
   },
-  // 分发：state / destroy 带游戏状态，entities 返回空数组
+  // 分发：state / destroy 带游戏状态，entities 返回空数组，animals 返回动物列表
   fetch: url => {
     const u = String(url);
     let body = {};
@@ -68,6 +68,10 @@ const ctx = {
     else if (u.indexOf('/api/editor/destroy') >= 0)
       body = { ok: true, destroyed: 0, failed: 0, inSave: stateResp.inSave, loading: stateResp.loading, saveLoads: stateResp.saveLoads };
     else if (u.indexOf('/api/editor/entities') >= 0) body = [];
+    else if (u.indexOf('/api/editor/animals') >= 0)
+      body = { animals: [{ id: 501001, name: '鸡' }, { id: 501002, name: '羊' }, { id: 501003, name: '牛' },
+        { id: 501004, name: '马' }, { id: 501005, name: '猪' }, { id: 501006, name: '驯狼' },
+        { id: 502001, name: '鹿' }, { id: 502005, name: '白鹿' }, { id: 502006, name: '梅花鹿' }] };
     return Promise.resolve({ json: () => Promise.resolve(body) });
   },
   setTimeout, clearTimeout, Date, JSON, Math, Number, String, Object, Array, Promise, Set, Map,
@@ -581,6 +585,41 @@ const src = fs.readFileSync(path.join(dir, 'npcfix.js'), 'utf8');
   await ctx.npcfixBox4RenderBody();
   ok(els['npcfixBox4Body'].innerHTML.indexOf('猪') >= 0, '搜「猪」显示猪组');
   ev('npcfixBox4Query = ""');
+
+  // ---------- 16) 盒子4 召唤动物 ----------
+  console.log('\n== 16) 盒子4 召唤动物 ==');
+  setData(DATA);
+  await ctx.renderNpcfixBox4(false);   // 顺带加载动物列表并填充下拉
+  const H4s = els['content'].innerHTML + els['npcfixBox4Body'].innerHTML;
+  ok(H4s.indexOf('npcfixBox4Spawn()') >= 0, '有「召唤」按钮');
+  ok(H4s.indexOf('npcfixBox4SpawnCountChange(this)') >= 0, '有数量输入框');
+  const selHtml4 = els['npcfixBox4SpawnAnimal'].innerHTML;
+  console.log('  下拉选项:', selHtml4.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80));
+  ok(selHtml4.indexOf('鸡') >= 0 && selHtml4.indexOf('猪') >= 0 && selHtml4.indexOf('驯狼') >= 0
+    && selHtml4.indexOf('梅花鹿') >= 0, '下拉含官方中文名（鸡/猪/驯狼/梅花鹿…）');
+  ok(selHtml4.indexOf('大鱼') < 0, '水生动物（大鱼）不在召唤列表');
+  ok(ev('npcfixAnimalList.some(a => a.id === 501005)') === true
+    && els['npcfixBox4SpawnAnimal'].value === '501005', '默认选中 = 猪（501005）');
+  // 数量夹取：0→1 / 11→10 / 非法→1 / 5 不变
+  const clampC = v => vm.runInContext(`(function(){ var el={value:'${v}'}; npcfixBox4SpawnCountChange(el); return el.value; })()`, ctx);
+  console.log('  夹取: 0→' + clampC(0), '11→' + clampC(11), 'abc→' + clampC('abc'), '5→' + clampC(5));
+  ok(clampC(0) === 1 && clampC(11) === 10 && clampC('abc') === 1 && clampC(5) === 5, '数量夹取 0→1 / 11→10 / 非法→1 / 5 不变');
+  // 召唤请求：带 stuffId + count，走 /api/editor/animal/spawn
+  ctx.confirm = () => true;
+  const calls5 = [];
+  ctx.fetch = (u, o) => { calls5.push([String(u), o && o.body]); return origFetch(u, o); };
+  const selEl = ctx.document.getElementById('npcfixBox4SpawnAnimal');
+  const cntEl = ctx.document.getElementById('npcfixBox4SpawnCount');
+  selEl.value = '501001';   // 鸡
+  cntEl.value = '3';
+  await ctx.npcfixBox4Spawn();
+  ctx.fetch = origFetch;
+  const spawnCall = calls5.find(([u]) => u.indexOf('/api/editor/animal/spawn') >= 0);
+  ok(!!spawnCall, '召唤请求走 /api/editor/animal/spawn');
+  if (spawnCall && spawnCall[1]) {
+    const sent = JSON.parse(spawnCall[1]);
+    ok(sent.stuffId === 501001 && sent.count === 3, '请求带 stuffId=501001（鸡）与 count=3');
+  }
 
   console.log('\n' + (fails === 0 ? 'ALL PASS' : (fails + ' FAILED')));
   process.exit(fails === 0 ? 0 : 1);
