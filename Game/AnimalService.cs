@@ -175,10 +175,19 @@ internal static class AnimalService
         //（x 低 32 位、y 高 32 位，小端）。传 il2cpp_object_new 的"对象指针"会把 klass 头
         // 读成坐标（实测 x=1.37e9 = klass 低 32 位），这就是"幽灵动物"的根因。
         IntPtr posSlot = new IntPtr(gx | (gy << 32));
+        var newGuids = new List<int>();
         for (int i = 0; i < count; i++)
         {
-            Invoke(createAnimal, helper, posSlot, stuffId, 1);
+            IntPtr created = Invoke(createAnimal, helper, posSlot, stuffId, 1);   // 返回 Animal 对象指针
+            if (created == IntPtr.Zero) continue;
+            try
+            {
+                var cls = GetClass(created);
+                if (GetClassFieldsCached(cls, "Animal").TryGetValue("guid", out var gf) && !gf.IsString && !gf.IsPointer)
+                    newGuids.Add(ReadIl2CppInt(created, gf.Offset));
+            }
+            catch { }
         }
-        return (gx, gy);
+        return (gx, gy, newGuids);
     }
 }

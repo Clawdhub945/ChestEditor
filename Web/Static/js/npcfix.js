@@ -1710,16 +1710,30 @@ async function npcfixBox4Spawn() {
   if (isNaN(count)) count = 1;
   count = Math.min(10, Math.max(1, count));
   const name = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : ('#' + stuffId);
-  if (!confirm('确定召唤 ' + count + ' 只「' + name + '」？（生成在地图随机陆地）')) return;
+  if (!confirm('确定召唤 ' + count + ' 只「' + name + '」？（生成在我方建筑旁）')) return;
   toast('召唤中...', false);
+  let r = null;
   try {
-    const r = await fetch('/api/editor/animal/spawn', {
+    r = await fetch('/api/editor/animal/spawn', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ stuffId: stuffId, count: count })
     }).then(x => x.json());
-    toast('召唤完成: ' + ((r && r.spawned) || 0) + ' 只「' + name + '」已出现在地图随机位置');
   } catch (e) { toast('召唤失败: ' + esc(String((e && e.message) || e)), true); return; }
+  const spawned = (r && r.spawned) || 0;
+  toast('召唤完成: ' + spawned + ' 只「' + name + '」已出现');
+  // 重扫后按 guid 定位到新动物（locate 读真实 transform 坐标，视角精确落在动物身上）
   await npcfixScan();
+  const wanted = new Set((r && r.guids) || []);
+  const target = entityEditorData.find(e => wanted.has(e.guid)) || entityEditorData.find(e => wanted.has(-e.guid));
+  if (target) {
+    try {
+      await fetch('/api/editor/locate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ptrHash: target.ptrHash })
+      });
+    } catch (e) { /* 定位失败不影响结果 */ }
+  }
   npcfixRefreshView();
 }
