@@ -164,35 +164,16 @@ internal static class AnimalService
         var (rx, ry) = candidates[rnd.Next(candidates.Count)];
         int gx = (int)Math.Floor(rx - 0.5f) + rnd.Next(-2, 3);
         int gy = (int)Math.Floor(ry - 0.5f) + rnd.Next(-2, 3);
-        IntPtr pos = NewPoint(gx, gy);
         Plugin.LogInfo($"[AnimalService] Spawn {count} 只 stuffId={stuffId} 于格子({gx},{gy})（参考 {rx:F1},{ry:F1}）");
 
+        // ⚠⚠ Point 是 struct（值类型）：CreateAnimal 的 Point 参数槽里要放 {x,y} 8 字节数据本身
+        //（x 低 32 位、y 高 32 位，小端）。传 il2cpp_object_new 的"对象指针"会把 klass 头
+        // 读成坐标（实测 x=1.37e9 = klass 低 32 位），这就是"幽灵动物"的根因。
+        IntPtr posSlot = new IntPtr(gx | (gy << 32));
         for (int i = 0; i < count; i++)
         {
-            Invoke(createAnimal, helper, pos, stuffId, 1);
+            Invoke(createAnimal, helper, posSlot, stuffId, 1);
         }
         return (gx, gy);
-    }
-
-    /// <summary>
-    /// il2cpp_object_new 构造 Point 并调官方 ctor(int hash) 完成初始化：
-    /// <c>x = hash &amp; 0xFFFF, y = hash &gt;&gt; 16</c>（伪 C 证实）。
-    /// ⚠ 不要用"读字段偏移直写 x/y"——il2cpp_field_get_offset 的语义与对象头不匹配，
-    /// 实测写无效（x/y 留堆垃圾 → 动物生成在 1.3e9 的垃圾坐标）。
-    /// </summary>
-    private static IntPtr NewPoint(int gx, int gy)
-    {
-        IntPtr pointCls = FindClassByName("Point");
-        if (pointCls == IntPtr.Zero)
-            throw new InvalidOperationException("找不到 Point 类");
-        IntPtr obj = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_new(pointCls);
-        if (obj == IntPtr.Zero)
-            throw new InvalidOperationException("Point 对象创建失败");
-        IntPtr ctor = FindMethodInHierarchy(pointCls, ".ctor", 1);
-        if (ctor == IntPtr.Zero)
-            throw new InvalidOperationException("找不到 Point..ctor(int hash)");
-        int hash = ((gy & 0xFFFF) << 16) | (gx & 0xFFFF);
-        Invoke(ctor, obj, hash);
-        return obj;
     }
 }
