@@ -32,6 +32,9 @@ function selectNpcfixView(view) {
   // 缓存为空时上面的渲染本身就会扫描，无需重复触发。
   if (!wasActive && view === 'box1' && npcfixView === 'box1' && npcListData.length > 0)
     renderNpcfixBox1(true);
+  // 盒子2 同理：实体扫描结果也要刷一遍，否则船/怪物是新生成的就看不到
+  if (!wasActive && view === 'box2' && npcfixView === 'box2' && entityEditorData.length > 0)
+    renderNpcfixBox2(true);
 }
 
 // ===== 盒子1 小人数值修改 =====
@@ -179,7 +182,7 @@ async function renderNpcfixBox1(forceScan) {
   html += '<div style="padding:20px;height:100%;box-sizing:border-box;display:flex;flex-direction:column;overflow:hidden">';
   html += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-shrink:0">';
   html += '<h2 style="color:var(--accent-light);margin:0;font-size:18px">&#x1F9F0; 小人数值修改</h2>';
-  html += '<span style="color:var(--text-muted);font-size:13px">我方NPC · 字段按职业定制</span>';
+  html += '<span style="color:var(--text-muted);font-size:13px">我方NPC · 字段按职业定制（敌方单位在「战斗单位」）</span>';
   html += '<button onclick="renderNpcfixBox1(true)" style="padding:6px 16px;background:var(--accent);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;font-size:13px;margin-left:auto">重新扫描</button>';
   html += '</div>';
   html += '<div id="npcfixBox1Body" style="flex:1;overflow-y:auto;min-height:0;color:var(--text-muted)">' + (needScan ? '扫描中...' : '') + '</div>';
@@ -203,9 +206,8 @@ async function renderNpcfixBox1(forceScan) {
     return;
   }
 
-  // 先分敌我：阵营1=我方；其余阵营里带兵种ID的是敌方士兵
+  // 分敌我：本面板只列我方（阵营1）。敌方战斗单位已迁到「盒子2 战斗单位」。
   const ours = npcListData.filter(n => (n.hometownKingdomId || 0) === 1);
-  const enemySoldiers = npcListData.filter(n => (n.hometownKingdomId || 0) !== 1 && (n.soldierTypeId || 0) > 0);
 
   // 贵族线先摘出来（三类互斥，优先级 领主 > 王室成员 > 贵族），其余再按职业分类：
   //   领主     = npcType 70（Npc.is_lord_class 派生的职业）
@@ -224,14 +226,6 @@ async function renderNpcfixBox1(forceScan) {
     const prof = n.soldierTypeName || '未知兵种';
     if (!professions[prof]) professions[prof] = [];
     professions[prof].push(n);
-  }
-
-  // 敌方士兵按阵营细分
-  const enemyByKingdom = {};
-  for (const n of enemySoldiers) {
-    const kid = n.hometownKingdomId || 0;
-    if (!enemyByKingdom[kid]) enemyByKingdom[kid] = [];
-    enemyByKingdom[kid].push(n);
   }
 
   let html2 = '';
@@ -297,25 +291,6 @@ async function renderNpcfixBox1(forceScan) {
   // 其他（未归类的我方 NPC，保持独立盒子）
   html2 += npcfixSimpleGroup('其他', '#34495e', '&#x2753;', oursByType.others, 'others');
 
-  // ===== 敌方士兵（按阵营） =====
-  const enemyKinds = Object.keys(enemyByKingdom).map(Number).sort((a, b) => b - a);
-  if (enemyKinds.length > 0) {
-    html2 += '<div style="font-size:13px;font-weight:600;color:var(--danger,#e74c3c);margin:10px 0 6px">敌方士兵 · ' + enemySoldiers.length + ' 个</div>';
-    for (const kid of enemyKinds) {
-      const kInfo = getKingdomInfo(kid);
-      const label = kInfo ? kInfo.name : ('阵营' + kid);
-      const list = enemyByKingdom[kid];
-      // 敌方职业分布小统计
-      const profDist = {};
-      for (const n of list) profDist[n.soldierTypeName || '?'] = (profDist[n.soldierTypeName || '?'] || 0) + 1;
-      const profText = Object.entries(profDist).sort((a, b) => b[1] - a[1]).map(([n, c]) => n + '×' + c).join('、');
-      let cards = '<div style="padding:2px 0 4px;font-size:11px;color:var(--text-muted)">' + esc(profText) + '</div>';
-      for (const npc of list)
-        cards += '<div style="margin-bottom:6px">' + renderNpcCard(npc, {groupKey: 'soldiers'}) + '</div>';
-      html2 += htmlDetailsGroup(label + ' (' + list.length + ')', kInfo ? kInfo.bg : '#7f8c8d', '&#x2694;', list.length + ' 个', cards);
-    }
-  }
-
   body.innerHTML = html2 || '<div style="padding:40px;text-align:center;color:var(--text-muted)">暂无数据</div>';
 }
 
@@ -377,119 +352,223 @@ async function loadNpcfixCard(details, ptrHash, groupKey) {
 
 
 // ===== 盒子2 战斗单位 =====
+// 布局照搬盒子1 的「士兵」盒子：一级盒子 → 二级分组卡片 → 单位卡片网格。
+// 数据源是实体扫描（/api/editor/scan）—— 船和怪物都不是 NPC，只有它扫得到。
+//
+// 船的两件事都得靠实体字段判，不能拿名字猜（原实现用 /war|战/ 正则猜，className 又
+// 以 Ship 开头，结果所有船都被算成战舰，商船也混进来了）：
+//   · 敌我 —— 实体自身 kingdom_id（后端输出 kingdomId；游戏里 Ship.SetInfo 里
+//             kingdom_id = territory.kingdom_id，Territory.IsMyTerritory 也用它判敌我）
+//   · 商船 —— stuff_id 706001 是「货船」，706002「战舰」/706003「巨型战舰」才是战舰
+//             （出处：反编译 Ship.IsTradingShip / Ship.get_IsBattleShip）
+const NPCFIX_TRADE_SHIP = 706001;          // 货船（商船）——不计
+const NPCFIX_WAR_SHIPS = [706002, 706003]; // 战舰 / 巨型战舰
 
-function renderNpcfixBox2() {
+// 单位所属阵营：船读自身 kingdom_id，NPC 读 hometown_kingdom_id
+function npcfixUnitKingdom(e) {
+  return e.kingdomId || e.hometownKingdomId || e.territoryKingdomId || 0;
+}
+
+// NPC/Soldier/BattleUnit 组件（Monster / Ship 另有分类，不在此列）
+function npcfixIsHumanUnit(cn) {
+  return /Npc|Soldier|BattleUnit/.test(cn) && !/NpcHelper|NpcTask|NpcFinder/.test(cn);
+}
+
+// 我方「战斗」单位：得有兵种才算，平民（工作者/儿童…）留在盒子1，不重复出现在战斗面板
+function npcfixIsCombatUnit(e) {
+  return (e.soldierTypeId || 0) > 0 || !!e.soldierTypeName;
+}
+
+// 分类（纯函数，便于单测）：
+//   我方战斗单位 / 敌方-小人(按阵营) / 敌方-怪物(按阵营) / 船(我方 & 敌方，排除商船)
+function npcfixCombatClassify(list) {
+  const ours = [];
+  const humanoids = {}, monsters = {};
+  const shipsOurs = [], shipsEnemy = {};
+  for (const e of list) {
+    const cn = e.className || '';
+    const kid = npcfixUnitKingdom(e);
+    if (cn.indexOf('Ship') >= 0) {
+      if (e.stuffId === NPCFIX_TRADE_SHIP) continue;             // 商船/货船：不计
+      if (NPCFIX_WAR_SHIPS.indexOf(e.stuffId) < 0) continue;      // 其它船型也不列
+      if (kid === 1) shipsOurs.push(e);
+      else (shipsEnemy[kid] = shipsEnemy[kid] || []).push(e);
+      continue;
+    }
+    if (cn.indexOf('Monster') === 0) {
+      (monsters[kid] = monsters[kid] || []).push(e);
+      continue;
+    }
+    if (!npcfixIsHumanUnit(cn)) continue;
+    if (kid === 1) { if (npcfixIsCombatUnit(e)) ours.push(e); }
+    else (humanoids[kid] = humanoids[kid] || []).push(e);
+  }
+  return { ours: ours, humanoids: humanoids, monsters: monsters, shipsOurs: shipsOurs, shipsEnemy: shipsEnemy };
+}
+
+function npcfixSumKinds(o) {
+  let n = 0;
+  for (const k in o) n += o[k].length;
+  return n;
+}
+
+// 单位卡：头部（名称/阵营/GUID/按钮）+ 懒加载字段表。
+// 复用 .npc-card / .npc-card-open：展开字段时占满整行，否则字段表（最小宽约 330px）
+// 会在 260px 的网格格里横向溢出（与盒子1 同一个坑）。
+function npcfixEntityCard(e, opts) {
+  opts = opts || {};
+  const ph = e.ptrHash || 0;
+  const displayName = e.npcName || e.name || e.goName || 'unknown';
+  const suffix = e.stuffNameWithIdIndex || e.soldierTypeName || '';
+  const kInfo = getKingdomInfo(npcfixUnitKingdom(e));
+  const btn = 'padding:3px 8px;border:none;border-radius:4px;cursor:pointer;font-size:11px;white-space:nowrap;color:#fff';
+  let h = '<div class="npc-card" style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius)">';
+  h += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px 12px">';
+  h += '<span style="font-weight:600;color:var(--text-primary);font-size:13px">' + esc(displayName) + '</span>';
+  if (suffix) h += '<span style="font-size:11px;color:var(--text-muted)">(' + esc(suffix) + ')</span>';
+  if (kInfo) h += '<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:' + kInfo.bg + ';color:' + kInfo.fg + '">' + esc(kInfo.name) + '</span>';
+  h += '<span style="font-size:11px;color:var(--text-muted);margin-left:auto" title="GUID:' + (e.guid || 0) + '">#' + (e.guid || 0) + '</span>';
+  if (opts.combat) {
+    h += '<button onclick="event.stopPropagation();npcfixMultiply(' + ph + ',\'atk\')" style="' + btn + ';background:var(--warning,#e67e22)">攻击×10</button>';
+    h += '<button onclick="event.stopPropagation();npcfixMultiply(' + ph + ',\'hp\')" style="' + btn + ';background:var(--success-dark,#27ae60)">血量×10</button>';
+  }
+  h += '<button onclick="event.stopPropagation();npcfixToggleUnit(' + ph + ')" style="' + btn + ';background:var(--accent)">字段</button>';
+  h += '<button onclick="event.stopPropagation();locateEditorEntity(' + ph + ')" style="' + btn + ';background:var(--info,#3498db)">定位</button>';
+  h += '<button onclick="event.stopPropagation();destroyEditorEntity(' + ph + ')" style="' + btn + ';background:var(--danger,#e74c3c)">消除</button>';
+  h += '</div>';
+  h += '<div id="editor_fields_' + ph + '" style="display:none;padding:6px 12px 10px;overflow-x:auto"></div>';
+  h += '</div>';
+  return h;
+}
+
+// 展开/收起单位卡的字段表（展开时整卡占满一行，与盒子1 一致）
+function npcfixToggleUnit(ptrHash) {
+  const c = document.getElementById('editor_fields_' + ptrHash);
+  if (!c) return;
+  const card = c.closest ? c.closest('.npc-card') : null;
+  const open = (c.style.display === 'none' || !c.style.display);
+  c.style.display = open ? 'block' : 'none';
+  if (card) card.classList.toggle('npc-card-open', open);
+  if (open) loadEntityEditorFields(ptrHash);
+}
+
+// 单位网格（与盒子1 的 npcfix-grid 同一套样式）
+function npcfixEntityGrid(list, opts) {
+  let h = '<div class="npcfix-grid">';
+  for (const e of list) h += npcfixEntityCard(e, opts);
+  h += '</div>';
+  return h;
+}
+
+// 二级分组卡片（同盒子1 的 npcfixGroupCard，只是内部换成单位网格）
+// trailingHtml：挂在标题栏计数右侧（怪物组的「一键清除」）
+function npcfixEntityGroupCard(label, color, icon, list, opts, trailingHtml) {
+  if (!list || list.length === 0) return '';
+  let h = '<details class="npcfix-group" style="--gc:' + color + '">';
+  h += '<summary class="npcfix-group-head">';
+  h += '<span class="npcfix-chev">&#x25B6;</span>';
+  h += '<span>' + icon + '</span><span>' + esc(label) + '</span>';
+  h += '<span class="npcfix-count">' + list.length + ' 个</span>';
+  h += (trailingHtml || '');
+  h += '</summary>';
+  h += npcfixEntityGrid(list, opts);
+  h += '</details>';
+  return h;
+}
+
+// 怪物组的「一键清除」按钮：长在 <summary> 里，必须阻止冒泡，否则点它会把分组一起开合
+function npcfixKillBtn(kid) {
+  const s = 'padding:2px 8px;background:var(--danger,#e74c3c);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px';
+  return '<span style="margin-left:8px"><button onclick="event.preventDefault();event.stopPropagation();npcfixKillMonsters(' + kid + ')" style="' + s + '">一键清除(2遍)</button></span>';
+}
+
+// 按阵营铺二级分组（敌方-小人 / 敌方-怪物 / 敌方舰队 共用）
+function npcfixKingdomGroups(map, fallbackColor, icon, extraTrailing) {
+  let h = '';
+  const kinds = Object.keys(map).map(Number).sort((a, b) => a - b);
+  for (const kid of kinds) {
+    const kInfo = getKingdomInfo(kid);
+    h += npcfixEntityGroupCard(kInfo ? kInfo.name : ('阵营' + kid), kInfo ? kInfo.bg : fallbackColor,
+      icon, map[kid], {}, extraTrailing ? extraTrailing(kid) : null);
+  }
+  return h;
+}
+
+async function renderNpcfixBox2(forceScan) {
   const el = document.getElementById('content');
+  // 首次进入（无缓存）或显式刷新时才真正扫描；其余情况复用已扫描数据直接渲染
+  const needScan = forceScan === true || entityEditorData.length === 0;
   let html = '';
   html += '<div style="padding:20px;height:100%;box-sizing:border-box;display:flex;flex-direction:column;overflow:hidden">';
   html += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-shrink:0">';
   html += '<h2 style="color:var(--accent-light);margin:0;font-size:18px">&#x2694; 战斗单位</h2>';
-  html += '<span style="color:var(--text-muted);font-size:13px">' + entityEditorData.length + ' 个实体</span>';
-  html += '<button onclick="entityEditorScan()" style="padding:6px 16px;background:var(--accent);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;font-size:13px;margin-left:auto">重新扫描</button>';
+  html += '<span style="color:var(--text-muted);font-size:13px">我方战斗单位 · 敌方小人/怪物 · 舰船（区分敌我，商船不计）</span>';
+  html += '<button onclick="renderNpcfixBox2(true)" style="padding:6px 16px;background:var(--accent);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;font-size:13px;margin-left:auto">重新扫描</button>';
   html += '</div>';
-  html += '<div id="npcfixBox2Body" style="flex:1;overflow-y:auto;min-height:0">';
-  if (entityEditorData.length === 0)
-    html += '<div style="padding:40px;text-align:center;color:var(--text-muted)">点击右上"重新扫描"</div>';
-  else
-    html += renderNpcfixBox2Groups();
-  html += '</div></div>';
+  html += '<div id="npcfixBox2Body" style="flex:1;overflow-y:auto;min-height:0;color:var(--text-muted)">' + (needScan ? '扫描中...' : '') + '</div>';
+  html += '</div>';
   el.innerHTML = html;
-}
 
-function renderNpcfixBox2Groups() {
-  const isBattle = (cn) => /Npc|Soldier|BattleUnit/.test(cn) && !/NpcHelper|NpcTask/.test(cn);
-  const ours = [], humanoids = {}, monsters = {}, ships = [];
-  for (const e of entityEditorData) {
-    const cn = e.className || '';
-    const kid = e.hometownKingdomId || e.territoryKingdomId || 0;
-    if (cn.includes('Ship')) { ships.push(e); continue; }
-    if (cn.startsWith('Monster')) {
-      if (!monsters[kid]) monsters[kid] = [];
-      monsters[kid].push(e);
-      continue;
-    }
-    if (isBattle(cn)) {
-      if (kid === 1) ours.push(e);
-      else {
-        if (!humanoids[kid]) humanoids[kid] = [];
-        humanoids[kid].push(e);
-      }
+  if (needScan) {
+    try {
+      await fetch('/api/editor/scan', { method: 'POST' });
+      await fetchEntityEditorData();
+    } catch (e) {
+      const b = document.getElementById('npcfixBox2Body');
+      if (b) b.innerHTML = '<div style="padding:40px;text-align:center;color:var(--danger)">扫描失败: ' + esc(String((e && e.message) || e)) + '</div>';
+      return;
     }
   }
 
-  let html = '';
-  // 我方单位（可修改 + ×10）
-  if (ours.length > 0)
-    html += editorGroupHtml('我方单位', 'var(--success-dark, #27ae60)', '#fff', ours.length + ' 个',
-      '<div style="display:flex;flex-direction:column;gap:4px;padding:6px 0">' + ours.map(npcfixUnitItemHtml).join('') + '</div>');
+  const body = document.getElementById('npcfixBox2Body');
+  if (!body) return;
+  const c = npcfixCombatClassify(entityEditorData);
+  let h = '';
 
-  // 敌方-小人（按阵营）
-  const humanKinds = Object.keys(humanoids).map(Number).sort((a, b) => a - b);
-  if (humanKinds.length > 0) {
-    let inner = '';
-    for (const kid of humanKinds) {
-      const kInfo = getKingdomInfo(kid);
-      inner += editorGroupHtml(kInfo ? esc(kInfo.name) : ('阵营' + kid),
-        kInfo ? kInfo.bg : 'var(--text-muted)', kInfo ? kInfo.fg : '#fff',
-        humanoids[kid].length + ' 个', editorItemsHtml(humanoids[kid]));
+  // ===== 我方战斗单位（按兵种二级分组，与盒子1「士兵」同款） =====
+  if (c.ours.length > 0) {
+    const prof = {};
+    for (const e of c.ours) {
+      const k = e.soldierTypeName || '未知兵种';
+      (prof[k] = prof[k] || []).push(e);
     }
-    html += editorGroupHtml('敌方-小人', '#c0392b', '#fff', humanKinds.reduce((s, k) => s + humanoids[k].length, 0) + ' 个', inner);
+    const entries = Object.keys(prof).sort((a, b) => prof[b].length - prof[a].length);
+    let inner = '<div class="npcfix-box-body">';
+    for (const name of entries)
+      inner += npcfixEntityGroupCard('我方 · ' + name, 'var(--success-dark, #27ae60)', '&#x2694;', prof[name], { combat: true });
+    inner += '</div>';
+    h += htmlDetailsGroup('我方战斗单位 (' + c.ours.length + ')', 'var(--success-dark, #27ae60)', '&#x2694;',
+      c.ours.length + ' 个', inner, null, npcfixBoxBtns());
   }
 
-  // 敌方-怪物（按阵营，一键清除执行两遍间隔1秒）
-  const monsterKinds = Object.keys(monsters).map(Number).sort((a, b) => a - b);
-  if (monsterKinds.length > 0) {
-    let inner = '';
-    for (const kid of monsterKinds) {
-      const kInfo = getKingdomInfo(kid);
-      const label = (kInfo ? esc(kInfo.name) : ('阵营' + kid)) + '（清除执行2遍，间隔1秒）';
-      const hashes = monsters[kid].map(e => e.ptrHash);
-      inner += editorGroupHtml(label, 'var(--danger, #e74c3c)', '#fff', monsters[kid].length + ' 个', editorItemsHtml(monsters[kid]));
-      // 一键清除按钮插到组 summary 后：用带按钮的分组头
-      inner += '';
-    }
-    html += editorGroupHtml('敌方-怪物', 'var(--danger, #e74c3c)', '#fff',
-      monsterKinds.reduce((s, k) => s + monsters[k].length, 0) + ' 个',
-      '<div style="padding:6px 0">' +
-      monsterKinds.map(kid => {
-        const kInfo = getKingdomInfo(kid);
-        const label = (kInfo ? esc(kInfo.name) : ('阵营' + kid));
-        return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">' +
-          '<span style="font-size:12px;color:var(--text-primary)">' + label + ' (' + monsters[kid].length + ')</span>' +
-          '<button onclick="npcfixKillMonsters(' + kid + ')" style="padding:3px 10px;background:var(--danger,#e74c3c);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px">一键清除(2遍)</button>' +
-          '</div><div style="display:flex;flex-direction:column;gap:4px;padding:0 0 6px 12px">' +
-          monsters[kid].map(e => renderEditorEntityItem(e)).join('') + '</div>';
-      }).join('') +
-      '</div>');
+  // ===== 敌方-小人（按阵营） =====
+  if (Object.keys(c.humanoids).length > 0) {
+    const n = npcfixSumKinds(c.humanoids);
+    h += htmlDetailsGroup('敌方-小人 (' + n + ')', '#c0392b', '&#x1F464;', n + ' 个',
+      '<div class="npcfix-box-body">' + npcfixKingdomGroups(c.humanoids, 'var(--text-muted)', '&#x1F464;') + '</div>',
+      null, npcfixBoxBtns());
   }
 
-  // 船（仅战舰）
-  if (ships.length > 0) {
-    const warships = ships.filter(e => /war|battle|attack|战/i.test((e.goName || '') + (e.className || '')) || (e.className || '').indexOf('Ship') === 0);
-    if (warships.length > 0)
-      html += editorGroupHtml('船-战舰', '#3498db', '#fff', warships.length + ' 个', editorItemsHtml(warships));
-    const traders = ships.length - warships.length;
-    if (traders > 0)
-      html += '<div style="margin:4px 0 8px 12px;font-size:11px;color:var(--text-muted)">另有 ' + traders + ' 艘商船未列入</div>';
+  // ===== 敌方-怪物（按阵营，每组带一键清除） =====
+  if (Object.keys(c.monsters).length > 0) {
+    const n = npcfixSumKinds(c.monsters);
+    h += htmlDetailsGroup('敌方-怪物 (' + n + ')', 'var(--danger, #e74c3c)', '&#x1F47E;', n + ' 个',
+      '<div class="npcfix-box-body">' + npcfixKingdomGroups(c.monsters, 'var(--danger, #e74c3c)', '&#x1F47E;', npcfixKillBtn) + '</div>',
+      null, npcfixBoxBtns());
   }
 
-  if (html === '') html = '<div style="padding:20px;text-align:center;color:var(--text-muted)">没有匹配的战斗单位</div>';
-  return html;
-}
+  // ===== 船：只列战舰，区分敌我（货船/商船不计） =====
+  if (c.shipsOurs.length > 0 || Object.keys(c.shipsEnemy).length > 0) {
+    let inner = '<div class="npcfix-box-body">';
+    if (c.shipsOurs.length > 0)
+      inner += npcfixEntityGroupCard('我方舰队', 'var(--success-dark, #27ae60)', '&#x1F6A2;', c.shipsOurs, {});
+    inner += npcfixKingdomGroups(c.shipsEnemy, '#3498db', '&#x1F6A2;');
+    inner += '</div>';
+    const n = c.shipsOurs.length + npcfixSumKinds(c.shipsEnemy);
+    h += htmlDetailsGroup('船 · 战舰 (' + n + ')', '#3498db', '&#x1F6A2;', n + ' 个', inner, null, npcfixBoxBtns());
+  }
 
-// 我方战斗单位条目（带 攻击×10 / 血量×10）
-function npcfixUnitItemHtml(e) {
-  const ph = e.ptrHash || 0;
-  const displayName = e.npcName || e.name || e.goName || 'unknown';
-  let h = '<div style="margin-bottom:4px">';
-  h += '<div style="display:flex;align-items:center;gap:8px;padding:6px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm)">';
-  h += '<span style="font-weight:600;color:var(--text-primary)">' + esc(displayName) + '</span>';
-  h += '<span style="font-size:11px;color:var(--text-muted);margin-left:auto">GUID:' + (e.guid || 0) + '</span>';
-  h += '<button onclick="event.stopPropagation();npcfixMultiply(' + ph + ',\'atk\')" style="padding:3px 8px;background:var(--warning,#e67e22);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px">攻击×10</button>';
-  h += '<button onclick="event.stopPropagation();npcfixMultiply(' + ph + ',\'hp\')" style="padding:3px 8px;background:var(--success-dark,#27ae60);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px">血量×10</button>';
-  h += '<button onclick="event.stopPropagation();locateEditorEntity(' + ph + ')" style="padding:3px 8px;background:var(--info,#3498db);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px">定位</button>';
-  h += '</div></div>';
-  return h;
+  body.innerHTML = h || '<div style="padding:40px;text-align:center;color:var(--text-muted)">没有匹配的战斗单位</div>';
 }
 
 // ×10：读取当前字段值并写回 10 倍
@@ -527,17 +606,16 @@ async function destroyBatch(hashes) {
 async function npcfixKillMonsters(kid) {
   if (!confirm('确定清除该阵营全部怪物？（将执行2遍，覆盖分裂怪）')) return;
   toast('清除中...', false);
-  const hashes = entityEditorData
-    .filter(e => (e.className || '').startsWith('Monster') && (e.hometownKingdomId || e.territoryKingdomId || 0) === kid)
+  const pick = () => entityEditorData
+    .filter(e => (e.className || '').indexOf('Monster') === 0 && npcfixUnitKingdom(e) === kid)
     .map(e => e.ptrHash);
+  const hashes = pick();
   if (hashes.length === 0) { toast('没有怪物', true); return; }
   const d1 = await destroyBatch(hashes);
   await new Promise(r => setTimeout(r, 1000));
   // 重扫拿到分裂新生成的怪物，再清一遍
   await entityEditorScan();
-  const hashes2 = entityEditorData
-    .filter(e => (e.className || '').startsWith('Monster') && (e.hometownKingdomId || e.territoryKingdomId || 0) === kid)
-    .map(e => e.ptrHash);
+  const hashes2 = pick();
   let d2 = { destroyed: 0 };
   if (hashes2.length > 0) d2 = await destroyBatch(hashes2);
   await entityEditorScan();

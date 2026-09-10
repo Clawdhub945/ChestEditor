@@ -38,6 +38,7 @@ internal static class EntityScan
         public string NpcName = "";
         public int HometownKingdomId;
         public int TerritoryKingdomId;
+        public int KingdomId; // 实体自身的 kingdom_id（Ship 直接持有；Territory.IsMyTerritory 即用此字段判敌我）
         public string StuffNameWithIdIndex = "";
         public int SoldierTypeId;
         public IntPtr Ptr;
@@ -147,6 +148,13 @@ internal static class EntityScan
                         if (fieldMap.TryGetValue("npc_id", out var npcIdFe))
                             try { npcId = ReadIl2CppInt(compPtr, npcIdFe.Offset); } catch { }
 
+                        // 读取实体自身的 kingdom_id（Ship 有该字段：Ship.SetInfo 里
+                        // kingdom_id = territory.kingdom_id，Territory.IsMyTerritory 也用它判敌我）。
+                        // Npc 用的是 hometown_kingdom_id，这里读不到就保持 0。
+                        int kingdomId = 0;
+                        if (fieldMap.TryGetValue("kingdom_id", out var kFe) && !kFe.IsString && !kFe.IsPointer)
+                            try { kingdomId = ReadIl2CppInt(compPtr, kFe.Offset); } catch { }
+
                         seenPtrHash.Add(ptrHash);
 
                         var entity = new EditorEntity
@@ -155,6 +163,7 @@ internal static class EntityScan
                             ClassName = className,
                             NpcName = npcName,
                             HometownKingdomId = hometownKingdomId,
+                            KingdomId = kingdomId,
                             StuffNameWithIdIndex = stuffNameWithIdIndex,
                             SoldierTypeId = soldierTypeId,
                             Ptr = compPtr,
@@ -225,6 +234,7 @@ internal static class EntityScan
             jw.WriteString("soldierTypeName", GetSoldierTypeName(e.SoldierTypeId));
             jw.WriteNumber("hometownKingdomId", e.HometownKingdomId);
             jw.WriteNumber("territoryKingdomId", e.TerritoryKingdomId);
+            jw.WriteNumber("kingdomId", e.KingdomId);
             jw.WriteNumber("ptrHash", e.PtrHash);
             jw.WriteNumber("guid", e.Guid);
             jw.WriteNumber("stuffId", e.StuffId);
