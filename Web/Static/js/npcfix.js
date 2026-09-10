@@ -24,12 +24,7 @@ function toggleNpcfix() {
 }
 
 function selectNpcfixView(view) {
-  selectedChest = -1;
-  dragonView = '';
-  npcView = '';
-  npcfixView = (npcfixView === view) ? '' : view;
-  renderSidebar();
-  renderContent();
+  selectExclusiveView('npcfix', view);
 }
 
 // ===== 盒子1 小人数值修改 =====
@@ -64,52 +59,81 @@ async function renderNpcfixBox1() {
     return;
   }
 
-  // 按职业分组（复用 NPC 面板的分类逻辑）
-  const groups = [
-    { key: 'soldiers', label: '士兵', icon: '&#x2694;', color: '#e74c3c', items: classifyNpcByType(npcListData).soldiers },
-    { key: 'workers', label: '工作者', icon: '&#x1F527;', color: '#f39c12', items: classifyNpcByType(npcListData).workers },
-    { key: 'laborers', label: '杂工', icon: '&#x1F6E0;', color: '#95a5a6', items: classifyNpcByType(npcListData).laborers },
-    { key: 'children', label: '儿童', icon: '&#x1F476;', color: '#e91e63', items: classifyNpcByType(npcListData).children },
-    { key: 'others', label: '其他', icon: '&#x2753;', color: '#34495e', items: classifyNpcByType(npcListData).others },
-  ];
+  // 先分敌我：阵营1=我方；其余阵营里带兵种ID的是敌方士兵
+  const ours = npcListData.filter(n => (n.hometownKingdomId || 0) === 1);
+  const enemySoldiers = npcListData.filter(n => (n.hometownKingdomId || 0) !== 1 && (n.soldierTypeId || 0) > 0);
+
+  // 我方士兵再按职业（兵种名）细分
+  const oursByType = classifyNpcByType(ours);
+  const professions = {};
+  for (const n of oursByType.soldiers) {
+    const prof = n.soldierTypeName || '未知兵种';
+    if (!professions[prof]) professions[prof] = [];
+    professions[prof].push(n);
+  }
+
+  // 敌方士兵按阵营细分
+  const enemyByKingdom = {};
+  for (const n of enemySoldiers) {
+    const kid = n.hometownKingdomId || 0;
+    if (!enemyByKingdom[kid]) enemyByKingdom[kid] = [];
+    enemyByKingdom[kid].push(n);
+  }
 
   let html2 = '';
-  for (const g of groups) {
-    if (g.items.length === 0) continue;
+
+  // ===== 我方 =====
+  html2 += '<div style="font-size:13px;font-weight:600;color:var(--success-dark,#27ae60);margin:4px 0 6px">我方 (阵营1) · ' + ours.length + ' 个</div>';
+  // 士兵按职业细分
+  const profEntries = Object.entries(professions).sort((a, b) => b[1].length - a[1].length);
+  for (const [prof, list] of profEntries) {
     let cards = '<div style="padding:4px 0">';
-    for (const npc of g.items)
-      cards += '<div style="margin-bottom:6px">' + renderNpcfixNpcCard(npc, g.key) + '</div>';
+    for (const npc of list)
+      cards += '<div style="margin-bottom:6px">' + renderNpcCard(npc, {groupKey: 'soldiers'}) + '</div>';
     cards += '</div>';
-    html2 += htmlDetailsGroup(g.label + ' (' + g.items.length + ')', g.color, g.icon, g.items.length + ' 个', cards);
+    html2 += htmlDetailsGroup('士兵·' + prof + ' (' + list.length + ')', '#e74c3c', '&#x2694;', list.length + ' 个', cards);
   }
+  // 非士兵职业组
+  const nonSoldierGroups = [
+    { key: 'workers', label: '工作者', icon: '&#x1F527;', color: '#f39c12' },
+    { key: 'laborers', label: '杂工', icon: '&#x1F6E0;', color: '#95a5a6' },
+    { key: 'children', label: '儿童', icon: '&#x1F476;', color: '#e91e63' },
+    { key: 'others', label: '其他', icon: '&#x2753;', color: '#34495e' },
+  ];
+  for (const g of nonSoldierGroups) {
+    const list = oursByType[g.key];
+    if (!list || list.length === 0) continue;
+    let cards = '<div style="padding:4px 0">';
+    for (const npc of list)
+      cards += '<div style="margin-bottom:6px">' + renderNpcCard(npc, {groupKey: g.key}) + '</div>';
+    cards += '</div>';
+    html2 += htmlDetailsGroup(g.label + ' (' + list.length + ')', g.color, g.icon, list.length + ' 个', cards);
+  }
+
+  // ===== 敌方士兵（按阵营） =====
+  const enemyKinds = Object.keys(enemyByKingdom).map(Number).sort((a, b) => b - a);
+  if (enemyKinds.length > 0) {
+    html2 += '<div style="font-size:13px;font-weight:600;color:var(--danger,#e74c3c);margin:10px 0 6px">敌方士兵 · ' + enemySoldiers.length + ' 个</div>';
+    for (const kid of enemyKinds) {
+      const kInfo = getKingdomInfo(kid);
+      const label = kInfo ? kInfo.name : ('阵营' + kid);
+      const list = enemyByKingdom[kid];
+      // 敌方职业分布小统计
+      const profDist = {};
+      for (const n of list) profDist[n.soldierTypeName || '?'] = (profDist[n.soldierTypeName || '?'] || 0) + 1;
+      const profText = Object.entries(profDist).sort((a, b) => b[1] - a[1]).map(([n, c]) => n + '×' + c).join('、');
+      let cards = '<div style="padding:2px 0 4px;font-size:11px;color:var(--text-muted)">' + esc(profText) + '</div>';
+      for (const npc of list)
+        cards += '<div style="margin-bottom:6px">' + renderNpcCard(npc, {groupKey: 'soldiers'}) + '</div>';
+      html2 += htmlDetailsGroup(label + ' (' + list.length + ')', kInfo ? kInfo.bg : '#7f8c8d', '&#x2694;', list.length + ' 个', cards);
+    }
+  }
+
   body.innerHTML = html2 || '<div style="padding:40px;text-align:center;color:var(--text-muted)">暂无数据</div>';
 }
 
-// 单个 NPC 卡：字段编辑懒加载（展开 details 才请求一次字段，职业字段置顶）
-function renderNpcfixNpcCard(npc, groupKey) {
-  const ptrHash = npc.ptrHash || 0;
-  const displayName = npc.npcName || npc.name || ('NPC#' + npc.guid);
-  const soldierType = npc.soldierTypeName || '';
-  const npcTypeName = getNpcTypeName(npc.npcType || 0);
-  let h = '';
-  h += '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius)">';
 
-  h += '<div style="display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid var(--border)">';
-  h += '<span style="font-weight:600;color:var(--text-primary);font-size:13px">' + esc(displayName) + '</span>';
-  if (npcTypeName) h += '<span style="font-size:11px;padding:1px 8px;border-radius:8px;background:var(--warning,#e67e22);color:#fff">' + esc(npcTypeName) + '</span>';
-  if (soldierType) h += '<span style="font-size:11px;padding:1px 8px;border-radius:8px;background:var(--accent);color:#fff">' + esc(soldierType) + '</span>';
-  h += '<span style="font-size:11px;color:var(--text-muted);margin-left:auto">GUID:' + npc.guid + '</span>';
-  h += '<button onclick="event.stopPropagation();locateEditorEntity(' + ptrHash + ')" style="padding:3px 8px;background:var(--info,#3498db);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px">定位</button>';
-  h += '</div>';
-
-  h += '<details style="border-top:1px solid var(--border)" ontoggle="loadNpcfixCard(this,' + ptrHash + ',\'' + groupKey + '\')">';
-  h += '<summary style="cursor:pointer;padding:6px 14px;font-size:12px;color:var(--text-muted);user-select:none">字段编辑（职业字段置顶）</summary>';
-  h += '<div id="npcfix-body-' + ptrHash + '" style="padding:6px 14px 10px;color:var(--text-muted);font-size:12px">展开加载...</div>';
-  h += '</details>';
-
-  h += '</div>';
-  return h;
-}
+// NPC 卡片统一由 npc.js 的 renderNpcCard(npc, {groupKey}) 渲染（见 npc.js）
 
 // 卡片字段加载：一次请求，渲染 职业快速字段 + 全字段表格
 async function loadNpcfixCard(details, ptrHash, groupKey) {
@@ -128,8 +152,7 @@ async function loadNpcfixCard(details, ptrHash, groupKey) {
     const keys = [...NPCFIX_COMMON_FIELDS, ...(NPCFIX_FIELD_SETS[groupKey] || [])];
     const seen = new Set();
     const groupLabel = { soldiers: '士兵', workers: '工作者', laborers: '杂工', children: '儿童', others: '其他' }[groupKey] || groupKey;
-    let quick = npcTableHeader(ptrHash, false).replace('class="npc-fields-table"', 'class="npc-fields-table"') ;
-    quick = '<div style="font-size:11px;color:var(--accent-light);margin-bottom:4px">常用字段（' + groupLabel + '）</div>' + npcTableHeader(ptrHash, false);
+    let quick = '<div style="font-size:11px;color:var(--accent-light);margin-bottom:4px">常用字段（' + groupLabel + '）</div>' + npcTableHeader(ptrHash, false);
     for (const key of keys) {
       if (seen.has(key)) continue;
       seen.add(key);
@@ -144,26 +167,8 @@ async function loadNpcfixCard(details, ptrHash, groupKey) {
     const allKeys = Object.keys(fields).filter(k => k !== 'error' && !seen.has(k));
     const numKeys = allKeys.filter(k => !fields[k].isString);
     const strKeys = allKeys.filter(k => fields[k].isString);
-    const checked = new Set(getCheckedFields(ptrHash));
     let full = npcTableHeader(ptrHash, true);
-    for (const key of numKeys) {
-      const f = fields[key];
-      const displayVal = (typeof f.value === 'number') ? (f.isFloat ? f.value.toFixed(2) : f.value) : (f.value || 0);
-      full += npcNumRowHtml(ptrHash, key, f.isFloat, displayVal, translations[key] || '', {
-        inpId: 'npcfix_all_' + ptrHash + '_' + key,
-        checkbox: checked.has(key),
-        rowCls: 'npc-field-row',
-        dataKey: esc(key).toLowerCase()
-      });
-    }
-    for (const key of strKeys) {
-      full += npcStrRowHtml(key, fields[key].value, translations[key] || '', {
-        ptrHash: ptrHash,
-        checkbox: checked.has(key),
-        rowCls: 'npc-field-row',
-        dataKey: esc(key).toLowerCase()
-      });
-    }
+    full += npcFieldRowsHtml(ptrHash, fields, translations, numKeys, strKeys, 'npcfix_all_');
     full += '</tbody></table>';
 
     quick += '</tbody></table>';

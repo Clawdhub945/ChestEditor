@@ -129,32 +129,42 @@ function getNpcTypeName(typeId) {
 }
 
 
-function renderNpcCard(npc) {
+// NPC 卡片（我方 NPC 面板 与 NPC修改盒子1 共用）
+// opts.groupKey 存在 => NPC修改模式：字段按职业置顶、无"勾选字段"显示区
+function renderNpcCard(npc, opts) {
+  opts = opts || {};
+  const isFix = opts.groupKey !== undefined;
   const ptrHash = npc.ptrHash || 0;
   const displayName = npc.npcName || npc.name || ('NPC#' + npc.guid);
   const soldierType = npc.soldierTypeName || '';
   const npcTypeName = getNpcTypeName(npc.npcType || 0);
-  const fieldCount = npc.fieldCount || 0;
+  const bodyId = isFix ? ('npcfix-body-' + ptrHash) : ('npc-fields-' + ptrHash);
+  const toggleCall = isFix
+    ? "loadNpcfixCard(this," + ptrHash + ",'" + opts.groupKey + "')"
+    : "loadNpcFields(this," + ptrHash + ")";
+  const summaryText = isFix
+    ? '字段编辑（职业字段置顶）'
+    : ('所有字段 (' + (npc.fieldCount || 0) + ')');
   let h = '';
 
   h += '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius)">';
 
-  // 头部：名称 + 兵种 + NPC类型
-  h += '<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--border)">';
-  h += '<span style="font-weight:600;color:var(--text-primary);font-size:14px">' + esc(displayName) + '</span>';
+  // 头部：名称 + NPC类型 + 兵种
+  h += '<div style="display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid var(--border)">';
+  h += '<span style="font-weight:600;color:var(--text-primary);font-size:13px">' + esc(displayName) + '</span>';
   if (npcTypeName) h += '<span style="font-size:11px;padding:1px 8px;border-radius:8px;background:var(--warning,#e67e22);color:#fff">' + esc(npcTypeName) + '</span>';
   if (soldierType) h += '<span style="font-size:11px;padding:1px 8px;border-radius:8px;background:var(--accent);color:#fff">' + esc(soldierType) + '</span>';
   h += '<span style="font-size:11px;color:var(--text-muted);margin-left:auto">GUID:' + npc.guid + '</span>';
   h += '<button onclick="event.stopPropagation();locateEditorEntity(' + ptrHash + ')" style="padding:3px 8px;background:var(--info,#3498db);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px">定位</button>';
   h += '</div>';
 
-  // 勾选字段显示区域
-  h += '<div id="npc-checked-' + ptrHash + '"></div>';
+  // 勾选字段显示区域（仅 NPC 面板用）
+  if (!isFix) h += '<div id="npc-checked-' + ptrHash + '"></div>';
 
-  // 所有字段折叠（懒加载）
-  h += '<details style="border-top:1px solid var(--border)" ontoggle="loadNpcFields(this,' + ptrHash + ')">';
-  h += '<summary style="cursor:pointer;padding:8px 14px;font-size:12px;color:var(--text-muted);user-select:none">所有字段 (' + fieldCount + ')</summary>';
-  h += '<div id="npc-fields-' + ptrHash + '" style="padding:6px 14px 10px;color:var(--text-muted);font-size:12px">点击展开加载...</div>';
+  // 字段折叠（懒加载）
+  h += '<details style="border-top:1px solid var(--border)" ontoggle="' + toggleCall + '">';
+  h += '<summary style="cursor:pointer;padding:6px 14px;font-size:12px;color:var(--text-muted);user-select:none">' + summaryText + '</summary>';
+  h += '<div id="' + bodyId + '" style="padding:6px 14px 10px;color:var(--text-muted);font-size:12px">展开加载...</div>';
   h += '</details>';
 
   h += '</div>';
@@ -227,6 +237,32 @@ function npcStrRowHtml(key, val, trans, opts) {
   return h;
 }
 
+// 字段表格数据行（NPC 面板 与 NPC修改盒子1 共用）
+// inpPrefix: 数值输入框 id 前缀（'npc_inp_' / 'npcfix_all_'）
+function npcFieldRowsHtml(ptrHash, fields, translations, numKeys, strKeys, inpPrefix) {
+  const checked = new Set(getCheckedFields(ptrHash));
+  let h = '';
+  for (const key of numKeys) {
+    const f = fields[key];
+    const displayVal = (typeof f.value === 'number') ? (f.isFloat ? f.value.toFixed(2) : f.value) : (f.value || 0);
+    h += npcNumRowHtml(ptrHash, key, f.isFloat, displayVal, translations[key] || '', {
+      inpId: inpPrefix + ptrHash + '_' + key,
+      checkbox: checked.has(key),
+      rowCls: 'npc-field-row',
+      dataKey: esc(key).toLowerCase()
+    });
+  }
+  for (const key of strKeys) {
+    h += npcStrRowHtml(key, fields[key].value, translations[key] || '', {
+      ptrHash: ptrHash,
+      checkbox: checked.has(key),
+      rowCls: 'npc-field-row',
+      dataKey: esc(key).toLowerCase()
+    });
+  }
+  return h;
+}
+
 
 async function loadNpcFields(details, ptrHash) {
   if (!details.open) return;
@@ -246,7 +282,6 @@ async function loadNpcFields(details, ptrHash) {
       container.innerHTML = '<span style="color:var(--danger)">实体已失效 (ptrHash: ' + ptrHash + ')，请<a href="javascript:void(0)" onclick="openNpcPanel()" style="color:var(--accent)">重新扫描</a></span>';
       return;
     }
-    const checked = new Set(getCheckedFields(ptrHash));
     const numKeys = allKeys.filter(k => !fields[k].isString);
     const strKeys = allKeys.filter(k => fields[k].isString);
 
@@ -262,25 +297,7 @@ async function loadNpcFields(details, ptrHash) {
     h += '<a href="javascript:void(0)" onclick="toggleAllNpcCheckboxes(' + ptrHash + ',false)" style="color:var(--text-muted)">取消全选</a>';
     h += '</div>';
     h += npcTableHeader(ptrHash, true);
-
-    for (const key of numKeys) {
-      const f = fields[key];
-      const displayVal = (typeof f.value === 'number') ? (f.isFloat ? f.value.toFixed(2) : f.value) : (f.value || 0);
-      h += npcNumRowHtml(ptrHash, key, f.isFloat, displayVal, translations[key], {
-        inpId: 'npc_inp_' + ptrHash + '_' + key,
-        checkbox: checked.has(key),
-        rowCls: 'npc-field-row',
-        dataKey: esc(key).toLowerCase()
-      });
-    }
-    for (const key of strKeys) {
-      h += npcStrRowHtml(key, fields[key].value, translations[key], {
-        ptrHash: ptrHash,
-        checkbox: checked.has(key),
-        rowCls: 'npc-field-row',
-        dataKey: esc(key).toLowerCase()
-      });
-    }
+    h += npcFieldRowsHtml(ptrHash, fields, translations, numKeys, strKeys, 'npc_inp_');
     h += '</tbody></table>';
 
     container.innerHTML = h;
@@ -411,11 +428,19 @@ async function setNpcField(ptrHash, field, value, isFloat) {
 }
 
 
-function selectNpcView(view) {
+// 视图互斥切换（NPC 面板 与 NPC修改 面板共用）
+// target: 'npc' | 'npcfix'；再次点同一视图则收起
+function selectExclusiveView(target, view) {
   selectedChest = -1;
   dragonView = '';
-  npcView = (npcView === view) ? '' : view;
-  npcfixView = '';
+  const toggle = (cur) => (cur === view) ? '' : view;
+  if (target === 'npc') { npcView = toggle(npcView); npcfixView = ''; }
+  else { npcfixView = toggle(npcfixView); npcView = ''; }
   renderSidebar();
   renderContent();
+}
+
+
+function selectNpcView(view) {
+  selectExclusiveView('npc', view);
 }

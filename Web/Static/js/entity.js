@@ -112,9 +112,9 @@ async function locateEditorEntity(ptrHash) {
       body: JSON.stringify({ptrHash})
     });
     const j = await r.json();
-    if (j.error) { showToast('定位失败: ' + j.error, 'error'); return; }
-    showToast('已定位到 (' + (j.x||0).toFixed(1) + ', ' + (j.y||0).toFixed(1) + ')', 'success');
-  } catch(e) { showToast('定位请求失败', 'error'); }
+    if (j.error) { toast('定位失败: ' + j.error, true); return; }
+    toast('已定位到 (' + (j.x||0).toFixed(1) + ', ' + (j.y||0).toFixed(1) + ')');
+  } catch(e) { toast('定位请求失败', true); }
 }
 
 
@@ -222,205 +222,6 @@ function renderNpcGroup(items) {
     others[kid].push(e);
   }
   let h = '';
-  // 我方
-  if (mine.length > 0) {
-    const workers = [];
-    const soldiers = [];
-    for (const e of mine) {
-      const stn = e.soldierTypeName || '';
-      if (stn === '民兵' || stn === '市民') workers.push(e); else soldiers.push(e);
-    }
-    const mineHashes = mine.map(e => e.ptrHash);
-    h += '<details style="margin-bottom:8px;margin-left:12px">';
-    h += '<summary style="cursor:pointer;padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-weight:600;font-size:13px;display:flex;align-items:center;gap:8px">';
-    h += '<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:var(--success-dark, #27ae60);color:#fff">我方</span>';
-    h += '<span style="margin-left:auto;font-size:12px;color:var(--text-muted);font-weight:400">' + mine.length + ' 个</span>';
-    h += '<button onclick="event.stopPropagation();destroyEditorEntities(' + JSON.stringify(mineHashes) + ')" style="padding:2px 8px;background:var(--danger,#e74c3c);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px">一键消除</button>';
-    h += '</summary>';
-    // 工作者
-    if (workers.length > 0) {
-      const wHashes = workers.map(e => e.ptrHash);
-      h += '<details style="margin-bottom:8px;margin-left:12px">';
-      h += '<summary style="cursor:pointer;padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-weight:600;font-size:13px;display:flex;align-items:center;gap:8px">';
-      h += '<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:#f39c12;color:#fff">工作者</span>';
-      h += '<span style="margin-left:auto;font-size:12px;color:var(--text-muted);font-weight:400">' + workers.length + ' 个</span>';
-      h += '<button onclick="event.stopPropagation();destroyEditorEntities(' + JSON.stringify(wHashes) + ')" style="padding:2px 8px;background:var(--danger,#e74c3c);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px">一键消除</button>';
-      h += '</summary>';
-      h += '<div style="display:flex;flex-direction:column;gap:4px;padding:6px 0">';
-      for (const e of workers) h += renderEditorEntityItem(e);
-      h += '</div></details>';
-    }
-    // 士兵
-    if (soldiers.length > 0) {
-      const sHashes = soldiers.map(e => e.ptrHash);
-      h += '<details style="margin-bottom:8px;margin-left:12px">';
-      h += '<summary style="cursor:pointer;padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-weight:600;font-size:13px;display:flex;align-items:center;gap:8px">';
-      h += '<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:#3498db;color:#fff">士兵</span>';
-      h += '<span style="margin-left:auto;font-size:12px;color:var(--text-muted);font-weight:400">' + soldiers.length + ' 个</span>';
-      h += '<button onclick="event.stopPropagation();destroyEditorEntities(' + JSON.stringify(sHashes) + ')" style="padding:2px 8px;background:var(--danger,#e74c3c);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px">一键消除</button>';
-      h += '</summary>';
-      h += '<div style="display:flex;flex-direction:column;gap:4px;padding:6px 0">';
-      for (const e of soldiers) h += renderEditorEntityItem(e);
-      h += '</div></details>';
-    }
-    h += '</details>';
-  }
-  // 其他阵营按王国分组
-  const sortedKids = Object.keys(others).map(Number).sort((a,b) => a - b);
-  for (const kid of sortedKids) {
-    const group = others[kid];
-    const kInfo = getKingdomInfo(kid);
-    const label = kInfo ? kInfo.name : ('阵营' + kid);
-    const bg = kInfo ? kInfo.bg : 'var(--text-muted)';
-    const fg = kInfo ? kInfo.fg : '#fff';
-    const groupHashes = group.map(e => e.ptrHash);
-    h += '<details style="margin-bottom:8px;margin-left:12px">';
-    h += '<summary style="cursor:pointer;padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-weight:600;font-size:13px;display:flex;align-items:center;gap:8px">';
-    h += '<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:' + bg + ';color:' + fg + '">' + esc(label) + '</span>';
-    h += '<span style="margin-left:auto;font-size:12px;color:var(--text-muted);font-weight:400">' + group.length + ' 个</span>';
-    h += '<button onclick="event.stopPropagation();destroyEditorEntities(' + JSON.stringify(groupHashes) + ')" style="padding:2px 8px;background:var(--danger,#e74c3c);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px">一键消除</button>';
-    h += '</summary>';
-    h += '<div style="display:flex;flex-direction:column;gap:4px;padding:6px 0">';
-    for (const e of group) h += renderEditorEntityItem(e);
-    h += '</div></details>';
-  }
-  return h;
-}
-
-function renderTerritoryGroup(items) {
-  const mine = [];
-  const others = {};
-  for (const e of items) {
-    const kid = e.territoryKingdomId || e.hometownKingdomId || 0;
-    if (kid === 1) { mine.push(e); continue; }
-    if (!others[kid]) others[kid] = [];
-    others[kid].push(e);
-  }
-  let h = '';
-  // 我方（默认展开）
-  if (mine.length > 0) {
-    const mineHashes = mine.map(e => e.ptrHash);
-    h += '<details style="margin-bottom:8px;margin-left:12px">';
-    h += '<summary style="cursor:pointer;padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-weight:600;font-size:13px;display:flex;align-items:center;gap:8px">';
-    h += '<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:var(--success-dark, #27ae60);color:#fff">我方</span>';
-    h += '<span style="margin-left:auto;font-size:12px;color:var(--text-muted);font-weight:400">' + mine.length + ' 个</span>';
-    h += '<button onclick="event.stopPropagation();destroyEditorEntities(' + JSON.stringify(mineHashes) + ')" style="padding:2px 8px;background:var(--danger,#e74c3c);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px">一键消除</button>';
-    h += '</summary>';
-    h += '<div style="display:flex;flex-direction:column;gap:4px;padding:6px 0">';
-    for (const e of mine) h += renderEditorEntityItem(e);
-    h += '</div></details>';
-  }
-  // 其他阵营按 territory 分组（默认收起）
-  const sortedKids = Object.keys(others).map(Number).sort((a,b) => a - b);
-  for (const kid of sortedKids) {
-    const group = others[kid];
-    const kInfo = getKingdomInfo(kid);
-    const label = kInfo ? kInfo.name : ('阵营' + kid);
-    const bg = kInfo ? kInfo.bg : 'var(--text-muted)';
-    const fg = kInfo ? kInfo.fg : '#fff';
-    const groupHashes = group.map(e => e.ptrHash);
-    h += '<details style="margin-bottom:8px;margin-left:12px">';
-    h += '<summary style="cursor:pointer;padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-weight:600;font-size:13px;display:flex;align-items:center;gap:8px">';
-    h += '<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:' + bg + ';color:' + fg + '">' + esc(label) + '</span>';
-    h += '<span style="margin-left:auto;font-size:12px;color:var(--text-muted);font-weight:400">' + group.length + ' 个</span>';
-    h += '<button onclick="event.stopPropagation();destroyEditorEntities(' + JSON.stringify(groupHashes) + ')" style="padding:2px 8px;background:var(--danger,#e74c3c);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px">一键消除</button>';
-    h += '</summary>';
-    h += '<div style="display:flex;flex-direction:column;gap:4px;padding:6px 0">';
-    for (const e of group) h += renderEditorEntityItem(e);
-    h += '</div></details>';
-  }
-  return h;
-}
-
-function renderBuildingGroup(items) {
-  const monsterBuildNames = ['巨树', '巨型蘑菇', '巨型蜂巢'];
-  const monsterBuilds = {};
-  const normalBuilds = [];
-  for (const e of items) {
-    const dn = e.npcName || e.name || e.goName || '';
-    let matched = false;
-    for (const mn of monsterBuildNames) {
-      if (dn.includes(mn)) {
-        if (!monsterBuilds[mn]) monsterBuilds[mn] = [];
-        monsterBuilds[mn].push(e);
-        matched = true;
-        break;
-      }
-    }
-    if (!matched) normalBuilds.push(e);
-  }
-  const monsterKeys = Object.keys(monsterBuilds);
-  let h = '';
-  if (monsterKeys.length > 0) {
-    const totalMonster = monsterKeys.reduce((s, k) => s + monsterBuilds[k].length, 0);
-    h += '<details style="margin-bottom:8px;margin-left:12px">';
-    h += '<summary style="cursor:pointer;padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-weight:600;font-size:13px;display:flex;align-items:center;gap:8px">';
-    h += '<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:var(--danger, #e74c3c);color:#fff">怪物建筑 备注：这里显示我方是因为可交互的</span>';
-    h += '<span style="margin-left:auto;font-size:12px;color:var(--text-muted);font-weight:400">' + totalMonster + ' 个</span>';
-    h += '<button onclick="event.stopPropagation();destroyEditorEntities(' + JSON.stringify([].concat(...monsterKeys.map(k => monsterBuilds[k].map(e => e.ptrHash)))) + ')" style="padding:2px 8px;background:var(--danger,#e74c3c);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px">一键消除</button>';
-    h += '</summary>';
-    for (const mn of monsterBuildNames) {
-      const group = monsterBuilds[mn];
-      if (!group || group.length === 0) continue;
-      const groupHashes = group.map(e => e.ptrHash);
-      h += '<details style="margin-bottom:8px;margin-left:12px">';
-      h += '<summary style="cursor:pointer;padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-weight:600;font-size:13px;display:flex;align-items:center;gap:8px">';
-      h += '<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:var(--warning, #f39c12);color:#fff">' + esc(mn) + '</span>';
-      h += '<span style="margin-left:auto;font-size:12px;color:var(--text-muted);font-weight:400">' + group.length + ' 个</span>';
-      h += '<button onclick="event.stopPropagation();destroyEditorEntities(' + JSON.stringify(groupHashes) + ')" style="padding:2px 8px;background:var(--danger,#e74c3c);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px">一键消除</button>';
-      h += '</summary>';
-      h += '<div style="display:flex;flex-direction:column;gap:4px;padding:6px 0">';
-      for (const e of group) h += renderEditorEntityItem(e);
-      h += '</div></details>';
-    }
-    h += '</details>';
-  }
-  if (normalBuilds.length > 0) {
-    if (monsterKeys.length > 0) h += '<div style="margin:8px 0 4px 12px;font-size:12px;font-weight:600;color:var(--text-muted)">普通建筑 (' + normalBuilds.length + ')</div>';
-    h += renderTerritoryGroup(normalBuilds);
-  }
-  return h;
-}
-
-function renderAnimalGroup(items) {
-  const hasTerritory = [];
-  const noTerritory = {};
-  for (const e of items) {
-    const kid = e.territoryKingdomId || e.hometownKingdomId || 0;
-    if (kid > 0) { hasTerritory.push(e); continue; }
-    const label = e.npcName || e.name || e.goName || '未知';
-    if (!noTerritory[label]) noTerritory[label] = [];
-    noTerritory[label].push(e);
-  }
-  let h = '';
-  if (hasTerritory.length > 0) h += renderTerritoryGroup(hasTerritory);
-  const sortedLabels = Object.keys(noTerritory).sort();
-  for (const label of sortedLabels) {
-    const group = noTerritory[label];
-    const groupHashes = group.map(e => e.ptrHash);
-    h += '<details style="margin-bottom:8px;margin-left:12px">';
-    h += '<summary style="cursor:pointer;padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-weight:600;font-size:13px;display:flex;align-items:center;gap:8px">';
-    h += '<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:var(--warning, #f39c12);color:#fff">' + esc(label) + '</span>';
-    h += '<span style="margin-left:auto;font-size:12px;color:var(--text-muted);font-weight:400">' + group.length + ' 个</span>';
-    h += '<button onclick="event.stopPropagation();destroyEditorEntities(' + JSON.stringify(groupHashes) + ')" style="padding:2px 8px;background:var(--danger,#e74c3c);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px">一键消除</button>';
-    h += '</summary>';
-    h += '<div style="display:flex;flex-direction:column;gap:4px;padding:6px 0">';
-    for (const e of group) h += renderEditorEntityItem(e);
-    h += '</div></details>';
-  }
-  return h;
-}
-
-function renderNpcGroup(items) {
-  const mine = [];
-  const others = {};
-  for (const e of items) {
-    const kid = e.hometownKingdomId || 0;
-    if (kid === 1) { mine.push(e); continue; }
-    if (!others[kid]) others[kid] = [];
-    others[kid].push(e);
-  }
-  let h = '';
   // 我方（按兵种分：工作者/士兵）
   if (mine.length > 0) {
     const workers = [];
@@ -457,7 +258,7 @@ function renderTerritoryGroup(items) {
   let h = '';
   // 我方（默认展开）
   if (mine.length > 0)
-    h += editorGroupHtml('我方', 'var(--success-dark, #27ae60)', '#fff', mine.length + ' 个', editorItemsHtml(mine));
+    h += editorGroupHtml('我方', 'var(--success-dark, #27ae60)', '#fff', mine.length + ' 个', editorItemsHtml(mine), {hashes: mine.map(e => e.ptrHash)});
   // 其他阵营按 territory 分组（默认收起）
   const sortedKids = Object.keys(others).map(Number).sort((a,b) => a - b);
   for (const kid of sortedKids) {
