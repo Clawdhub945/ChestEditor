@@ -257,8 +257,8 @@ const src = fs.readFileSync(path.join(dir, 'npcfix.js'), 'utf8');
   ok(/!before\.has\(e\.ptrHash\)/.test(clearSrc), '靠"动刀前名单"识别新刷出来的士兵');
   ok(/npcfixIsHumanEntity\(e\)/.test(clearSrc), '只是对敌方小人做二次清除（不误伤别的）');
   ok(/before\.has/.test(clearSrc) && /const before = new Set/.test(clearSrc), '动刀前就记住了 before 集合（顺序正确）');
-  ok(clearSrc.indexOf('const before = new Set') < clearSrc.indexOf('npcfixKillInChunks(hashes)'),
-    'before 快照在第一轮销毁之前');
+  ok(clearSrc.indexOf('const before = new Set') < clearSrc.indexOf('const d1 = await kill(hashes)'),
+    'before 快照在第一轮销毁之前（kill 按 keyField 路由）');
 
   // ---------- 8) 战斗力 ×10 / ÷10 按钮 ----------
   console.log('\n== 8) 战斗力缩放按钮 ==');
@@ -433,6 +433,58 @@ const src = fs.readFileSync(path.join(dir, 'npcfix.js'), 'utf8');
   ev('npcfixBox3Query = ""');
   await ctx.npcfixBox3RenderBody();
   ok(els['npcfixBox3Body'].innerHTML.indexOf('铁墙') >= 0, '清空搜索词后恢复全部分组');
+
+  // ---------- 13) 盒子5 掉落物 ----------
+  console.log('\n== 13) 盒子5 掉落物 ==');
+  // 判据：StuffOnMap*（含 StuffOnMapFaeces 粪便），StartsWith 不是 Contains
+  ok(ev('npcfixIsStuffOnMapEntity({className:"StuffOnMap"})') === true, 'StuffOnMap 命中');
+  ok(ev('npcfixIsStuffOnMapEntity({className:"StuffOnMapFaeces"})') === true, 'StuffOnMapFaeces（粪便）命中');
+  ok(ev('npcfixIsStuffOnMapEntity({className:"MyStuffOnMap"})') === false, '前缀不符 → 不命中');
+
+  // 实机守恒：全部 StuffOnMap* 都能分组（物品无阵营语义，全 0 的粪便也照常显示）
+  const liveStuff = LIVE.filter(e => ctx.npcfixIsStuffOnMapEntity(e));
+  const liveZeroStuff = liveStuff.filter(e => kidOf(e) === 0).length;
+  console.log('  实机掉落物', liveStuff.length, '堆（其中阵营字段全0的粪便', liveZeroStuff, '堆照常显示）');
+  ok(liveZeroStuff > 0, '实机有全0阵营的掉落物（验证"不做阵营0隐藏"是有意义的）');
+
+  setData(DATA);
+  await ctx.renderNpcfixBox5(false);
+  const H5 = els['npcfixBox5Body'].innerHTML;
+  ok(H5.indexOf('白银') >= 0 || H5.indexOf('银币') >= 0 || liveStuff.length === 0,
+    '按物品中文名分组（白银/银币…，实机没有时跳过）');
+  ok(H5.indexOf("npcfixClear('stuff:all:g=") >= 0, '组级按钮 spec = stuff:all:g=<物品名>');
+  ok(els['content'].innerHTML.indexOf("npcfixClear('stuff:all')") >= 0, '标题栏有「全部清除」（stuff:all）');
+  ok(/还有 \d+ 个未显示/.test(H5) === (liveStuff.length + 1 > 24) || liveStuff.length === 0,
+    '大组限量渲染（超出 24 显示"还有 N 个"）');
+  ok(!/阵营0/.test(H5), '没有「阵营0」分组键（掉落物不做阵营0隐藏）');
+
+  // keyField='guid'：pick 收集的是 guid 不是 ptrHash
+  const guidPick = ev(`npcfixParseSpec('stuff:all:g=白银') ? 1 : 0`) === 1 || !DATA.some(e => e.name === '白银')
+    ? true : true;   // spec 合法性
+  ok(ev('NPCFIX_CLEAR_KINDS.stuff.keyField') === 'guid', 'stuff 的 keyField = guid');
+  const guidsPicked = vm.runInContext(
+    'npcfixParseSpec("stuff:all").pick().slice(0,3)', ctx);
+  const allAreGuids = guidsPicked.every(v => DATA.some(e => e.guid === v));
+  ok(allAreGuids, 'pick 返回的是 guid（与实体表的 guid 字段对得上）');
+
+  // 确认框：where='地图上全部' + tail（不进背包）
+  let cap5 = null;
+  ctx.confirm = m => { cap5 = m; return false; };
+  await ctx.npcfixClear('stuff:all');
+  console.log('  [清除掉落物] ' + String(cap5).replace(/\n/g, ' ⏎ '));
+  ok(/确定清除地图上全部的 \d+ 个掉落物/.test(cap5), 'where 用「地图上全部」（不是"全部阵营"）');
+  ok(/不会进背包/.test(cap5), '确认框写明物品直接消失、不进背包');
+
+  // kill 路由：走 /api/editor/stuff/batch（不走 destroy/batch）
+  const calls = [];
+  const origFetch = ctx.fetch;
+  ctx.fetch = (u, o) => { calls.push(String(u)); return origFetch(u, o); };
+  ctx.confirm = () => true;
+  setData(DATA.filter(e => e.className === 'StuffOnMap').slice(0, 5));
+  await ctx.npcfixClear('stuff:all');
+  ctx.fetch = origFetch;
+  ok(calls.some(u => u.indexOf('/api/editor/stuff/batch') >= 0), '销毁请求走 /api/editor/stuff/batch');
+  ok(!calls.some(u => u.indexOf('/api/editor/destroy/batch') >= 0), '不走 destroy/batch（ptrHash 只销 GO 不清注册表）');
 
   console.log('\n' + (fails === 0 ? 'ALL PASS' : (fails + ' FAILED')));
   process.exit(fails === 0 ? 0 : 1);

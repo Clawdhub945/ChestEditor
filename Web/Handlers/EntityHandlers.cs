@@ -115,6 +115,41 @@ internal static class EntityHandlers
             });
         });
 
+        // 批量删除地面掉落物（盒子5）：按 guid 走游戏自己的 MapStuffHelper.DestroyStuffOnMap，
+        // 通用兜底不清注册表也不取消 NPC 拾取任务（见 StuffOnMapService 注释），所以单独开接口。
+        Router.Add("POST", "/api/editor/stuff/batch", ctx =>
+        {
+            var arr = ctx.Json?["guids"] as System.Text.Json.Nodes.JsonArray;
+            if (arr == null || arr.Count == 0) throw new HttpError(400, "missing guids");
+            var guids = new List<int>();
+            foreach (var n in arr)
+                if (n != null) guids.Add(n.GetValue<int>());
+
+            int deleted = 0, missing = 0, i = 0, frames = 0;
+            bool resolved = false;
+            var swTotal = System.Diagnostics.Stopwatch.StartNew();
+            MainThread.RunPaced(() =>
+            {
+                frames++;
+                if (!resolved) { resolved = true; StuffOnMapService.Resolve(); }
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                while (i < guids.Count && sw.ElapsedMilliseconds < FrameBudgetMs)
+                {
+                    if (StuffOnMapService.DestroyOne(guids[i++])) deleted++; else missing++;
+                }
+                return i < guids.Count;   // true = 还没做完，下帧继续
+            }, 120000);
+            Plugin.LogInfo($"[EntityEditor] 掉落物清除: {deleted} 删除 / {missing} 已消失 / 共 {guids.Count} 个, "
+                + $"分 {frames} 帧, 墙钟 {swTotal.ElapsedMilliseconds}ms");
+            return JsonBuilder.Object(w =>
+            {
+                w.WriteBoolean("ok", true);
+                w.WriteNumber("destroyed", deleted);
+                w.WriteNumber("missing", missing);
+                w.WriteNumber("failed", missing);
+            });
+        });
+
         // 战斗力批量缩放（×10 / ÷10；一次主线程任务循环执行，界面上的「战斗力×10 / ÷10」用）
         Router.Add("POST", "/api/editor/scale/batch", ctx =>
         {

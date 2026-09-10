@@ -38,6 +38,9 @@ function selectNpcfixView(view) {
   // 盒子3（建筑物）同理：数据源也是实体扫描
   if (!wasActive && view === 'box3' && npcfixView === 'box3' && entityEditorData.length > 0)
     renderNpcfixBox3(true);
+  // 盒子5（掉落物）同理：数据源也是实体扫描
+  if (!wasActive && view === 'box5' && npcfixView === 'box5' && entityEditorData.length > 0)
+    renderNpcfixBox5(true);
 }
 
 // ===== 盒子1 小人数值修改 =====
@@ -543,6 +546,9 @@ function npcfixIsOurUnit(e) {
 // 反而可能吃进未知类名 —— 与 IsShipEntity 的教训同一性质。
 function npcfixIsFacilityEntity(e) { return (e.className || '').indexOf('Facility') === 0; }
 
+// ===== 掉落物（盒子5）：StuffOnMap*（StuffOnMapFaeces 粪便也在内），判据与渲染/清除三处共用 =====
+function npcfixIsStuffOnMapEntity(e) { return (e.className || '').indexOf('StuffOnMap') === 0; }
+
 const NPCFIX_CLEAR_KINDS = {
   monster: { name: '怪物', test: npcfixIsMonsterEntity },
   humanoid: { name: '小人', test: npcfixIsHumanEntity },
@@ -556,6 +562,14 @@ const NPCFIX_CLEAR_KINDS = {
     tail: '（手动拆除流程：不返还材料与物品，删除后不可恢复）',
     warn: '箱子 / 仓库 / 床类建筑删除后，里面的物品与住宿功能一并消失！',
   },
+  // 掉落物：keyField='guid' —— 按 guid 走 /api/editor/stuff/batch（游戏自己的
+  // MapStuffHelper.DestroyStuffOnMap），清注册表 + 取消 NPC 拾取任务；
+  // 通用 destroy/batch 按 ptrHash 只销毁 GO，不清注册表，所以这里不能复用。
+  stuff: {
+    name: '掉落物', test: npcfixIsStuffOnMapEntity,
+    keyField: 'guid', whereLabel: '地图上全部',
+    tail: '（物品将直接消失，不会进背包 / 仓库 —— 游戏没有"强制拾取"语义）',
+  },
 };
 
 // 二级分组的组名（必须与渲染分组时用的规则一致，否则 :g= 匹配不上）
@@ -563,6 +577,8 @@ function npcfixGroupKeyOf(kind, e) {
   if (kind === 'ourCombat') return e.soldierTypeName || '未知兵种';
   // 建筑：后端 name = DataTables.ItemName(stuff_id) 的中文名（铁墙 / 小床 / 大箱子…）
   if (kind === 'facility') return e.name || e.className || '未知建筑';
+  // 掉落物：同走后端中文名（白银 / 银币 / 粪便…）
+  if (kind === 'stuff') return e.name || e.className || '未知物品';
   const cn = e.className || '';
   if (cn.indexOf('Dragon') >= 0) return '龙';
   return e.name || cn || '未知怪物';
@@ -587,10 +603,14 @@ function npcfixParseSpec(spec) {
     if (scope === 'ours') return kid === 1;
     return kid === Number(scope);
   };
-  const where = scope === 'all' ? '全部阵营'
+  // whereLabel：无阵营语义的种类（掉落物）在 scope='all' 时用"地图上全部"，别写"全部阵营"
+  const where = def.whereLabel && scope === 'all' ? def.whereLabel
+    : scope === 'all' ? '全部阵营'
     : scope === 'enemy' ? '敌方全部阵营'
       : scope === 'ours' ? '我方' : ('阵营' + scope);
-  return { def: def, where: where, pick: () => entityEditorData.filter(test).map(e => e.ptrHash) };
+  // keyField='guid' 的种类（掉落物）按 guid 收集，走专属接口；其余按 ptrHash
+  const key = def.keyField || 'ptrHash';
+  return { def: def, where: where, pick: () => entityEditorData.filter(test).map(e => e[key]) };
 }
 
 // 拼 spec（按钮工厂共用）
@@ -1000,11 +1020,33 @@ async function npcfixKillInChunks(hashes) {
   return { destroyed: destroyed, failed: failed };
 }
 
+// 掉落物专用：按 guid 走 /api/editor/stuff/batch（游戏自己的 MapStuffHelper.DestroyStuffOnMap，
+// 清注册表 + 取消 NPC 拾取任务）。后端已按帧摊开，这里照旧分批提交（少几次往返）。
+// 返回同构 {destroyed, failed}（failed = guid 已不在注册表，多半被 NPC 捡走了）。
+async function npcfixKillStuffInChunks(guids) {
+  let destroyed = 0, missing = 0;
+  for (let i = 0; i < guids.length; i += NPCFIX_KILL_CHUNK) {
+    const part = guids.slice(i, i + NPCFIX_KILL_CHUNK);
+    try {
+      const r = await fetch('/api/editor/stuff/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ guids: part })
+      }).then(x => x.json());
+      destroyed += (r && r.destroyed) || 0;
+      missing += (r && r.missing) || 0;
+    } catch (e) { missing += part.length; }
+    await new Promise(r => setTimeout(r, 60));
+  }
+  return { destroyed: destroyed, failed: missing };
+}
+
 // 清完/改完把面板刷新一下：否则界面上还挂着已经销毁的卡片，用户得再点一次
 // 「重新扫描」才能看到结果 —— 那又多扫一遍全量。
 function npcfixRefreshView() {
   if (npcfixView === 'box2') renderNpcfixBox2(false);
   if (npcfixView === 'box3') renderNpcfixBox3(false);
+  if (npcfixView === 'box5') renderNpcfixBox5(false);
 }
 
 // 一键清除（spec 见 npcfixParseSpec）：
@@ -1027,13 +1069,17 @@ async function npcfixClear(spec) {
   const before = new Set(entityEditorData.map(e => e.ptrHash));
 
   toast('清除中...', false);
-  const d1 = await npcfixKillInChunks(hashes);
+  // 掉落物（keyField='guid'）走 /api/editor/stuff/batch（游戏自己的注册表删除）；
+  // 其余走 destroy/batch(ptrHash)
+  const kill = (p.def.keyField && p.def.keyField !== 'ptrHash')
+    ? npcfixKillStuffInChunks : npcfixKillInChunks;
+  const d1 = await kill(hashes);
   await new Promise(r => setTimeout(r, 1000));
-  // 重扫拿到分裂新生成的目标，再清一遍
+  // 重扫拿到分裂/新刷的目标，再清一遍（掉落物：清掉NPC来不及捡而刚掉的）
   await npcfixScan();
   const hashes2 = p.pick();
   let d2 = { destroyed: 0 };
-  if (hashes2.length > 0) d2 = await npcfixKillInChunks(hashes2);
+  if (hashes2.length > 0) d2 = await kill(hashes2);
   await npcfixScan();
 
   // 舰船专属收尾：ShipHelper.DestroyShip(船, false) 会把船员按 sailor_count 生成士兵丢在船的位置
@@ -1208,4 +1254,85 @@ function npcfixBox3RenderBody() {
     body.querySelectorAll('details.npcfix-group').forEach(d => {
       if (d.dataset && wasOpen.indexOf(d.dataset.g) >= 0) d.open = true;
     });
+}
+
+// ===== 盒子5 掉落物 =====
+// 数据源：实体扫描（/api/editor/entities）。实机掉落物 = StuffOnMap*（打怪/采集后掉在地上的物品堆），
+// 实测 2495 堆：白银 637 / 银币 607 / 蓝宝石碎片 507 / 粪便 85 ……
+// ⚠ 物品无阵营语义（73 个粪便三个阵营字段全 0 是常态，不是脏数据）——
+//   所以这里【不做】盒子2/3 的"阵营0 隐藏"，也不分敌我，单列表按物品名分组。
+// 删除走 /api/editor/stuff/batch（游戏自己的 MapStuffHelper.DestroyStuffOnMap，
+// 清注册表 + 取消 NPC 拾取任务）；物品直接消失、不进背包（源码核实，游戏没有强制拾取语义）。
+
+async function renderNpcfixBox5(forceScan) {
+  const el = document.getElementById('content');
+  // 与盒子2/3 同策略：首次进入（无缓存）或显式刷新才扫描，其余复用已扫描数据
+  const needScan = forceScan === true || entityEditorData.length === 0;
+  let html = '';
+  html += '<div style="padding:20px;height:100%;box-sizing:border-box;display:flex;flex-direction:column;overflow:hidden">';
+  html += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-shrink:0">';
+  html += '<h2 style="color:var(--accent-light);margin:0;font-size:18px">&#x1F4B0; 掉落物</h2>';
+  html += '<span style="color:var(--text-muted);font-size:13px">掉在地图上的物品堆 · 按物品名分组（大分组限量显示，用搜索框过滤）</span>';
+  html += npcfixBoxClearBtn('stuff', 'all');
+  html += '<button onclick="renderNpcfixBox5(true)" style="padding:6px 16px;background:var(--accent);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;font-size:13px;margin-left:auto">重新扫描</button>';
+  html += '</div>';
+  html += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-shrink:0">';
+  html += '<input id="npcfixBox5Search" value="' + esc(npcfixBox5Query) + '"'
+    + ' placeholder="搜索物品名，如：银 / 宝石 / 肉（留空显示全部）"'
+    + ' oninput="npcfixBox5Query=this.value;npcfixBox5RenderBody()"'
+    + ' style="width:300px;padding:6px 10px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px">';
+  html += '<span id="npcfixBox5Summary" style="color:var(--text-muted);font-size:12px"></span>';
+  html += '</div>';
+  html += '<div id="npcfixBox5Body" style="flex:1;overflow-y:auto;min-height:0;color:var(--text-muted)">' + (needScan ? '扫描中...' : '') + '</div>';
+  html += '</div>';
+  el.innerHTML = html;
+
+  if (needScan) {
+    try {
+      await fetch('/api/editor/scan', { method: 'POST' });
+      await fetchEntityEditorData();
+    } catch (e) {
+      const b = document.getElementById('npcfixBox5Body');
+      if (b) b.innerHTML = '<div style="padding:40px;text-align:center;color:var(--danger)">扫描失败: ' + esc(String((e && e.message) || e)) + '</div>';
+      return;
+    }
+  }
+  npcfixBox5RenderBody();
+}
+
+let npcfixBox5Query = '';   // 搜索词（纯前端过滤已扫描数据，不触发扫描）
+
+function npcfixBox5RenderBody() {
+  const body = document.getElementById('npcfixBox5Body');
+  if (!body) return;
+
+  // 分组：组名 = 物品中文名（与 :g= 定位共用 npcfixGroupKeyOf，否则清除范围对不上显示）
+  const kinds = {};
+  let total = 0;
+  for (const e of entityEditorData) {
+    if (npcfixIsStuffOnMapEntity(e)) {
+      const k = npcfixGroupKeyOf('stuff', e);
+      (kinds[k] = kinds[k] || []).push(e);
+      total++;
+    }
+  }
+
+  const sum = document.getElementById('npcfixBox5Summary');
+  if (sum) sum.textContent = '共 ' + total + ' 堆（' + Object.keys(kinds).length + ' 种）';
+
+  const q = (npcfixBox5Query || '').trim().toLowerCase();
+  const names = Object.keys(kinds).sort((a, b) => kinds[b].length - kinds[a].length);
+  let h = '';
+  for (const name of names) {
+    let list = kinds[name];
+    const groupHit = !q || name.toLowerCase().indexOf(q) >= 0;
+    if (!groupHit) {
+      // 组名不中 → 按带编号的显示名（stuffNameWithIdIndex）匹配
+      list = list.filter(e => String(e.stuffNameWithIdIndex || e.name || '').toLowerCase().indexOf(q) >= 0);
+      if (list.length === 0) continue;
+    }
+    h += npcfixFacilityGroupCard(name, 'var(--warning, #e67e22)', '&#x1F4B0;', list,
+      npcfixSpecOf('stuff', 'all', name));
+  }
+  body.innerHTML = h || npcfixEmptyHint('没有匹配的掉落物（共 ' + total + ' 堆）');
 }
