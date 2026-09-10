@@ -110,7 +110,8 @@ internal static class AnimalService
     /// </summary>
     /// <param name="stuffId">动物种类（animal.json 的 animal_id，如 501005=猪）</param>
     /// <param name="count">数量（前端夹取 1..10）</param>
-    internal static void Spawn(int stuffId, int count)
+    /// <returns>(gx, gy) 实际召唤的格子坐标（= 参考实体所在格）</returns>
+    internal static (int gx, int gy) Spawn(int stuffId, int count)
     {
         IntPtr helper = GameChainLocator.GetAnimalHelper();
         if (helper == IntPtr.Zero)
@@ -119,40 +120,59 @@ internal static class AnimalService
         if (createAnimal == IntPtr.Zero)
             throw new InvalidOperationException("找不到 AnimalHelper.CreateAnimal(pos, stuff_id, count)");
 
-        IntPtr areaMap = GameChainLocator.GetAreaMap();
-        if (areaMap == IntPtr.Zero)
-            throw new InvalidOperationException("未进入存档，找不到 AreaMap");
-        IntPtr getLandPoint = FindMethodInHierarchy(GetClass(areaMap), "GetRandomLandPointNotAtMapBorder", 0);
-        if (getLandPoint == IntPtr.Zero)
-            throw new InvalidOperationException("找不到 AreaMap.GetRandomLandPointNotAtMapBorder()");
-
-        // ⚠ 位置策略：GetRandomLandPointNotAtMapBorder 是全图随机 —— 可能落在几屏幕之外、
-        // 区块未加载 → 动物逻辑存在但看不见（用户实测"幽灵生物"），且对它调 DestroySelf
-        // 会因渲染组件未创建而 native 崩溃。
-        // 位置来源：**在场动物的 get_CurPoint()**（0 参属性 getter 返回 Point 对象，沿继承链可找）
-        // → 召唤到现有动物旁边（玩家领地内、看得见）。无动物时退回全图随机。
-        IntPtr pos = IntPtr.Zero;
-        string posSrc = "";
+        // ⚠ 位置策略：全图随机会落在几屏幕外的未加载区块 → 幽灵动物（逻辑存在看不见），
+        // 且删它们会崩。改为：**借在场实体的世界坐标反推格子**（必然在玩家领地/视野内）：
+        //   Point.ToVector3 = (gx+0.5, gy+0.5, 0)（伪 C 证实）→ 逆运算 gx=floor(wx-0.5)。
+        // Point 对象用 il2cpp_object_new 构造并直写 x/y 字段（纯数据类，ToVector3 只读 x/y）。
+        float refX = 0f, refY = 0f;
+        bool hasRef = false;
         foreach (var e in EntityScan.Snapshot())
         {
-            if (e.ClassName != "Animal" || e.Ptr == IntPtr.Zero) continue;
-            IntPtr getCur = FindMethodInHierarchy(GetClass(e.Ptr), "get_CurPoint", 0);
-            if (getCur == IntPtr.Zero) continue;
-            IntPtr p = Invoke(getCur, e.Ptr);
-            if (p != IntPtr.Zero) { pos = p; posSrc = $"动物 guid={e.Guid} 的 CurPoint"; break; }
+            if (e.GoRef == null) continue;
+            string? cn = e.ClassName;
+            bool okSrc = cn == "Animal" || cn == "Npc"
+                || (cn != null && cn.IndexOf("Facility", StringComparison.Ordinal) == 0);
+            if (!okSrc) continue;
+            try
+            {
+                if (!e.GoRef.activeInHierarchy) continue;   // 幽灵/池化排除
+                var p = e.GoRef.transform.position;
+                if (p.x == 0 && p.y == 0) continue;
+                refX = p.x; refY = p.y; hasRef = true;
+                Plugin.LogVerbose($"[AnimalService] 位置参考: {cn} ({p.x:F1},{p.y:F1})");
+                break;
+            }
+            catch { }
         }
-        if (pos == IntPtr.Zero)
-        {
-            pos = Invoke(getLandPoint, areaMap);
-            posSrc = "全图随机陆地";
-        }
-        if (pos == IntPtr.Zero)
-            throw new InvalidOperationException("取不到召唤位置");
-        Plugin.LogVerbose($"[AnimalService] Spawn {count} 只 stuffId={stuffId}，位置来源：{posSrc}");
+        if (!hasRef)
+            throw new InvalidOperationException("地图上没有可参考位置的实体（重新扫描后再试）");
+
+        int gx = (int)Math.Floor(refX - 0.5f);
+        int gy = (int)Math.Floor(refY - 0.5f);
+        IntPtr pos = NewPoint(gx, gy);
+        Plugin.LogVerbose($"[AnimalService] Spawn {count} 只 stuffId={stuffId} 于格子({gx},{gy})（参考 {refX:F1},{refY:F1}）");
 
         for (int i = 0; i < count; i++)
         {
             Invoke(createAnimal, helper, pos, stuffId, 1);
         }
+        return (gx, gy);
+    }
+
+    /// <summary>il2cpp_object_new 构造 Point 并直写 x/y（纯数据类；CreateAnimal 内部只调 Point.ToVector3 读 x/y）</summary>
+    private static IntPtr NewPoint(int gx, int gy)
+    {
+        IntPtr pointCls = FindClassByName("Point");
+        if (pointCls == IntPtr.Zero)
+            throw new InvalidOperationException("找不到 Point 类");
+        IntPtr obj = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_new(pointCls);
+        if (obj == IntPtr.Zero)
+            throw new InvalidOperationException("Point 对象创建失败");
+        var fm = GetClassFieldsCached(pointCls, "Point");
+        if (!fm.TryGetValue("x", out var xf) || !fm.TryGetValue("y", out var yf))
+            throw new InvalidOperationException("Point 缺少 x/y 字段");
+        WriteIl2CppInt(obj, xf.Offset, gx);
+        WriteIl2CppInt(obj, yf.Offset, gy);
+        return obj;
     }
 }

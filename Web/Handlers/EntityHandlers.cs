@@ -253,8 +253,17 @@ internal static class EntityHandlers
             if (count > 10) count = 10;
             return MainThread.Run(() =>
             {
-                AnimalService.Spawn(stuffId, count);
-                return JsonBuilder.Object(w => { w.WriteBoolean("ok", true); w.WriteNumber("spawned", count); });
+                var (gx, gy) = AnimalService.Spawn(stuffId, count);
+                // 相机移到召唤点：用户立刻看到新动物（复用 locate 的相机机制）
+                try { ChestService.LocateFacility(gx + 0.5f, gy + 0.5f); }
+                catch (Exception ex) { Plugin.LogVerbose($"[EntityEditor] 召唤后定位失败: {ex.Message}"); }
+                return JsonBuilder.Object(w =>
+                {
+                    w.WriteBoolean("ok", true);
+                    w.WriteNumber("spawned", count);
+                    w.WriteNumber("gx", gx);
+                    w.WriteNumber("gy", gy);
+                });
             }, 30000);
         });
 
