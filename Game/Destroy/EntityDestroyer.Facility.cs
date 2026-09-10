@@ -75,30 +75,8 @@ internal static partial class EntityDestroyer
                         Plugin.LogInfo($"[EntityEditor] Found Facility.Dismantle(6p), calling...");
                         try
                         {
-                            IntPtr exception = IntPtr.Zero;
-                            int pc = 6;
-                            IntPtr[] argPtrs = new IntPtr[pc];
-                            IntPtr[] storage = new IntPtr[pc];
-                            for (int a = 0; a < pc; a++)
-                            {
-                                IntPtr paramType = Il2CppApi.GetMethodParam(disMth, (uint)a);
-                                string? tn = paramType != IntPtr.Zero ? Il2CppApi.PtrToString(Il2CppApi.TypeGetName(paramType)) : null;
-                                bool isBool = tn != null && (tn == "System.Boolean" || tn == "bool");
-                                storage[a] = isBool ? (IntPtr)1 : IntPtr.Zero;
-                            }
-                            unsafe
-                            {
-                                fixed (IntPtr* storPtr = storage)
-                                {
-                                    for (int a = 0; a < pc; a++)
-                                        argPtrs[a] = (IntPtr)(&storPtr[a]);
-                                    fixed (IntPtr* argsArr = argPtrs)
-                                    {
-                                        Il2CppApi.RuntimeInvoke(disMth, e.Ptr, (void**)argsArr, ref exception);
-                                    }
-                                }
-                            }
-                            Plugin.LogInfo($"[EntityEditor] Facility.Dismantle(6p) done, exception={exception != IntPtr.Zero}");
+                            bool ok = Il2CppInvoke.InvokeWithDefaults(disMth, e.Ptr, 6);
+                            Plugin.LogInfo($"[EntityEditor] Facility.Dismantle(6p) done, exception={!ok}");
                         }
                         catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] Facility.Dismantle(6p) failed: {ex.Message}"); }
                     }
@@ -219,24 +197,9 @@ internal static partial class EntityDestroyer
                             {
                                 try
                                 {
-                                    IntPtr exception = IntPtr.Zero;
-                                    IntPtr[] argPtrs = new IntPtr[pc];
-                                    IntPtr[] storage = new IntPtr[pc];
-                                    storage[0] = e.Ptr;
-                                    for (int a = 1; a < pc; a++) storage[a] = IntPtr.Zero;
-                                    unsafe
-                                    {
-                                        fixed (IntPtr* storPtr = storage)
-                                        {
-                                            for (int a = 0; a < pc; a++)
-                                                argPtrs[a] = (IntPtr)(&storPtr[a]);
-                                            fixed (IntPtr* argsArr = argPtrs)
-                                            {
-                                                Il2CppApi.RuntimeInvoke(mth, inst, (void**)argsArr, ref exception);
-                                            }
-                                        }
-                                    }
-                                    if (exception == IntPtr.Zero)
+                                    IntPtr[] args = new IntPtr[pc];
+                                    args[0] = e.Ptr;
+                                    if (Il2CppInvoke.InvokeWithArgs(mth, inst, args))
                                     {
                                         Plugin.LogInfo($"[EntityEditor] ✓ Called {mgrName}.{methodName}({pc}p)");
                                         called = true;

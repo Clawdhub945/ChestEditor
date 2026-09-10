@@ -60,21 +60,7 @@ internal static partial class EntityDestroyer
                     {
                         try
                         {
-                            IntPtr exH = IntPtr.Zero;
-                            IntPtr[] hArgs = new IntPtr[1];
-                            IntPtr[] hStorage = new IntPtr[1];
-                            hStorage[0] = IntPtr.Zero; // false
-                            unsafe
-                            {
-                                fixed (IntPtr* hStor = hStorage)
-                                {
-                                    hArgs[0] = (IntPtr)(&hStor[0]);
-                                    fixed (IntPtr* hArgsArr = hArgs)
-                                    {
-                                        Il2CppApi.RuntimeInvoke(hMth, e.Ptr, (void**)hArgsArr, ref exH);
-                                    }
-                                }
-                            }
+                            Il2CppInvoke.InvokeWithArgs(hMth, e.Ptr, IntPtr.Zero); // false
                             Plugin.LogInfo($"[EntityEditor] {hideName}(false) at depth={hDepth}");
                         }
                         catch { }

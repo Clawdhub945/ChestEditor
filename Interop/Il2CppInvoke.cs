@@ -87,6 +87,61 @@ internal static unsafe class Il2CppInvoke
         return m == IntPtr.Zero ? null : InvokeString(m, objPtr, args);
     }
 
+    /// <summary>
+    /// 按方法签名逐参数填默认值（bool → 1，其余 → 0/null）后调用。
+    /// 用于"按名找到重载但不确知精确签名，需以最小副作用参数试探调用"的场景。
+    /// </summary>
+    /// <returns>IL2CPP 异常指针为空则 true；失败不抛托管异常，由调用方记日志。</returns>
+    internal static bool InvokeWithDefaults(IntPtr method, IntPtr objPtr, int paramCount)
+    {
+        if (method == IntPtr.Zero) return false;
+        IntPtr exception = IntPtr.Zero;
+        if (paramCount <= 0)
+        {
+            Il2CppApi.RuntimeInvoke(method, objPtr, null, ref exception);
+            return exception == IntPtr.Zero;
+        }
+
+        IntPtr[] slots = new IntPtr[paramCount];
+        for (int i = 0; i < paramCount; i++)
+        {
+            IntPtr paramType = Il2CppApi.GetMethodParam(method, (uint)i);
+            string? tn = paramType != IntPtr.Zero ? Il2CppApi.PtrToString(Il2CppApi.TypeGetName(paramType)) : null;
+            slots[i] = (tn == "System.Boolean" || tn == "bool") ? (IntPtr)1 : IntPtr.Zero;
+        }
+        return InvokeRaw(method, objPtr, slots, ref exception);
+    }
+
+    /// <summary>
+    /// 以显式给定的参数槽调用方法（引用类型放对象指针，值类型放值本身）。未给的槽请在数组里填 <see cref="IntPtr.Zero"/>。
+    /// </summary>
+    internal static bool InvokeWithArgs(IntPtr method, IntPtr objPtr, params IntPtr[] args)
+    {
+        if (method == IntPtr.Zero) return false;
+        IntPtr exception = IntPtr.Zero;
+        if (args == null || args.Length == 0)
+        {
+            Il2CppApi.RuntimeInvoke(method, objPtr, null, ref exception);
+            return exception == IntPtr.Zero;
+        }
+        return InvokeRaw(method, objPtr, args, ref exception);
+    }
+
+    /// <summary>把参数槽的地址数组交给 il2cpp_runtime_invoke；slots 本身只读。</summary>
+    private static bool InvokeRaw(IntPtr method, IntPtr objPtr, IntPtr[] slots, ref IntPtr exception)
+    {
+        IntPtr[] argv = new IntPtr[slots.Length];
+        fixed (IntPtr* sp = slots)
+        {
+            for (int i = 0; i < slots.Length; i++) argv[i] = (IntPtr)(&sp[i]);
+            fixed (IntPtr* ap = argv)
+            {
+                Il2CppApi.RuntimeInvoke(method, objPtr, (void**)ap, ref exception);
+            }
+        }
+        return exception == IntPtr.Zero;
+    }
+
     // 值类型参数：把值放进 IntPtr 槽的低 4 字节；引用类型：槽里放对象指针
     private static IntPtr ToSlot(object? arg) => arg switch
     {

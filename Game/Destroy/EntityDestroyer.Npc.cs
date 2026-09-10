@@ -39,44 +39,13 @@ internal static partial class EntityDestroyer
                             Plugin.LogInfo($"[EntityEditor] [NPC] Found {mName}({pCount}p) at depth={depth} cls={clsName}");
                             try
                             {
-                                IntPtr exception = IntPtr.Zero;
-                                if (pCount == 0)
-                                {
-                                    unsafe { Il2CppApi.RuntimeInvoke(mth, e.Ptr, null, ref exception); }
-                                }
-                                else
-                                {
-                                    // 有参数的方法，传默认值
-                                    IntPtr[] argPtrs = new IntPtr[pCount];
-                                    IntPtr[] storage = new IntPtr[pCount];
-                                    for (int a = 0; a < (int)pCount; a++)
-                                    {
-                                        IntPtr paramType = Il2CppApi.GetMethodParam(mth, (uint)a);
-                                        string? tn = paramType != IntPtr.Zero ? Il2CppApi.PtrToString(Il2CppApi.TypeGetName(paramType)) : null;
-                                        bool isBool = tn != null && (tn == "System.Boolean" || tn == "bool");
-                                        storage[a] = isBool ? (IntPtr)1 : IntPtr.Zero;
-                                    }
-                                    unsafe
-                                    {
-                                        fixed (IntPtr* storPtr = storage)
-                                        {
-                                            for (int a = 0; a < (int)pCount; a++)
-                                                argPtrs[a] = (IntPtr)(&storPtr[a]);
-                                            fixed (IntPtr* argsArr = argPtrs)
-                                            {
-                                                Il2CppApi.RuntimeInvoke(mth, e.Ptr, (void**)argsArr, ref exception);
-                                            }
-                                        }
-                                    }
-                                }
-                                if (exception != IntPtr.Zero)
-                                    Plugin.LogInfo($"[EntityEditor] {mName}() exception on {name}");
-                                else
+                                if (Il2CppInvoke.InvokeWithDefaults(mth, e.Ptr, (int)pCount))
                                 {
                                     Plugin.LogInfo($"[EntityEditor] ✓ Called {mName}() on {name} (depth={depth})");
                                     called = true;
                                     break;
                                 }
+                                Plugin.LogInfo($"[EntityEditor] {mName}() exception on {name}");
                             }
                             catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] {mName}() CRASH: {ex.Message}"); }
                         }

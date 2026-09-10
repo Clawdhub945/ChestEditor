@@ -58,42 +58,13 @@ internal static partial class EntityDestroyer
                 if (called) break;
                 try
                 {
-                    IntPtr exception = IntPtr.Zero;
-                    if (fm.paramCount == 0)
-                    {
-                        unsafe { Il2CppApi.RuntimeInvoke(fm.methodPtr, e.Ptr, null, ref exception); }
-                    }
-                    else
-                    {
-                        IntPtr[] argPtrs = new IntPtr[fm.paramCount];
-                        IntPtr[] storage = new IntPtr[fm.paramCount];
-                        for (int a = 0; a < (int)fm.paramCount; a++)
-                        {
-                            IntPtr paramType = Il2CppApi.GetMethodParam(fm.methodPtr, (uint)a);
-                            string? tn = paramType != IntPtr.Zero ? Il2CppApi.PtrToString(Il2CppApi.TypeGetName(paramType)) : null;
-                            bool isBool = tn != null && (tn == "System.Boolean" || tn == "bool");
-                            storage[a] = isBool ? (IntPtr)1 : IntPtr.Zero;
-                        }
-                        unsafe
-                        {
-                            fixed (IntPtr* storPtr = storage)
-                            {
-                                for (int a = 0; a < (int)fm.paramCount; a++)
-                                    argPtrs[a] = (IntPtr)(&storPtr[a]);
-                                fixed (IntPtr* argsArr = argPtrs)
-                                {
-                                    Il2CppApi.RuntimeInvoke(fm.methodPtr, e.Ptr, (void**)argsArr, ref exception);
-                                }
-                            }
-                        }
-                    }
-                    if (exception != IntPtr.Zero)
-                        Plugin.LogInfo($"[EntityEditor] {fm.name}() exception on {name}");
-                    else
+                    if (Il2CppInvoke.InvokeWithDefaults(fm.methodPtr, e.Ptr, (int)fm.paramCount))
                     {
                         Plugin.LogInfo($"[EntityEditor] ✓ Called {fm.name}() on {name} (depth={fm.d})");
                         called = true;
                     }
+                    else
+                        Plugin.LogInfo($"[EntityEditor] {fm.name}() exception on {name}");
                 }
                 catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] {fm.name}() CRASH: {ex.Message}"); }
             }
@@ -397,50 +368,14 @@ internal static partial class EntityDestroyer
 
                         try
                         {
-                            IntPtr exception = IntPtr.Zero;
-                            if (isStatic)
-                            {
-                                // 静态方法：不传 this，只传参数
-                                IntPtr[] argPtrs = new IntPtr[1];
-                                IntPtr[] storage = new IntPtr[1];
-                                storage[0] = e.Ptr;
-                                unsafe
-                                {
-                                    fixed (IntPtr* storPtr = storage)
-                                    {
-                                        argPtrs[0] = (IntPtr)(&storPtr[0]);
-                                        fixed (IntPtr* argsArr = argPtrs)
-                                        {
-                                            Il2CppApi.RuntimeInvoke(mMth, IntPtr.Zero, (void**)argsArr, ref exception);
-                                        }
-                                    }
-                                }
-                            }
-                            else
-                            {
-                                // 实例方法
-                                IntPtr[] argPtrs = new IntPtr[1];
-                                IntPtr[] storage = new IntPtr[1];
-                                storage[0] = e.Ptr;
-                                unsafe
-                                {
-                                    fixed (IntPtr* storPtr = storage)
-                                    {
-                                        argPtrs[0] = (IntPtr)(&storPtr[0]);
-                                        fixed (IntPtr* argsArr = argPtrs)
-                                        {
-                                            Il2CppApi.RuntimeInvoke(mMth, mgrInst, (void**)argsArr, ref exception);
-                                        }
-                                    }
-                                }
-                            }
-                            if (exception == IntPtr.Zero)
+                            // 静态方法不传 this，实例方法传实例；唯一参数是实体指针
+                            if (Il2CppInvoke.InvokeWithArgs(mMth, isStatic ? IntPtr.Zero : mgrInst, e.Ptr))
                             {
                                 Plugin.LogInfo($"[EntityEditor] ✓ Called {mgrName}.{mName}(entity) on {name}");
                                 called = true;
                             }
                             else
-                                Plugin.LogInfo($"[EntityEditor] {mgrName}.{mName}(entity) IL2CPP exception (ptr={exception.ToInt64():X})");
+                                Plugin.LogInfo($"[EntityEditor] {mgrName}.{mName}(entity) IL2CPP exception");
                         }
                         catch (Exception ex) { Plugin.LogInfo($"[EntityEditor] {mgrName}.{mName}(entity) CRASH: {ex.Message}"); }
                         if (called) break;
