@@ -47,13 +47,18 @@ function npcfixGrid(list, groupKey) {
 // 分组卡片：彩色左条标题栏 + 内部 NPC 网格。
 // 取代原来的二级 <details> 折叠 —— 一级盒子展开后直接铺出若干张分组卡片，
 // 少点一次（士兵→兵种 / 市民→职业 / 贵族→身份）。
+// 卡片本身是 <details open>：默认就是铺开的（保持"少点一次"），
+// 点标题栏可把这一组整体收起/再展开，人多的盒子能自己腾地方。
 function npcfixGroupCard(label, color, icon, list, groupKey) {
   if (!list || list.length === 0) return '';
-  let h = '<div class="npcfix-group" style="--gc:' + color + '">';
-  h += '<div class="npcfix-group-head"><span>' + icon + '</span><span>' + esc(label) + '</span>';
-  h += '<span class="npcfix-count">' + list.length + ' 个</span></div>';
+  let h = '<details class="npcfix-group" style="--gc:' + color + '" open>';
+  h += '<summary class="npcfix-group-head">';
+  h += '<span class="npcfix-chev">&#x25B6;</span>';
+  h += '<span>' + icon + '</span><span>' + esc(label) + '</span>';
+  h += '<span class="npcfix-count">' + list.length + ' 个</span>';
+  h += '</summary>';
   h += npcfixGrid(list, groupKey);
-  h += '</div>';
+  h += '</details>';
   return h;
 }
 

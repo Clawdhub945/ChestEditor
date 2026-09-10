@@ -960,7 +960,8 @@ input[type='number']::-webkit-inner-spin-button {
   border-top: 1px solid var(--border);
 }
 
-/* 分组卡片：士兵→兵种 / 市民→职业 / 贵族→身份（取代原来的二级 <details> 折叠） */
+/* 分组卡片：士兵→兵种 / 市民→职业 / 贵族→身份（取代原来的二级 <details> 折叠）
+   本身是 <details open>：默认铺开卡片，点标题栏可整组收起/展开。 */
 .npcfix-group {
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -979,18 +980,33 @@ input[type='number']::-webkit-inner-spin-button {
   font-size: 12px;
   font-weight: 600;
   color: var(--text-primary);
+  cursor: pointer;
+  user-select: none;
+  list-style: none;          /* 去掉原生三角，用自带 chevron 统一风格 */
 }
+.npcfix-group-head::-webkit-details-marker { display: none; }
+.npcfix-group-head:hover { background: var(--bg-hover); }
 .npcfix-group-head .npcfix-count {
   margin-left: auto;
   font-size: 11px;
   font-weight: 400;
   color: var(--text-muted);
 }
+/* 收起/展开指示箭头：展开时朝下，收起时朝右 */
+.npcfix-group-head .npcfix-chev {
+  flex-shrink: 0;
+  width: 10px;
+  font-size: 9px;
+  line-height: 1;
+  color: var(--text-muted);
+  transition: transform .15s ease;
+}
+.npcfix-group[open] .npcfix-group-head .npcfix-chev { transform: rotate(90deg); }
 
-/* NPC 卡片网格：300px 起自适应列数，窄窗口自动降为 1 列 */
+/* NPC 卡片网格：260px 起自适应列数，窄窗口自动降为 1 列 */
 .npcfix-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   gap: 8px;
   padding: 8px;
   background: var(--bg-secondary);
