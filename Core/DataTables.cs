@@ -80,6 +80,10 @@ internal static class DataTables
     /// <summary>物品显示名（未知 id 返回空串）</summary>
     internal static string ItemName(int stuffId) => Items.TryGetValue(stuffId, out var r) ? r.Name : "";
 
+    /// <summary>物品 stuff_type（未知 id 返回 0）。语义：1=建筑 2=生物/士兵/龙 3=食物
+    /// 4=材料/装备 5=活体动物 6=资源/药 7=种子 8=尸体 9=技术/信仰。</summary>
+    internal static int ItemType(int stuffId) => Items.TryGetValue(stuffId, out var r) ? r.StuffType : 0;
+
     internal static bool TryGetItem(int stuffId, out ItemRow row) => Items.TryGetValue(stuffId, out row);
 
     /// <summary>全部物品（按 stuff_id 升序）</summary>
