@@ -256,50 +256,20 @@ internal static class EntityHandlers
 
         // ===== 调试/自动化接口（远程控制游戏生命周期；仅 localhost 可达） =====
 
-        // POST /api/editor/debug/load {dir:"2026-09-11_00_xxx"} — 调用游戏自己的读档。
-        // 自诊断：先取 ArchiveManager.get_dir_path() 实际根目录，报告各文件存在性，
-        // 依次尝试 Load(guid)（游戏自己的路径拼接）与 DoLoad(完整路径)，返回全部结果。
+        // POST /api/editor/debug/load {dir:"2026-09-11_00_xxx"} — 远程"进入存档"。
+        // 走游戏自己的高层入口 UI.ExitAndLoadGame(folderName, "")（移植自 GameMCP 的
+        // 验证机制，配合 SaveLoadPatches 的 UI.ExitGame/UI.Start 补丁）。
+        // ExitAndLoadGame 内部会自己退出当前场景并初始化读档，返回值仅代表"指令已受理"；
+        // 之后游戏重载 UIScene → UI.Start → 延迟 StartGame(folder)，需轮询 state 等 inSave=true。
         Router.Add("POST", "/api/editor/debug/load", ctx =>
         {
             string dir = ctx.Json?["dir"]?.GetValue<string>() ?? "";
             if (string.IsNullOrWhiteSpace(dir)) throw new HttpError(400, "missing dir");
             return MainThread.Run(() =>
             {
-                var t = SaveLoadPatches.ArchiveManagerType ?? HarmonyLib.AccessTools.TypeByName("ArchiveManager");
-                if (t == null) throw new InvalidOperationException("找不到 ArchiveManager 类型");
-                var flags = System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static;
-                var load = t.GetMethods(flags).FirstOrDefault(x => x.Name == "Load" && x.GetParameters().Length == 1 && x.GetParameters()[0].ParameterType == typeof(string));
-                var doLoad = t.GetMethods(flags).FirstOrDefault(x => x.Name == "DoLoad" && x.GetParameters().Length == 1 && x.GetParameters()[0].ParameterType == typeof(string));
-                var getRoot = t.GetMethods(flags).FirstOrDefault(x => x.Name == "get_dir_path" && x.GetParameters().Length == 0);
-                string? root = getRoot?.Invoke(null, null) as string;
-                bool sumExists = root != null && System.IO.File.Exists(System.IO.Path.Combine(root, dir, "summary.sav"));
-                bool zipExists = root != null && System.IO.File.Exists(System.IO.Path.Combine(root, dir, "archive_zip.sav"));
-                Plugin.LogInfo($"[Debug] get_dir_path={root}；目标 {dir}；summary.sav={sumExists} archive_zip.sav={zipExists}");
-
-                bool? r1 = null, r2 = null;
-                if (load != null)
-                {
-                    var r = load.Invoke(null, new object[] { dir });
-                    r1 = r is bool b1 && b1;
-                    Plugin.LogInfo($"[Debug] Load(\"{dir}\") = {r1}");
-                }
-                if ((r1 != true) && doLoad != null && root != null)
-                {
-                    var full = System.IO.Path.Combine(root, dir) + System.IO.Path.DirectorySeparatorChar;
-                    var r = doLoad.Invoke(null, new object[] { full });
-                    r2 = r is bool b2 && b2;
-                    Plugin.LogInfo($"[Debug] DoLoad(\"{full}\") = {r2}");
-                }
-                bool ok = (r1 == true) || (r2 == true);
-                return JsonBuilder.Object(w =>
-                {
-                    w.WriteBoolean("ok", true);
-                    w.WriteBoolean("result", ok);
-                    w.WriteString("root", root ?? "");
-                    w.WriteNumber("load", r1 == true ? 1 : 0);
-                    w.WriteNumber("doload", r2 == true ? 1 : 0);
-                });
-            }, 120000);
+                bool ok = SaveLoadPatches.LoadSaveViaUI(dir);
+                return JsonBuilder.Object(w => { w.WriteBoolean("ok", true); w.WriteBoolean("result", ok); });
+            }, 30000);
         });
 
         // POST /api/editor/debug/quit — 优雅退出游戏（Application.Quit，日志正常落盘）
