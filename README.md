@@ -29,10 +29,16 @@ Interop/                 IL2CPP 互操作层（全项目唯一定义处，禁止
   Il2CppInvoke.cs        方法查找 + il2cpp_runtime_invoke 参数编组
   ManagedReflect.cs      对 IL2CPP 代理对象的 C# 反射读写（MemberInfo 缓存）
 
-Game/                    游戏业务服务（每个领域一个文件）
+Game/                    游戏业务服务（每个领域一个文件/目录）
   GameContext.cs         Game/Territory 根对象解析
-  ChestService.cs        箱子/背包：设施扫描、物品增删、计划库存、筛选、定位、JSON 构建（TTL 缓存）
-  DragonService.cs       龙系统：素材背包（本地记账+实时读）、龙魂、召唤、龙实体
+  Chest/                 ChestService（partial 按职责拆分）
+    ChestService.cs      核心状态/结构体 + 物品增删（袋方法缓存）
+    ChestService.Scan/Locate/Temple/Plan/Json.cs
+                         扫描读取器 / 定位相机 / 永恒神殿 / 计划库存+筛选 / JSON 构建（TTL 缓存）
+  Dragon/                DragonService（partial 按职责拆分）
+    DragonService.cs     共享 JSON 值写入器
+    DragonService.Bag/Summon/Soul/Entities.cs
+                         素材背包（本地记账+实时读）/ 召唤 / 龙魂与强化持久化 / 龙实体扫描与字段修改
   TechTreeService.cs     科技树
   EntityScan.cs          统一实体扫描 + 字段读写（EditorEntity 模型）
   NpcEditor.cs           NPC 列表/字段修改 + speed/hp/hp_total 每帧持续覆盖
