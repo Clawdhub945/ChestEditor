@@ -51,6 +51,10 @@ public class ChestEditorComponent : MonoBehaviour
         try { NpcSpawnService.PumpPinnedResidents(); }
         catch (Exception ex) { Plugin.LogError($"[Plugin] PumpPinnedResidents 失败: {ex.Message}"); }
 
+        // 召唤士兵离场时间修复（内部 5s 节流，字段直读，全量一遍 <5ms）
+        try { NpcSpawnService.FixSummonedLeaveTime(); }
+        catch (Exception ex) { Plugin.LogError($"[Plugin] FixSummonedLeaveTime 失败: {ex.Message}"); }
+
         if (Input.GetKeyDown(KeyCode.F11))
         {
             try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("http://localhost:8765/") { UseShellExecute = true }); }

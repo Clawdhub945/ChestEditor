@@ -145,18 +145,21 @@ internal static class NpcSpawnService
     private static string seq(int i) => i.ToString();
 
     /// <summary>
-    /// 雇工 → 居民：清 is_hire_worker（bool 单字节写 0）、leave_time_days=0（永久）、
+    /// 雇工 → 居民：清 is_hire_worker（bool 单字节写 0）、
     /// 传送到目标点旁并加入"钉住"队列（每帧 set_position 压过入场行走状态，
     /// 180 秒后释放——入场流程走完后居民就留在目标点生活）。
+    /// leave_time_days 不动：CreateHireWorker 已写 当前天数+99999（永久）；
+    /// ⚠ 千万别清 0——leave=0 会让离场结算链原生 AV（见 SpawnSoldier 注释）。
     /// </summary>
     private static void MakeResident(IntPtr npcPtr, float wx, float wy, int seq, Random rnd)
     {
         IntPtr npcClass = GetClass(npcPtr);
-        foreach (var f in EnumerateFields(npcClass))
-        {
-            if (f.Name == "is_hire_worker") WriteIl2CppByte(npcPtr, f.Offset, 0);
-            else if (f.Name == "leave_time_days") WriteIl2CppInt(npcPtr, f.Offset, 0);
-        }
+        // ⚠ is_hire_worker 声明在基类 BattleUnit 上（il2cpp_class_get_fields 只枚举本类声明），
+        //   必须沿父类链找偏移——否则清零静默不生效，居民一直是雇工标记。
+        if (TryFindFieldOffset(npcClass, "is_hire_worker", out int offHire) && offHire > 0)
+            WriteIl2CppByte(npcPtr, offHire, 0);
+        else
+            Plugin.LogInfo("[NpcSpawn] 未找到 is_hire_worker 字段（雇工标记未清除）");
         try
         {
             IntPtr getGo = FindMethodInHierarchy(npcClass, "get_gameObject", 0);
@@ -185,6 +188,7 @@ internal static class NpcSpawnService
     internal static void PumpPinnedResidents()
     {
         if (_pinned.Count == 0) return;
+        if (!GameChainLocator.IsWorldReady()) { _pinned.Clear(); return; }
         long now = Environment.TickCount64;
         for (int i = _pinned.Count - 1; i >= 0; i--)
         {
@@ -206,6 +210,52 @@ internal static class NpcSpawnService
             Invoke(setPos, tr, new RawArg(vec));
         }
         finally { Marshal.FreeHGlobal(vec); }
+    }
+
+    // ===== 召唤士兵离场时间修复（存量 + 兜底） =====
+    // 我们用 CreateSoldierBySummon(existDay=0) 造过的士兵 leave_time_days=0：
+    // is_soldier_summon=1 的 NPC 每日结算必进 Clock.Days > leave → is_time_to_leave=1 →
+    // 离场处理链原生 AV（三次闪退同偏移）。这里把召唤兵的 leave 统一改成 99999 并清标记。
+    // 字段直读直写（不走 invoke），全量一遍 <5ms；节流 5s，只在存档世界内跑。
+
+    private static long _lastLeaveFix;
+    private static IntPtr _fixClass;
+    private static int _offSummon, _offLeave, _offTimeToLeave;
+    private static bool _fixOffsetsReady;
+
+    internal static void FixSummonedLeaveTime()
+    {
+        if (!GameChainLocator.IsWorldReady()) return;
+        long now = Environment.TickCount64;
+        if (now - _lastLeaveFix < 5000) return;
+        _lastLeaveFix = now;
+        try
+        {
+            foreach (var e in EntityScan.Snapshot())
+            {
+                if (e.ClassName != "Npc" || e.Ptr == IntPtr.Zero) continue;
+                IntPtr cls = GetClass(e.Ptr);
+                if (cls != _fixClass)
+                {
+                    _fixClass = cls; _fixOffsetsReady = false;
+                    // ⚠ is_soldier_summon/leave_time_days 等声明在基类 BattleUnit 上，
+                    //   il2cpp_class_get_fields 只枚举本类声明字段 → 必须沿父类链查
+                    _offSummon = _offLeave = _offTimeToLeave = 0;
+                    TryFindFieldOffset(cls, "is_soldier_summon", out _offSummon);
+                    TryFindFieldOffset(cls, "leave_time_days", out _offLeave);
+                    TryFindFieldOffset(cls, "is_time_to_leave", out _offTimeToLeave);
+                    _fixOffsetsReady = _offSummon > 0 && _offLeave > 0;
+                    Plugin.LogInfo($"[NpcSpawn] 离场修复字段偏移: summon={_offSummon} leave={_offLeave} ttl={_offTimeToLeave}");
+                }
+                if (!_fixOffsetsReady) return;
+                if (ReadIl2CppByte(e.Ptr, _offSummon) == 0) continue;          // 非召唤士兵不管
+                if (ReadIl2CppInt(e.Ptr, _offLeave) >= 99999) continue;        // 已修复
+                WriteIl2CppInt(e.Ptr, _offLeave, 99999);
+                if (_offTimeToLeave > 0) WriteIl2CppByte(e.Ptr, _offTimeToLeave, 0);
+                Plugin.LogInfo($"[NpcSpawn] 修复召唤士兵离场时间 ptrHash={e.PtrHash}");
+            }
+        }
+        catch (Exception ex) { Plugin.LogInfo($"[NpcSpawn] FixSummonedLeaveTime: {ex.Message}"); }
     }
 
     /// <summary>召唤士兵（上帝模式同款：兵种 + 武器/盔甲/盾牌，0 = 默认）。</summary>
@@ -234,9 +284,12 @@ internal static class NpcSpawnService
             // Vector2 是 8 字节 struct：槽里塞 {x, y} 两个 float 的位模式（x 低 32 / y 高 32）
             long packed = (long)(uint)BitConverter.SingleToInt32Bits(px)
                         | ((long)(uint)BitConverter.SingleToInt32Bits(py) << 32);
-            // exist_day_count = 0 → leave_time_days = 0 = 永久（>0 时 = Days+N 后离场）
+            // exist_day_count 传 99999 → leave_time_days = 当前天数+99999，永不触发离场链。
+            // ⚠ 传 0 会得到 leave_time_days=0 的士兵：is_soldier_summon=1 的 NPC 每日结算
+            //   (NpcDoOnNewDay) 必进 Clock.Days > leave_time_days → is_time_to_leave=1 →
+            //   离场处理链原生 AV（实测三次闪退同一偏移 GameAssembly+0x445291）。
             if (Invoke(m, helper, soldierTypeId, typeName, weaponId, armorId, shieldId,
-                       0, packed, 0) != IntPtr.Zero) spawned++;
+                       0, packed, 99999) != IntPtr.Zero) spawned++;
         }
         Plugin.LogInfo($"[NpcSpawn] 士兵({typeName}) ×{spawned} 武器{weaponId} 盔甲{armorId} 盾牌{shieldId}（参考 {wx:F1},{wy:F1}）");
         return (spawned, wx, wy);
