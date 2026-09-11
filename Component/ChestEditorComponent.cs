@@ -47,10 +47,6 @@ public class ChestEditorComponent : MonoBehaviour
         // 记录主线程 id：给 MainThread.IsMainThread 用（防止有调用点在 HTTP 线程上碰 Unity 对象）
         MainThread.MarkMainThread();
 
-        // 召唤居民的"位置钉住"队列（入场行走状态每帧拖回边缘，逐帧 set_position 压过）
-        try { NpcSpawnService.PumpPinnedResidents(); }
-        catch (Exception ex) { Plugin.LogError($"[Plugin] PumpPinnedResidents 失败: {ex.Message}"); }
-
         // 召唤士兵离场时间修复（内部 5s 节流，字段直读，全量一遍 <5ms）
         try { NpcSpawnService.FixSummonedLeaveTime(); }
         catch (Exception ex) { Plugin.LogError($"[Plugin] FixSummonedLeaveTime 失败: {ex.Message}"); }

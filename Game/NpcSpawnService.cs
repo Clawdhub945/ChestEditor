@@ -13,17 +13,18 @@ namespace ChestEditor.Game;
 /// · 小精灵  = <c>NpcHelper.CreateElf(Point)</c>            游戏自己的小精灵入口（npc_type=23，
 ///             自带命名/随机成年年龄/离场天数）。
 /// · 石头人  = <c>NpcHelper.CreateStoneMan(Point)</c>       同上（npc_type=30）。
-/// · 各种族  = <c>CreateHireWorker(Point, race, count, ...) 造人 + 洗成居民</c>：
-///             造完立即清 is_hire_worker（bool 单字节 0）+ leave_time_days=0（永久）+
-///             transform.position 传送到参考点旁 → 与直造居民无差别。
+/// · 各种族  = <c>CreateHireWorker(Point, race, count, 99999, ...)</c> 造人 + 洗成居民：
+///             造完立即清 is_hire_worker（bool 单字节 0；字段在基类 BattleUnit，
+///             须沿父类链查偏移）。不做传送/逐帧位置钉住——长期持 Transform 原始指针
+///             在 NPC 死亡/回收后悬垂 → 原生 AV（多次闪退嫌疑）；雇工入场位置另行处理。
 ///             ⚠ 不直调 CreateNpc：实参矩阵（含与 CreateElf 完全一致的实参）全部在方法体内
 ///             NullReferenceException —— runtime_invoke 调用上下文问题，游戏自己的包装器链没事。
-///             雇工本身会无视 start_pos 从地图边缘走进来，所以传送是必需步骤。
 /// · 士兵    = <c>NpcHelper.CreateSoldierBySummon(8参)</c>  游戏"召唤士兵"原装入口：
 ///             (type_id, 类型名, weapon, armor, shield, mount, Vector2 落点, exist_day_count)。
 ///             内部查 soldier_equip_dic 取种族/随机成年年龄，is_soldier_summon=1；
-///             exist_day_count &lt;= 0 → leave_time_days=0 = 永久；weapon/armor/shield 传
-///             装备表 id（405/407/408 段 stuff_id），0 = 默认（拳头/无）。
+///             exist_day_count 传 99999（leave=天数+99999 永不触发离场链；传 0 会得到
+///             leave=0，游戏内跨天 DoOnNewDay 置 is_time_to_leave → 离场链原生 AV）；
+///             weapon/armor/shield 传装备表 id（405/407/408 段 stuff_id），0 = 默认（拳头/无）。
 /// 位置：借在场实体的世界坐标（与 AnimalService.Spawn 同一套合法性过滤）——
 ///       精灵/石头人反推格子（Point.ToVector3 = (gx+0.5, gy+0.5, 0)）。
 /// ⚠ marshaling：Point/Vector2 是 8 字节 struct → 参数槽直塞 64 位打包值；
@@ -132,8 +133,7 @@ internal static class NpcSpawnService
             {
                 IntPtr npcPtr = itemM != IntPtr.Zero ? Invoke(itemM, listPtr, i) : IntPtr.Zero;
                 if (npcPtr == IntPtr.Zero) continue;
-                MakeResident(npcPtr, wx, wy, i, rnd);
-                spawned2++;
+                spawned2 += MakeResident(npcPtr);
             }
             Plugin.LogInfo($"[NpcSpawn] 居民({raceName}) ×{spawned2}（参考 {wx:F1},{wy:F1}，格 {gx},{gy}；雇工洗白）");
             return (spawned2, wx, wy);
@@ -145,71 +145,21 @@ internal static class NpcSpawnService
     private static string seq(int i) => i.ToString();
 
     /// <summary>
-    /// 雇工 → 居民：清 is_hire_worker（bool 单字节写 0）、
-    /// 传送到目标点旁并加入"钉住"队列（每帧 set_position 压过入场行走状态，
-    /// 180 秒后释放——入场流程走完后居民就留在目标点生活）。
-    /// leave_time_days 不动：CreateHireWorker 已写 当前天数+99999（永久）；
-    /// ⚠ 千万别清 0——leave=0 会让离场结算链原生 AV（见 SpawnSoldier 注释）。
+    /// 雇工 → 居民：清 is_hire_worker（bool 单字节写 0，字段在基类 BattleUnit，沿父类链查偏移）。
+    /// ⚠ 不做传送/位置钉住：逐帧 set_position 需要长时间持有 Transform 原始指针，
+    ///   NPC 在战斗中死亡/被回收后即悬垂 → 原生 AV（多次闪退嫌疑）。
+    ///   位置问题（雇工从地图边缘入场）另行处理——玩家反馈"坐标先不理"。
     /// </summary>
-    private static void MakeResident(IntPtr npcPtr, float wx, float wy, int seq, Random rnd)
+    private static int MakeResident(IntPtr npcPtr)
     {
         IntPtr npcClass = GetClass(npcPtr);
-        // ⚠ is_hire_worker 声明在基类 BattleUnit 上（il2cpp_class_get_fields 只枚举本类声明），
-        //   必须沿父类链找偏移——否则清零静默不生效，居民一直是雇工标记。
         if (TryFindFieldOffset(npcClass, "is_hire_worker", out int offHire) && offHire > 0)
+        {
             WriteIl2CppByte(npcPtr, offHire, 0);
-        else
-            Plugin.LogInfo("[NpcSpawn] 未找到 is_hire_worker 字段（雇工标记未清除）");
-        try
-        {
-            IntPtr getGo = FindMethodInHierarchy(npcClass, "get_gameObject", 0);
-            IntPtr go = getGo != IntPtr.Zero ? Invoke(getGo, npcPtr) : IntPtr.Zero;
-            if (go == IntPtr.Zero) { Plugin.LogInfo("[NpcSpawn] 传送: get_gameObject 为空"); return; }
-            IntPtr getTr = FindMethodInHierarchy(GetClass(go), "get_transform", 0);
-            IntPtr tr = getTr != IntPtr.Zero ? Invoke(getTr, go) : IntPtr.Zero;
-            if (tr == IntPtr.Zero) { Plugin.LogInfo("[NpcSpawn] 传送: get_transform 为空"); return; }
-            IntPtr setPos = FindMethodInHierarchy(GetClass(tr), "set_position", 1);
-            if (setPos == IntPtr.Zero) { Plugin.LogInfo("[NpcSpawn] 传送: set_position 未找到"); return; }
-            float px = wx + (float)(rnd.NextDouble() * 4.0 - 2.0);
-            float py = wy + (float)(rnd.NextDouble() * 4.0 - 2.0);
-            _pinned.Add(new PinnedResident { Transform = tr, SetPos = setPos, X = px, Y = py,
-                UntilMs = Environment.TickCount64 + 180_000 });
-            TeleportNow(tr, setPos, px, py);
+            return 1;
         }
-        catch (Exception ex) { Plugin.LogInfo($"[NpcSpawn] 传送居民 {seq} 失败: {ex.Message}"); }
-    }
-
-    // ===== 位置钉住队列：入场行走状态每帧把雇工拖回边缘，逐帧 set_position 压过去 =====
-
-    private sealed class PinnedResident { public IntPtr Transform; public IntPtr SetPos; public float X, Y; public long UntilMs; }
-    private static readonly List<PinnedResident> _pinned = new();
-
-    /// <summary>ChestEditorComponent.Update 每帧调用（主线程）。</summary>
-    internal static void PumpPinnedResidents()
-    {
-        if (_pinned.Count == 0) return;
-        if (!GameChainLocator.IsWorldReady()) { _pinned.Clear(); return; }
-        long now = Environment.TickCount64;
-        for (int i = _pinned.Count - 1; i >= 0; i--)
-        {
-            var p = _pinned[i];
-            if (now >= p.UntilMs) { _pinned.RemoveAt(i); continue; }
-            try { TeleportNow(p.Transform, p.SetPos, p.X, p.Y); }
-            catch { _pinned.RemoveAt(i); }
-        }
-    }
-
-    private static void TeleportNow(IntPtr tr, IntPtr setPos, float px, float py)
-    {
-        IntPtr vec = Marshal.AllocHGlobal(12);
-        try
-        {
-            Marshal.WriteInt32(vec, 0, BitConverter.SingleToInt32Bits(px));
-            Marshal.WriteInt32(vec, 4, BitConverter.SingleToInt32Bits(py));
-            Marshal.WriteInt32(vec, 8, 0);
-            Invoke(setPos, tr, new RawArg(vec));
-        }
-        finally { Marshal.FreeHGlobal(vec); }
+        Plugin.LogInfo("[NpcSpawn] 未找到 is_hire_worker 字段（雇工标记未清除）");
+        return 0;
     }
 
     // ===== 召唤士兵离场时间修复（存量 + 兜底） =====
