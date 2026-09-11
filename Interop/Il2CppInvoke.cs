@@ -61,7 +61,14 @@ internal static unsafe class Il2CppInvoke
             }
 
             if (exception != IntPtr.Zero)
-                Plugin.LogError($"[Il2CppInvoke] 方法调用抛出异常: {Il2CppApi.PtrToString(exception)}");
+            {
+                // System.Exception 布局：klass(8) + monitor(8) + message(string)@16 → 直接解码真话
+                //（此前把异常对象整个当字符串读，只会得到乱码）
+                string msg;
+                try { msg = Il2CppMemory.ReadStringObject(Il2CppMemory.ReadIl2CppPointer(exception, 16)) ?? "(无法解码)"; }
+                catch { msg = "(解码失败)"; }
+                Plugin.LogError($"[Il2CppInvoke] 方法调用抛出异常: {msg}");
+            }
             return result;
         }
         catch (Exception ex)

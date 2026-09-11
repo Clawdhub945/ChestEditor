@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using static ChestEditor.Interop.Il2CppApi;
 using static ChestEditor.Interop.Il2CppInvoke;
+using static ChestEditor.Interop.Il2CppMemory;
 using static ChestEditor.Interop.ManagedReflect;
 
 namespace ChestEditor.Game;
@@ -9,21 +11,21 @@ namespace ChestEditor.Game;
 /// <summary>
 /// 召唤小人 / 召唤士兵 —— 走游戏内置"上帝模式"同款创建路径（伪 C 证实，code_meta.json）：
 /// · 小精灵  = <c>NpcHelper.CreateElf(Point)</c>            游戏自己的小精灵入口（npc_type=23，
-///             内部 Point→Vector3 调 CreateNpc；自带命名/随机成年年龄/离场天数）。
+///             自带命名/随机成年年龄/离场天数）。
 /// · 石头人  = <c>NpcHelper.CreateStoneMan(Point)</c>       同上（npc_type=30）。
-/// · 各种族  = <c>NpcHelper.CreateHireWorker(Point, race_id, count, leaveDays, ...)</c>
-///             游戏自己的"各种族批量雇工"入口（伪 C 证实：内部随机姓名/成年年龄/性别，
-///             npc_type=0 杂工；leave_time_days 给 99999 = 实际永久）。
-///             ⚠ 不直调 CreateNpc：prefab/family_guid 语义猜不准，实测抛 IL2CPP 异常
-///             （士兵路径能过是用了 soldier_equip_dic 里的官方 prefab 字段）。
+/// · 各种族  = <c>CreateHireWorker(Point, race, count, ...) 造人 + 洗成居民</c>：
+///             造完立即清 is_hire_worker（bool 单字节 0）+ leave_time_days=0（永久）+
+///             transform.position 传送到参考点旁 → 与直造居民无差别。
+///             ⚠ 不直调 CreateNpc：实参矩阵（含与 CreateElf 完全一致的实参）全部在方法体内
+///             NullReferenceException —— runtime_invoke 调用上下文问题，游戏自己的包装器链没事。
+///             雇工本身会无视 start_pos 从地图边缘走进来，所以传送是必需步骤。
 /// · 士兵    = <c>NpcHelper.CreateSoldierBySummon(8参)</c>  游戏"召唤士兵"原装入口：
 ///             (type_id, 类型名, weapon, armor, shield, mount, Vector2 落点, exist_day_count)。
 ///             内部查 soldier_equip_dic 取种族/随机成年年龄，is_soldier_summon=1；
 ///             exist_day_count &lt;= 0 → leave_time_days=0 = 永久；weapon/armor/shield 传
 ///             装备表 id（405/407/408 段 stuff_id），0 = 默认（拳头/无）。
 /// 位置：借在场实体的世界坐标（与 AnimalService.Spawn 同一套合法性过滤）——
-///       精灵/石头人反推格子（Point.ToVector3 = (gx+0.5, gy+0.5, 0)），
-///       村民/士兵直接用世界坐标（CreateNpc 只吃 Vector3，z 置 0）。
+///       精灵/石头人反推格子（Point.ToVector3 = (gx+0.5, gy+0.5, 0)）。
 /// ⚠ marshaling：Point/Vector2 是 8 字节 struct → 参数槽直塞 64 位打包值；
 ///   Vector3 是 12 字节 → 必须走 RawArg（非托管缓冲，槽装不下）。
 /// </summary>
@@ -69,12 +71,43 @@ internal static class NpcSpawnService
                 throw new InvalidOperationException($"未知种族 raceId={raceId}");
             string raceName = RaceNames[raceId];
 
-            // ⚠ 不直调 CreateNpc：prefab 字面量/family_guid 语义猜不准（实测抛 IL2CPP 异常，
-            //   士兵路径能过是因为用 soldier_equip_dic 里的官方 prefab 字段）。
-            // 改走游戏自己的"雇工"批量入口 CreateHireWorker(Point, race_id, hire_count,
-            //   leave_time_days, is_educated, tool_stuff_id, clothes_stuff_id)（伪 C 证实：
-            //   内部 NpcNameGenerator 随机姓名 + RandomAdultAgeOfHire + npc_type=0 杂工），
-            //   leave_time_days 给 99999 = 实际永久。
+            // ===== 尝试 A：CreateNpc 直调（真居民 + 精确坐标）=====
+            // 历史失败均在挂有 Harmony 捕获补丁的构建上（NRE 来自补丁桥嫌疑）；
+            // 当前构建无补丁，重新验证。成功 = 最优解。
+            IntPtr createNpc = FindMethodInHierarchy(helperClass, "CreateNpc", 15);
+            if (createNpc != IntPtr.Zero)
+            {
+                int spawned = 0;
+                for (int i = 0; i < count; i++)
+                {
+                    int familyGuid = NextGuid();
+                    if (familyGuid == 0) break;
+                    float px = wx + (float)(rnd.NextDouble() * 4.0 - 2.0);
+                    float py = wy + (float)(rnd.NextDouble() * 4.0 - 2.0);
+                    IntPtr vec = Marshal.AllocHGlobal(12);
+                    try
+                    {
+                        Marshal.WriteInt32(vec, 0, BitConverter.SingleToInt32Bits(px));
+                        Marshal.WriteInt32(vec, 4, BitConverter.SingleToInt32Bits(py));
+                        Marshal.WriteInt32(vec, 8, 0);
+                        if (Invoke(createNpc, helper, "召唤", raceName + "·" + seq(i), new RawArg(vec),
+                            20 + rnd.Next(21), rnd.Next(2) == 0, familyGuid, true,
+                            0, raceId, "npc", null, false, 0, 0, false) != IntPtr.Zero) spawned++;
+                    }
+                    finally { Marshal.FreeHGlobal(vec); }
+                }
+                if (spawned > 0)
+                {
+                    Plugin.LogInfo($"[NpcSpawn] 居民({raceName}) ×{spawned}（CreateNpc 直调，参考 {wx:F1},{wy:F1}）");
+                    return (spawned, wx, wy);
+                }
+                Plugin.LogInfo("[NpcSpawn] CreateNpc 直调失败 → 回落雇工洗白");
+            }
+
+            // ===== 尝试 B：CreateHireWorker 造人 + 洗成居民 =====
+            // 雇工会无视 start_pos 从地图边缘走进来（入口状态机每帧驱动），因此：
+            // ① is_hire_worker=false ② leave_time_days=0 ③ 传送到参考点旁。
+            // 传送可能与行走状态竞争（实测一次不生效）→ 传送后读回 position 验证并记录。
             IntPtr hire = FindMethodInHierarchy(helperClass, "CreateHireWorker", 7);
             if (hire == IntPtr.Zero)
                 throw new InvalidOperationException("找不到 NpcHelper.CreateHireWorker(7 参)");
@@ -85,20 +118,94 @@ internal static class NpcSpawnService
                 new IntPtr(gx | (gy << 32)),   // Point 是 struct：槽直塞 8 字节
                 raceId,
                 count,
-                99999,                         // 离场天数（游戏会写 leave_time_days = Days + N）
+                99999,                         // 离场天数（下面会显式清 0）
                 false,                         // is_educated
                 0, 0);                         // tool / clothes = 无
-            int spawned = 0;
-            if (listPtr != IntPtr.Zero)
+            if (listPtr == IntPtr.Zero)
+                throw new InvalidOperationException("CreateHireWorker 返回空");
+
+            IntPtr cntM = FindMethodInHierarchy(GetClass(listPtr), "get_Count", 0);
+            IntPtr itemM = FindMethodInHierarchy(GetClass(listPtr), "get_Item", 1);
+            int made = cntM != IntPtr.Zero ? InvokeInt(cntM, listPtr) : 0;
+            int spawned2 = 0;
+            for (int i = 0; i < made; i++)
             {
-                IntPtr cntM = FindMethodInHierarchy(GetClass(listPtr), "get_Count", 0);
-                if (cntM != IntPtr.Zero) spawned = InvokeInt(cntM, listPtr);
+                IntPtr npcPtr = itemM != IntPtr.Zero ? Invoke(itemM, listPtr, i) : IntPtr.Zero;
+                if (npcPtr == IntPtr.Zero) continue;
+                MakeResident(npcPtr, wx, wy, i, rnd);
+                spawned2++;
             }
-            Plugin.LogInfo($"[NpcSpawn] 雇工村民({raceName}) ×{spawned}（参考 {wx:F1},{wy:F1}，格 {gx},{gy}）");
-            return (spawned, wx, wy);
+            Plugin.LogInfo($"[NpcSpawn] 居民({raceName}) ×{spawned2}（参考 {wx:F1},{wy:F1}，格 {gx},{gy}；雇工洗白）");
+            return (spawned2, wx, wy);
         }
 
         throw new InvalidOperationException($"未知 kind={kind}");
+    }
+
+    private static string seq(int i) => i.ToString();
+
+    /// <summary>
+    /// 雇工 → 居民：清 is_hire_worker（bool 单字节写 0）、leave_time_days=0（永久）、
+    /// 传送到目标点旁并加入"钉住"队列（每帧 set_position 压过入场行走状态，
+    /// 180 秒后释放——入场流程走完后居民就留在目标点生活）。
+    /// </summary>
+    private static void MakeResident(IntPtr npcPtr, float wx, float wy, int seq, Random rnd)
+    {
+        IntPtr npcClass = GetClass(npcPtr);
+        foreach (var f in EnumerateFields(npcClass))
+        {
+            if (f.Name == "is_hire_worker") WriteIl2CppByte(npcPtr, f.Offset, 0);
+            else if (f.Name == "leave_time_days") WriteIl2CppInt(npcPtr, f.Offset, 0);
+        }
+        try
+        {
+            IntPtr getGo = FindMethodInHierarchy(npcClass, "get_gameObject", 0);
+            IntPtr go = getGo != IntPtr.Zero ? Invoke(getGo, npcPtr) : IntPtr.Zero;
+            if (go == IntPtr.Zero) { Plugin.LogInfo("[NpcSpawn] 传送: get_gameObject 为空"); return; }
+            IntPtr getTr = FindMethodInHierarchy(GetClass(go), "get_transform", 0);
+            IntPtr tr = getTr != IntPtr.Zero ? Invoke(getTr, go) : IntPtr.Zero;
+            if (tr == IntPtr.Zero) { Plugin.LogInfo("[NpcSpawn] 传送: get_transform 为空"); return; }
+            IntPtr setPos = FindMethodInHierarchy(GetClass(tr), "set_position", 1);
+            if (setPos == IntPtr.Zero) { Plugin.LogInfo("[NpcSpawn] 传送: set_position 未找到"); return; }
+            float px = wx + (float)(rnd.NextDouble() * 4.0 - 2.0);
+            float py = wy + (float)(rnd.NextDouble() * 4.0 - 2.0);
+            _pinned.Add(new PinnedResident { Transform = tr, SetPos = setPos, X = px, Y = py,
+                UntilMs = Environment.TickCount64 + 180_000 });
+            TeleportNow(tr, setPos, px, py);
+        }
+        catch (Exception ex) { Plugin.LogInfo($"[NpcSpawn] 传送居民 {seq} 失败: {ex.Message}"); }
+    }
+
+    // ===== 位置钉住队列：入场行走状态每帧把雇工拖回边缘，逐帧 set_position 压过去 =====
+
+    private sealed class PinnedResident { public IntPtr Transform; public IntPtr SetPos; public float X, Y; public long UntilMs; }
+    private static readonly List<PinnedResident> _pinned = new();
+
+    /// <summary>ChestEditorComponent.Update 每帧调用（主线程）。</summary>
+    internal static void PumpPinnedResidents()
+    {
+        if (_pinned.Count == 0) return;
+        long now = Environment.TickCount64;
+        for (int i = _pinned.Count - 1; i >= 0; i--)
+        {
+            var p = _pinned[i];
+            if (now >= p.UntilMs) { _pinned.RemoveAt(i); continue; }
+            try { TeleportNow(p.Transform, p.SetPos, p.X, p.Y); }
+            catch { _pinned.RemoveAt(i); }
+        }
+    }
+
+    private static void TeleportNow(IntPtr tr, IntPtr setPos, float px, float py)
+    {
+        IntPtr vec = Marshal.AllocHGlobal(12);
+        try
+        {
+            Marshal.WriteInt32(vec, 0, BitConverter.SingleToInt32Bits(px));
+            Marshal.WriteInt32(vec, 4, BitConverter.SingleToInt32Bits(py));
+            Marshal.WriteInt32(vec, 8, 0);
+            Invoke(setPos, tr, new RawArg(vec));
+        }
+        finally { Marshal.FreeHGlobal(vec); }
     }
 
     /// <summary>召唤士兵（上帝模式同款：兵种 + 武器/盔甲/盾牌，0 = 默认）。</summary>
