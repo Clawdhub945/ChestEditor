@@ -158,6 +158,14 @@ internal static class NpcSpawnService
         string typeName = DataTables.SoldierTypeName(soldierTypeId);
         if (string.IsNullOrEmpty(typeName)) typeName = soldierTypeId.ToString();
 
+        // ★ 名字必须用游戏自己的生成器造"人名"：
+        //   CreateSoldierBySummon 的第 2 参会**直接写进 Npc.npc_name**（伪 C 与实测均证实），
+        //   传兵种名会让士兵顶着职业名（用户实测："这些名字按职业来命名了"）。
+        //   游戏正规招募入口 SoldierHelper.CreateSoldier 用的就是
+        //   NpcNameGenerator.GetRandomFamilyName + GetName。
+        string nameParam = GameChainLocator.GenerateNpcName(0) ?? typeName;
+        Plugin.LogInfo($"[NpcSpawn] 人名生成: '{nameParam}'（兵种 {typeName}）");
+
         IntPtr m = FindMethodInHierarchy(GetClass(helper), "CreateSoldierBySummon", 8);
         if (m == IntPtr.Zero)
             throw new InvalidOperationException("找不到 NpcHelper.CreateSoldierBySummon(8 参)");
@@ -167,21 +175,22 @@ internal static class NpcSpawnService
         int spawned = 0;
 
         // ⚠⚠ 字符串参数必须登记 il2cpp GC 根，否则名字字段必成垃圾（崩溃根因）：
-        //   CreateSoldierBySummon 的第 2 参（兵种名 → 游戏写进 Npc.npc_name）是托管字符串，
+        //   CreateSoldierBySummon 的第 2 参（→ 游戏写进 Npc.npc_name）是托管字符串，
         //   经 StringToIl2Cpp 复制成 il2cpp 字符串后**只被 .NET 参数数组引用**；
         //   而 il2cpp 的 Boehm GC 不扫描 .NET 托管堆 —— CreateNpc 内部大量分配一旦触发 GC，
         //   这个字符串就被回收，游戏存进 npc_name 的就是悬垂指针（实测回读即乱码/含 \0）。
         //   后果：鼠标悬停 → Npc.OnPointerEnter → UI.ShowMouseTip(name) → TMPro 解析这个
         //   损坏字符串时 Array.Resize(newSize<0) → ArgumentOutOfRangeException → 原生 AV。
-        //   ⚠ 这里**故意不释放** GC 根：游戏对名字可能是"先存指针、稍后才规范化"，
+        //   ⚠ GC 根**故意不释放**：游戏对名字可能是"先存指针、稍后才规范化"，
         //   提前释放会让字符串在窗口期被回收（实测仍有部分 NPC 名字为空/乱码）。
         //   每次召唤泄漏一个短字符串，可忽略。
-        IntPtr namePtr = StringToIl2Cpp(typeName);
-        GcHandleNew(namePtr, true);   // pinned：连地址都锁住，最长保护
-        int made = 0;
-        Plugin.LogInfo($"[NpcSpawn] name 封送校验: '{typeName}' ptr=0x{namePtr:X} 回读='{ReadStringObject(namePtr) ?? "(null)"}'");
         for (int i = 0; i < count; i++)
         {
+            // 每个单位单独取一个游戏生成的人名（与正规招募一致，避免全叫同一个名字）
+            string nm = GameChainLocator.GenerateNpcName(0) ?? nameParam;
+            IntPtr namePtr = StringToIl2Cpp(nm);
+            GcHandleNew(namePtr, true);   // pinned：连地址都锁住，最长保护
+
             float px = wx + (float)(rnd.NextDouble() * 4.0 - 2.0);
             float py = wy + (float)(rnd.NextDouble() * 4.0 - 2.0);
             // Vector2 是 8 字节 struct：槽里塞 {x, y} 两个 float 的位模式（x 低 32 / y 高 32）
@@ -193,7 +202,7 @@ internal static class NpcSpawnService
             //   离场处理链原生 AV。
             IntPtr npc = Invoke(m, helper, soldierTypeId, namePtr, weaponId, armorId, shieldId,
                        0, packed, 99999);
-            if (npc != IntPtr.Zero) { spawned++; made++; SanitizeNpcName(npc, typeName); }
+            if (npc != IntPtr.Zero) { spawned++; SanitizeNpcName(npc, nm); }
         }
         Plugin.LogInfo($"[NpcSpawn] 士兵({typeName}) ×{spawned} 武器{weaponId} 盔甲{armorId} 盾牌{shieldId}（参考 {wx:F1},{wy:F1}）");
         return (spawned, wx, wy);

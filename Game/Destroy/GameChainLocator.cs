@@ -340,4 +340,66 @@ internal static class GameChainLocator
         catch (Exception ex) { Plugin.LogVerbose($"[EntityEditor] GetNpcHelper error: {ex.Message}"); }
         return IntPtr.Zero;
     }
+
+    /// <summary>
+    /// 用游戏自己的 <c>NpcNameGenerator</c> 生成一个"本地居民风格"的人名。
+    /// 伪 C 证实（SoldierHelper.CreateSoldier = 正规招募士兵入口）：
+    ///   family = NpcNameGenerator.GetRandomFamilyName(race_id)
+    ///   name   = NpcNameGenerator.GetName(1, race_id, family)
+    /// 而魔法召唤入口 CreateSoldierBySummon 的第 2 参会被**直接写进 Npc.npc_name**，
+    /// 所以必须给它"人名"，否则士兵会顶着兵种名（如"骑士"）满地图跑。
+    /// 两方法都是静态；返回托管字符串。
+    /// </summary>
+    internal static string? GenerateNpcName(int raceId)
+    {
+        try
+        {
+            IntPtr cls = Il2CppApi.FindClassByName("NpcNameGenerator");
+            if (cls == IntPtr.Zero) { Plugin.LogVerbose("[EntityEditor] 找不到 NpcNameGenerator"); return null; }
+
+            IntPtr mFamily = Il2CppApi.GetMethodFromName(cls, "GetRandomFamilyName", 1);
+            if (mFamily == IntPtr.Zero) mFamily = FindMethodInHierarchy(cls, "GetRandomFamilyName", 1);
+            if (mFamily == IntPtr.Zero) { Plugin.LogVerbose("[EntityEditor] 找不到 GetRandomFamilyName"); return null; }
+
+            IntPtr family = Invoke(mFamily, IntPtr.Zero, raceId);   // 静态：objPtr 传 0
+            if (family == IntPtr.Zero) return null;
+
+            // ⚠ family 必须登记 GC 根：它只被本地变量/参数槽（.NET 托管堆）引用，
+            //   而 il2cpp 的 Boehm GC 不扫描托管堆 —— 紧接着的调用内部一旦分配
+            //   触发 GC，family 就被回收，后续只会拿到空串（实测踩过）。
+            IntPtr root = GcHandleNew(family, true);
+            try
+            {
+                string? fam = Il2CppMemory.ReadStringObject(family);
+                // 路线1：GetNextMaleName()/GetNextFemaleName()（0 参，直接从名字表按序取）
+                foreach (var mn in new[] { "GetNextMaleName", "GetNextFemaleName" })
+                {
+                    IntPtr m = FindMethodInHierarchy(cls, mn, 0);
+                    if (m == IntPtr.Zero) continue;
+                    IntPtr o = Invoke(m, IntPtr.Zero);
+                    string? got = o != IntPtr.Zero ? Il2CppMemory.ReadStringObject(o) : null;
+                    if (!string.IsNullOrEmpty(got))
+                    {
+                        // GetNextXxxName 只返回"名"，完整人名 = 姓 + 名（实测原生士兵即"詹"+"轩宇"）
+                        string full = string.IsNullOrEmpty(fam) ? got : fam + got;
+                        Plugin.LogInfo($"[NpcName] {mn}() → 名='{got}' 姓='{fam}' ⇒ '{full}'");
+                        return full;
+                    }
+                }
+                // 路线2：GetName(is_male, race_id, family_name)（3 参）
+                IntPtr mName = FindMethodInHierarchy(cls, "GetName", 3);
+                if (mName != IntPtr.Zero)
+                {
+                    IntPtr nameObj = Invoke(mName, IntPtr.Zero, 1, raceId, family);
+                    string? nm = nameObj != IntPtr.Zero ? Il2CppMemory.ReadStringObject(nameObj) : null;
+                    Plugin.LogInfo($"[NpcName] GetName(3) race={raceId} 姓='{fam}' 名='{nm}'");
+                    if (!string.IsNullOrEmpty(nm)) return nm;
+                }
+                return null;
+            }
+            finally { GcHandleFree(root); }
+        }
+        catch (Exception ex) { Plugin.LogVerbose($"[EntityEditor] GenerateNpcName error: {ex.Message}"); }
+        return null;
+    }
 }

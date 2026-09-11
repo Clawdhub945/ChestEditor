@@ -152,7 +152,8 @@ def build_dragon_natures():
 
 def build_spawn_tables():
     """召唤小人/士兵的下拉数据（NpcSpawnService）。
-    兵种：soldier_equip.json（剔除 disable 与 0=市民——soldier_equip_dic[0] 不存在，调了必炸）；
+    兵种：soldier_equip.json（剔除 disable、0=市民、**is_mercenary=1 的雇佣兵**——
+          用户要的是"本地士兵"；雇佣兵是 202885~202899 段）；
     装备：weapon/armor/shield.json，按兵种的 weapon/armor/shield_group 在前端过滤；
     名称：stuff 表官方名（weapon_id=405xxx 等就是 stuff_id），缺名回落 prefab。
     种族名：race.json 没有完整中文族名（只有姓氏单字），沿用实测反推的 10 族名。"""
@@ -167,6 +168,8 @@ def build_spawn_tables():
     for r in sorted(load_game_json("soldier_equip.json"), key=lambda x: x["soldier_type_id"]):
         if r.get("disable", 0):
             continue
+        if r.get("is_mercenary", 0):
+            continue                      # 雇佣兵不是本地士兵
         sid = r["soldier_type_id"]
         if sid == 0:
             continue
