@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using System.Linq;
 using ChestEditor.Threading;
 
 namespace ChestEditor.Web;
@@ -252,6 +253,62 @@ internal static class EntityHandlers
             }
             w.WriteEndArray();
         }), 10000));
+
+        // ===== 调试/自动化接口（远程控制游戏生命周期；仅 localhost 可达） =====
+
+        // POST /api/editor/debug/load {dir:"2026-09-11_00_xxx"} — 调用游戏自己的读档。
+        // 自诊断：先取 ArchiveManager.get_dir_path() 实际根目录，报告各文件存在性，
+        // 依次尝试 Load(guid)（游戏自己的路径拼接）与 DoLoad(完整路径)，返回全部结果。
+        Router.Add("POST", "/api/editor/debug/load", ctx =>
+        {
+            string dir = ctx.Json?["dir"]?.GetValue<string>() ?? "";
+            if (string.IsNullOrWhiteSpace(dir)) throw new HttpError(400, "missing dir");
+            return MainThread.Run(() =>
+            {
+                var t = SaveLoadPatches.ArchiveManagerType ?? HarmonyLib.AccessTools.TypeByName("ArchiveManager");
+                if (t == null) throw new InvalidOperationException("找不到 ArchiveManager 类型");
+                var flags = System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static;
+                var load = t.GetMethods(flags).FirstOrDefault(x => x.Name == "Load" && x.GetParameters().Length == 1 && x.GetParameters()[0].ParameterType == typeof(string));
+                var doLoad = t.GetMethods(flags).FirstOrDefault(x => x.Name == "DoLoad" && x.GetParameters().Length == 1 && x.GetParameters()[0].ParameterType == typeof(string));
+                var getRoot = t.GetMethods(flags).FirstOrDefault(x => x.Name == "get_dir_path" && x.GetParameters().Length == 0);
+                string? root = getRoot?.Invoke(null, null) as string;
+                bool sumExists = root != null && System.IO.File.Exists(System.IO.Path.Combine(root, dir, "summary.sav"));
+                bool zipExists = root != null && System.IO.File.Exists(System.IO.Path.Combine(root, dir, "archive_zip.sav"));
+                Plugin.LogInfo($"[Debug] get_dir_path={root}；目标 {dir}；summary.sav={sumExists} archive_zip.sav={zipExists}");
+
+                bool? r1 = null, r2 = null;
+                if (load != null)
+                {
+                    var r = load.Invoke(null, new object[] { dir });
+                    r1 = r is bool b1 && b1;
+                    Plugin.LogInfo($"[Debug] Load(\"{dir}\") = {r1}");
+                }
+                if ((r1 != true) && doLoad != null && root != null)
+                {
+                    var full = System.IO.Path.Combine(root, dir) + System.IO.Path.DirectorySeparatorChar;
+                    var r = doLoad.Invoke(null, new object[] { full });
+                    r2 = r is bool b2 && b2;
+                    Plugin.LogInfo($"[Debug] DoLoad(\"{full}\") = {r2}");
+                }
+                bool ok = (r1 == true) || (r2 == true);
+                return JsonBuilder.Object(w =>
+                {
+                    w.WriteBoolean("ok", true);
+                    w.WriteBoolean("result", ok);
+                    w.WriteString("root", root ?? "");
+                    w.WriteNumber("load", r1 == true ? 1 : 0);
+                    w.WriteNumber("doload", r2 == true ? 1 : 0);
+                });
+            }, 120000);
+        });
+
+        // POST /api/editor/debug/quit — 优雅退出游戏（Application.Quit，日志正常落盘）
+        Router.Add("POST", "/api/editor/debug/quit", _ => MainThread.Run(() =>
+        {
+            Plugin.LogInfo("[Debug] 收到退出指令，Application.Quit()");
+            UnityEngine.Application.Quit();
+            return JsonBuilder.Ok();
+        }, 10000));
 
         // 召唤动物（盒子4）：AnimalHelper.CreateAnimal(随机陆地格, stuffId, 1) × count
         Router.Add("POST", "/api/editor/animal/spawn", ctx =>
