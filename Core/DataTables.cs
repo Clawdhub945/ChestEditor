@@ -21,6 +21,7 @@ internal static class DataTables
         public int Id { get; init; }
         public string Name { get; init; }
         public int StuffType { get; init; }
+        public int SubType { get; init; }
     }
 
     private static Dictionary<int, ItemRow>? _items;
@@ -67,7 +68,8 @@ internal static class DataTables
                         {
                             Id = id,
                             Name = row[1].GetString() ?? "",
-                            StuffType = row[2].GetInt32()
+                            StuffType = row[2].GetInt32(),
+                            SubType = row[3].GetInt32()
                         };
                     }
                 }
@@ -83,6 +85,10 @@ internal static class DataTables
     /// <summary>物品 stuff_type（未知 id 返回 0）。语义：1=建筑 2=生物/士兵/龙 3=食物
     /// 4=材料/装备 5=活体动物 6=资源/药 7=种子 8=尸体 9=技术/信仰。</summary>
     internal static int ItemType(int stuffId) => Items.TryGetValue(stuffId, out var r) ? r.StuffType : 0;
+
+    /// <summary>物品官方子类型（stuff_type_name.json 的类，未知 id 返回 0）。
+    /// 例：405=具体武器 602=药物 801=死亡的动物 806=商人 812=种族 815=龙专属物品。</summary>
+    internal static int ItemSubType(int stuffId) => Items.TryGetValue(stuffId, out var r) ? r.SubType : 0;
 
     internal static bool TryGetItem(int stuffId, out ItemRow row) => Items.TryGetValue(stuffId, out row);
 

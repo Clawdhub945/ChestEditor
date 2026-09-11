@@ -88,12 +88,14 @@ def diff_sets(label, expected, actual):
 
 
 def build_items():
-    """物品表：官方 stuff.json + stuff2.json，按 stuff_id 升序。"""
+    """物品表：官方 stuff.json + stuff2.json，按 stuff_id 升序。
+    行 = [stuff_id, 名称, stuff_type(大类), stuff_sub_type(官方子类)]。"""
     rows = load_game_json("stuff.json") + load_game_json("stuff2.json")
     items = {}
     for r in rows:
-        items[r["stuff_id"]] = (r.get("stuff_namezh-CN", ""), r.get("stuff_type", -1))
-    return [[i, items[i][0], items[i][1]] for i in sorted(items)]
+        items[r["stuff_id"]] = (r.get("stuff_namezh-CN", ""), r.get("stuff_type", -1),
+                                r.get("stuff_sub_type", 0))
+    return [[i, items[i][0], items[i][1], items[i][2]] for i in sorted(items)]
 
 
 def code_items():

@@ -249,14 +249,15 @@ function renderModalList(kind) {
   const cfg = ITEM_MODALS[kind];
   const q = document.getElementById(cfg.searchId).value.toLowerCase();
   const el = document.getElementById(cfg.listId);
-  // 按容器类型过滤可添加物品（stuffType：3=食物 4=材料/装备 6=资源/药 8=尸体）：
-  // 料堆额外收尸体(8)，普通容器/货架只收 3/4/6
+  // 按官方子类型（stuff_type_name.json）过滤：只显示真实物品类，
+  // 排除 种族(812)/商人(806)/龙魂石(815)/未知(808)/图标/场景元素 等伪物品。
+  // 料堆额外收尸体类（801=死亡的动物 804=尸体 805=已宰杀的动物），普通容器不收。
   const _chest = chests[_modalChestIndex];
   const isPile = _chest && _chest.name && _chest.name.indexOf('料堆') === 0;
-  const allow = isPile ? [3, 4, 6, 8] : [3, 4, 6];
   let html = '';
   for (const it of items) {
-    if (allow.indexOf(it.stuffType) < 0) continue;
+    if (!subTypeAllowed(it.subType)) continue;
+    if (!isPile && (it.subType === 801 || it.subType === 804 || it.subType === 805)) continue;
     if (q && !it.name.toLowerCase().includes(q)) continue;
     html += '<div class="modal-item" onclick="' + cfg.applyFn + '(' + it.stuffId + ')">';
     html += '<img src="/icon/' + it.stuffId + '" onerror="hideImg(this)">';
@@ -265,6 +266,16 @@ function renderModalList(kind) {
     html += '</div>';
   }
   el.innerHTML = html;
+}
+
+// 官方子类型白名单：食物(301-306) 加工品(401-408,410-430) 原料(601-621) 种子/经济作物(701-704,707)
+function subTypeAllowed(t) {
+  if (t >= 301 && t <= 306) return true;
+  if (t >= 401 && t <= 408) return true;
+  if (t >= 410 && t <= 430) return true;
+  if (t >= 601 && t <= 621) return true;
+  if ((t >= 701 && t <= 704) || t === 707) return true;
+  return false;
 }
 
 function modalSetN(kind, n) {
