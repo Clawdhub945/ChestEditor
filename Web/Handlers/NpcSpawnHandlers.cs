@@ -19,6 +19,11 @@ internal static class NpcSpawnHandlers
         Router.Add("POST", "/api/npcspawn/debug/hover/{ptrHash}", ctx =>
             MainThread.Run(() => Game.NpcSpawnService.ProbeHover(ctx.Int("ptrHash")), 20000));
 
+        // 【诊断·临时】POST /api/npcspawn/debug/probe-soldier/{typeId}
+        // 分步执行 SoldierHelper.CreateSoldier 内部逻辑，定位 KeyNotFoundException。
+        Router.Add("POST", "/api/npcspawn/debug/probe-soldier/{typeId}", ctx =>
+            MainThread.Run(() => Game.NpcSpawnService.ProbeSoldierChain(ctx.Int("typeId"), 0), 30000));
+
         // 【诊断·临时】GET /api/npcspawn/debug/screenpos/{ptrHash} → 实体屏幕坐标（自动化悬停用）
         Router.Add("GET", "/api/npcspawn/debug/screenpos/{ptrHash}", ctx =>
             MainThread.Run(() => Game.NpcSpawnService.GetScreenPos(ctx.Int("ptrHash")), 8000));

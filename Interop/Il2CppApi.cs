@@ -378,6 +378,12 @@ internal static class Il2CppApi
         => Il2CppInterop.Runtime.IL2CPP.il2cpp_class_from_name(image, ns, className);
 
     /// <summary>
+    /// 分配未初始化的 IL2CPP 对象（等价 C# new，字段全 0）。调用后必须再 Invoke 其 .ctor。
+    /// </summary>
+    internal static IntPtr ObjectNew(IntPtr klass)
+        => Il2CppInterop.Runtime.IL2CPP.il2cpp_object_new(klass);
+
+    /// <summary>
     /// 托管字符串 → IL2CPP 字符串对象（生命周期归 il2cpp GC，无需手动释放）。
     /// 供 Invoke 的 string 参数封送与静态字段写入（SaveLoadPatches 同款机制，这里收进门面）。
     /// ⚠ 必须配合 <see cref="GcHandleNew"/> 使用：新字符串只被 .NET 托管数组（参数槽）引用，

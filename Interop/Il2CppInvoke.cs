@@ -1,3 +1,5 @@
+using static ChestEditor.Interop.Il2CppApi;
+
 namespace ChestEditor.Interop;
 
 /// <summary>
@@ -65,9 +67,27 @@ internal static unsafe class Il2CppInvoke
                 // System.Exception 布局：klass(8) + monitor(8) + message(string)@16 → 直接解码真话
                 //（此前把异常对象整个当字符串读，只会得到乱码）
                 string msg;
-                try { msg = Il2CppMemory.ReadStringObject(Il2CppMemory.ReadIl2CppPointer(exception, 16)) ?? "(无法解码)"; }
-                catch { msg = "(解码失败)"; }
-                Plugin.LogError($"[Il2CppInvoke] 方法调用抛出异常: {msg}");
+                // ⚠ 异常对象未被 GC 根保护，il2cpp 调用（读消息）本身可能触发 GC把它回收
+                //   → 先 pinned 根住再读（实测不根住时消息永远解不出）
+                IntPtr exRoot = IntPtr.Zero;
+                try { exRoot = GcHandleNew(exception, true); } catch { }
+                try
+                {
+                    string exType = "";
+                    IntPtr msgPtr = Il2CppMemory.ReadIl2CppPointer(exception, 16);
+                    if (msgPtr != IntPtr.Zero)
+                    {
+                        IntPtr msgRoot = GcHandleNew(msgPtr, true);
+                        try { msg = Il2CppMemory.ReadStringObject(msgPtr) ?? "(空消息)"; }
+                        finally { GcHandleFree(msgRoot); }
+                    }
+                    else msg = "(消息指针为空)";
+                    IntPtr exClass = System.Runtime.InteropServices.Marshal.ReadIntPtr(exception);  // Il2CppObject.klass 在 +0
+                    exType = GetClassName(exClass) ?? "";
+                    Plugin.LogError($"[Il2CppInvoke] 方法调用抛出异常[{exType}]: {msg}");
+                }
+                catch { Plugin.LogError("[Il2CppInvoke] 方法调用抛出异常(解码失败)"); }
+                finally { if (exRoot != IntPtr.Zero) GcHandleFree(exRoot); }
             }
             return result;
         }

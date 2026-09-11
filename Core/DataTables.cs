@@ -137,6 +137,39 @@ internal static class DataTables
         }
     }
 
+    private static Dictionary<int, int>? _soldierTypeRaces;
+
+    /// <summary>
+    /// 兵种 → 种族（spawn_tables.json soldierTypes 第 6 位 = 官方 race_id_limit，
+    /// 即 SoldierHelper.CreateSoldier 的 race_id 参数同源；骑士=0、精灵系=7）。
+    /// 未知兵种返回 0。
+    /// </summary>
+    internal static int SoldierTypeRace(int soldierTypeId)
+    {
+        lock (Lock)
+        {
+            if (_soldierTypeRaces == null)
+            {
+                _soldierTypeRaces = new Dictionary<int, int>();
+                try
+                {
+                    using var doc = System.Text.Json.JsonDocument.Parse(SpawnTablesJson());
+                    if (doc.RootElement.TryGetProperty("soldierTypes", out var arr) && arr.ValueKind == System.Text.Json.JsonValueKind.Array)
+                    {
+                        foreach (var row in arr.EnumerateArray())
+                        {
+                            var items = row.EnumerateArray().ToList();
+                            if (items.Count >= 6 && items[5].ValueKind == System.Text.Json.JsonValueKind.Number)
+                                _soldierTypeRaces[items[0].GetInt32()] = items[5].GetInt32();
+                        }
+                    }
+                }
+                catch (Exception ex) { Plugin.LogError($"[DataTables] SoldierTypeRace 解析失败: {ex.Message}"); }
+            }
+            return _soldierTypeRaces.TryGetValue(soldierTypeId, out var race) ? race : 0;
+        }
+    }
+
     // ==================== 箱子筛选表 ====================
 
     /// <summary>

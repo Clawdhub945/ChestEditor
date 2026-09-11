@@ -150,6 +150,16 @@ internal static class NpcSpawnService
     internal static (int spawned, float x, float y) SpawnSoldier(
         int soldierTypeId, int weaponId, int armorId, int shieldId, int count)
     {
+        // ===== 本地士兵：直调 NpcHelper.CreateSoldier（13 参内核，is_soldier_summon=false）=====
+        // 这是召唤入口 CreateSoldierBySummon 内部转调的**同一个函数**（今天已验证跑得通），
+        // 唯一区别是 is_soldier_summon 传 false → 与兵营招募的本地兵完全同状态：
+        //   · is_soldier_summon=0 → 无离场时限/无召唤标记（用户要"本地士兵"）
+        //   · leave_time_days=0 → 与原生本地兵一致（实机 dump：summon=0, leave=0）
+        //   · 内部自建 SoldierConfigInfo（type/weapon/armor/shield）+ Soldier.SetFightMode(1)
+        // 落点 = Tile.GridIndexToPositionWithRandomOffset（兵营同款格子→世界坐标换算）。
+        // 名字 = 游戏 NpcNameGenerator（姓 / 全名），与原生兵 "詹"/"詹轩宇" 一致。
+        // ⚠ 不走 SoldierHelper.CreateSoldier 包装：探针实测其调用链（含 RAW _6454850096）
+        //   在 runtime_invoke 环境下必抛 KeyNotFoundException（原因未明，疑与调用上下文相关）。
         IntPtr helper = GameChainLocator.GetNpcHelper();
         if (helper == IntPtr.Zero)
             throw new InvalidOperationException("找不到 NpcHelper（未进存档？）");
@@ -157,55 +167,183 @@ internal static class NpcSpawnService
 
         string typeName = DataTables.SoldierTypeName(soldierTypeId);
         if (string.IsNullOrEmpty(typeName)) typeName = soldierTypeId.ToString();
+        // 兵种 → 种族（官方 race_id_limit：骑士=0、精灵系=7；实机原生兵 raceId 与之一一吻合）
+        int raceId = DataTables.SoldierTypeRace(soldierTypeId);
 
-        // ★ 名字必须用游戏自己的生成器造"人名"：
-        //   CreateSoldierBySummon 的第 2 参会**直接写进 Npc.npc_name**（伪 C 与实测均证实），
-        //   传兵种名会让士兵顶着职业名（用户实测："这些名字按职业来命名了"）。
-        //   游戏正规招募入口 SoldierHelper.CreateSoldier 用的就是
-        //   NpcNameGenerator.GetRandomFamilyName + GetName。
-        string nameParam = GameChainLocator.GenerateNpcName(0) ?? typeName;
-        Plugin.LogInfo($"[NpcSpawn] 人名生成: '{nameParam}'（兵种 {typeName}）");
-
-        IntPtr m = FindMethodInHierarchy(GetClass(helper), "CreateSoldierBySummon", 8);
-        if (m == IntPtr.Zero)
-            throw new InvalidOperationException("找不到 NpcHelper.CreateSoldierBySummon(8 参)");
+        IntPtr helperClass = GetClass(helper);
+        // 内核 CreateSoldier 13 参：type, family, name, weapon, armor, shield, mount,
+        // Vector2, age, is_male, exist_day_count, race_id, is_soldier_summon（计数不含 this）
+        IntPtr mCreate = FindMethodInHierarchy(helperClass, "CreateSoldier", 13);
+        if (mCreate == IntPtr.Zero)
+            throw new InvalidOperationException("找不到 NpcHelper.CreateSoldier(13 参)");
 
         var (wx, wy) = PickReferencePosition();
+        int gx = (int)Math.Floor(wx - 0.5f);
+        int gy = (int)Math.Floor(wy - 0.5f);
+        // 兵营同款：格子 → 世界坐标（游戏自己的换算 + 随机偏移）；Tile 不可用则退回参考点
+        (float tx, float ty) = TileGridToWorld(gx, gy) ?? (wx, wy);
+
         var rnd = new Random();
         int spawned = 0;
-
-        // ⚠⚠ 字符串参数必须登记 il2cpp GC 根，否则名字字段必成垃圾（崩溃根因）：
-        //   CreateSoldierBySummon 的第 2 参（→ 游戏写进 Npc.npc_name）是托管字符串，
-        //   经 StringToIl2Cpp 复制成 il2cpp 字符串后**只被 .NET 参数数组引用**；
-        //   而 il2cpp 的 Boehm GC 不扫描 .NET 托管堆 —— CreateNpc 内部大量分配一旦触发 GC，
-        //   这个字符串就被回收，游戏存进 npc_name 的就是悬垂指针（实测回读即乱码/含 \0）。
-        //   后果：鼠标悬停 → Npc.OnPointerEnter → UI.ShowMouseTip(name) → TMPro 解析这个
-        //   损坏字符串时 Array.Resize(newSize<0) → ArgumentOutOfRangeException → 原生 AV。
-        //   ⚠ GC 根**故意不释放**：游戏对名字可能是"先存指针、稍后才规范化"，
-        //   提前释放会让字符串在窗口期被回收（实测仍有部分 NPC 名字为空/乱码）。
-        //   每次召唤泄漏一个短字符串，可忽略。
         for (int i = 0; i < count; i++)
         {
-            // 每个单位单独取一个游戏生成的人名（与正规招募一致，避免全叫同一个名字）
-            string nm = GameChainLocator.GenerateNpcName(0) ?? nameParam;
-            IntPtr namePtr = StringToIl2Cpp(nm);
-            GcHandleNew(namePtr, true);   // pinned：连地址都锁住，最长保护
+            var (family, full) = GameChainLocator.GenerateNpcNameParts(raceId);
+            if (string.IsNullOrEmpty(full)) full = typeName;
+            if (string.IsNullOrEmpty(family)) family = full;
 
-            float px = wx + (float)(rnd.NextDouble() * 4.0 - 2.0);
-            float py = wy + (float)(rnd.NextDouble() * 4.0 - 2.0);
-            // Vector2 是 8 字节 struct：槽里塞 {x, y} 两个 float 的位模式（x 低 32 / y 高 32）
-            long packed = (long)(uint)BitConverter.SingleToInt32Bits(px)
-                        | ((long)(uint)BitConverter.SingleToInt32Bits(py) << 32);
-            // exist_day_count 传 99999 → leave_time_days = 当前天数+99999，永不触发离场链。
-            // ⚠ 传 0 会得到 leave_time_days=0 的士兵：is_soldier_summon=1 的 NPC 每日结算
-            //   (NpcDoOnNewDay) 必进 Clock.Days > leave_time_days → is_time_to_leave=1 →
-            //   离场处理链原生 AV。
-            IntPtr npc = Invoke(m, helper, soldierTypeId, namePtr, weaponId, armorId, shieldId,
-                       0, packed, 99999);
-            if (npc != IntPtr.Zero) { spawned++; SanitizeNpcName(npc, nm); }
+            // ⚠⚠ 字符串参数必须 pinned GC 根（故意不释放）：il2cpp 的 Boehm GC 不扫描
+            //   .NET 托管堆 —— 参数槽里的字符串一旦被回收，游戏存进 npc_name 的就是
+            //   悬垂/空串 → 悬停时 TMPro 解析崩（GameAssembly+0x445291 闪退根因）。
+            IntPtr famPtr = StringToIl2Cpp(family);
+            GcHandleNew(famPtr, true);
+            IntPtr namePtr = StringToIl2Cpp(full);
+            GcHandleNew(namePtr, true);
+
+            // Vector2 是 8 字节 struct：槽直塞 {x, y} 两个 float 的位模式（x 低 32 / y 高 32）
+            long packed = (long)(uint)BitConverter.SingleToInt32Bits(tx)
+                        | ((long)(uint)BitConverter.SingleToInt32Bits(ty) << 32);
+            // exist_day_count=0 → leave_time_days=0；is_soldier_summon=false → 本地兵
+            IntPtr npc = Invoke(mCreate, helper, soldierTypeId, famPtr, namePtr,
+                weaponId, armorId, shieldId, 0, packed,
+                rnd.Next(20, 41), rnd.Next(2) == 0, 0, raceId, false);
+            if (npc == IntPtr.Zero) continue;
+            spawned++;
+            PostprocessSoldier(npc, raceId, full);
         }
-        Plugin.LogInfo($"[NpcSpawn] 士兵({typeName}) ×{spawned} 武器{weaponId} 盔甲{armorId} 盾牌{shieldId}（参考 {wx:F1},{wy:F1}）");
-        return (spawned, wx, wy);
+        Plugin.LogInfo($"[NpcSpawn] 本地士兵({typeName}) ×{spawned} 武器{weaponId} 盔甲{armorId} 盾牌{shieldId}（参考 {wx:F1},{wy:F1}→落 {tx:F1},{ty:F1}，race={raceId}）");
+        return (spawned, tx, ty);
+    }
+
+    /// <summary>
+    /// Tile.GridIndexToPositionWithRandomOffset(Vector3Int)：游戏自己的"格子→世界坐标"换算
+    /// （兵营招募同款，含随机偏移）。返回值是装箱 Vector3（值在 +16 起）。
+    /// </summary>
+    private static (float, float)? TileGridToWorld(int gx, int gy)
+    {
+        try
+        {
+            IntPtr tileClass = FindClassByName("Tile");
+            if (tileClass == IntPtr.Zero) { Plugin.LogInfo("[NpcSpawn] 找不到 Tile 类"); return null; }
+            IntPtr m = FindMethodInHierarchy(tileClass, "GridIndexToPositionWithRandomOffset", 1);
+            if (m == IntPtr.Zero) { Plugin.LogInfo("[NpcSpawn] 找不到 Tile.GridIndexToPositionWithRandomOffset"); return null; }
+            // Vector3Int 是 12 字节 struct（m_X,m_Y,m_Z）→ 槽装不下，走 RawArg
+            IntPtr vec = Marshal.AllocHGlobal(12);
+            try
+            {
+                Marshal.WriteInt32(vec, 0, gx);
+                Marshal.WriteInt32(vec, 4, gy);
+                Marshal.WriteInt32(vec, 8, 0);
+                IntPtr boxed = Invoke(m, IntPtr.Zero, new RawArg(vec));
+                if (boxed == IntPtr.Zero) return null;
+                return (ReadIl2CppFloat(boxed, 16), ReadIl2CppFloat(boxed, 20));
+            }
+            finally { Marshal.FreeHGlobal(vec); }
+        }
+        catch (Exception ex) { Plugin.LogInfo($"[NpcSpawn] Tile 换算失败: {ex.Message}"); return null; }
+    }
+
+    /// <summary>兵营路径的收尾（FacilityBarracks.DoCreateSoldier 同款）：训练度拉满、精灵/三眼人项链、名字兜底。</summary>
+    private static void PostprocessSoldier(IntPtr npc, int raceId, string fallbackName)
+    {
+        IntPtr npcClass = GetClass(npc);
+        if (TryFindFieldOffset(npcClass, "training_progress", out int offTrain) && offTrain > 0)
+            WriteIl2CppFloat(npc, offTrain, 1.0f);
+        if ((raceId == 7 || raceId == 8) && TryFindFieldOffset(npcClass, "nacklace_stuff_id", out int offNeck) && offNeck > 0)
+            WriteIl2CppInt(npc, offNeck, 427001);
+        // 名字兜底：正常情况下游戏内部已生成人名；这里只挡损坏值（TMPro 悬停崩的教训）
+        SanitizeNpcName(npc, GameChainLocator.GenerateNpcName(raceId) ?? fallbackName);
+    }
+
+    /// <summary>
+    /// 【诊断·临时】分步执行 SoldierHelper.CreateSoldier 的内部逻辑（每步一个日志标记），
+    /// 用 LogOutput 中"最后一步标记 + 异常行"定位 KeyNotFoundException 的确切来源。
+    /// </summary>
+    internal static string ProbeSoldierChain(int soldierTypeId, int raceId)
+    {
+        var log = new List<string>();
+        void Mark(string m) { Plugin.LogInfo($"[ProbeS] >>> {m}"); log.Add(m); }
+
+        IntPtr soldierHelper = GameChainLocator.GetSoldierHelper();
+        log.Add($"soldierHelper=0x{soldierHelper:X} class={Il2CppApi.GetClassName(GetClass(soldierHelper)) ?? "?"}");
+        IntPtr helperClass = GetClass(soldierHelper);
+
+        Mark("m6 = CreateSoldier/6");
+        IntPtr m6 = FindMethodInHierarchy(helperClass, "CreateSoldier", 6);
+        log.Add($"m6=0x{m6:X} paramCount={(m6 != IntPtr.Zero ? GetMethodParamCountRaw(m6).ToString() : "n/a")}");
+
+        Mark("m5 = CreateSoldier/5 (raw)");
+        IntPtr m5 = FindMethodInHierarchy(helperClass, "CreateSoldier", 5);
+        log.Add($"m5=0x{m5:X} paramCount={(m5 != IntPtr.Zero ? GetMethodParamCountRaw(m5).ToString() : "n/a")}");
+
+        Mark("D.Ins");
+        IntPtr clsD = FindClassByName("D");
+        IntPtr ins = IntPtr.Zero;
+        foreach (var fh in EnumerateFieldHandles(clsD))
+        {
+            if (fh.Name == "Ins" && fh.IsStatic) { ins = ReadStaticFieldValue(fh.Field); break; }
+        }
+        log.Add($"D.Ins=0x{ins:X} class={(ins != IntPtr.Zero ? Il2CppApi.GetClassName(GetClass(ins)) ?? "?" : "null")}");
+        IntPtr insClass = GetClass(ins);
+
+        Mark("equip_dic[202301]");
+        IntPtr equipDic = ReadFieldSafe(ins, insClass, "soldier_equip_dic");
+        IntPtr mGetItem = FindMethodInHierarchy(GetClass(equipDic), "get_Item", 1);
+        IntPtr equip = Invoke(mGetItem, equipDic, soldierTypeId);
+        log.Add($"equip=0x{equip:X}");
+
+        Mark("race_dic[0]");
+        IntPtr raceDic = ReadFieldSafe(ins, insClass, "race_dic");
+        IntPtr raceInfo = Invoke(mGetItem2(GetClass(raceDic)), raceDic, raceId);
+        log.Add($"raceInfo=0x{raceInfo:X}");
+
+        Mark("GetRandomFamilyName(0)");
+        IntPtr genClass = FindClassByName("NpcNameGenerator");
+        IntPtr mFam = FindMethodInHierarchy(genClass, "GetRandomFamilyName", 1);
+        IntPtr fam = Invoke(mFam, IntPtr.Zero, raceId);
+        log.Add($"family='{(fam != IntPtr.Zero ? ReadStringObject(fam) : null)}'");
+
+        Mark("GetName(1, race, family)");
+        IntPtr mName = FindMethodInHierarchy(genClass, "GetName", 3);
+        IntPtr nameObj = fam != IntPtr.Zero && mName != IntPtr.Zero ? Invoke(mName, IntPtr.Zero, 1, raceId, fam) : IntPtr.Zero;
+        log.Add($"name='{(nameObj != IntPtr.Zero ? ReadStringObject(nameObj) : null)}'");
+
+        Mark("config new + fields");
+        IntPtr configClass = FindClassByName("SoldierConfigInfo");
+        IntPtr config = ObjectNew(configClass);
+        IntPtr ctor = FindMethodInHierarchy(configClass, ".ctor", 0);
+        if (ctor != IntPtr.Zero) Invoke(ctor, config);
+        if (TryFindFieldOffset(configClass, "soldier_type_id", out int offType)) WriteIl2CppInt(config, offType, soldierTypeId);
+        log.Add($"config=0x{config:X}");
+
+        var (wx, wy) = PickReferencePosition();
+        int gx = (int)Math.Floor(wx - 0.5f), gy = (int)Math.Floor(wy - 0.5f);
+
+        Mark("RAW _6454850096(troop=0,team=0,config,Point,race)");
+        IntPtr r1 = m5 != IntPtr.Zero ? Invoke(m5, soldierHelper, IntPtr.Zero, IntPtr.Zero, config,
+            new IntPtr(gx | (gy << 32)), raceId) : IntPtr.Zero;
+        log.Add($"raw→0x{r1:X}");
+
+        Mark("WRAPPER CreateSoldier(config,0,0,Point,race,null)");
+        IntPtr r2 = Invoke(m6, soldierHelper, config, IntPtr.Zero, IntPtr.Zero,
+            new IntPtr(gx | (gy << 32)), raceId, IntPtr.Zero);
+        log.Add($"wrapper→0x{r2:X}");
+
+        return string.Join(" | ", log);
+    }
+
+    private static IntPtr mGetItem2(IntPtr dicClass) => FindMethodInHierarchy(dicClass, "get_Item", 1);
+
+    /// <summary>按字段名写 SoldierConfigInfo 的 int 字段（偏移沿父类链查，找不到记日志跳过）。</summary>
+    private static void WriteConfigInt(IntPtr config, IntPtr configClass, string fieldName, int value)
+    {
+        if (TryFindFieldOffset(configClass, fieldName, out int off) && off > 0)
+        {
+            WriteIl2CppInt(config, off, value);
+            int back = ReadIl2CppInt(config, off);
+            Plugin.LogInfo($"[NpcSpawn] config.{fieldName} off={off} 写{value} 读回{back}" + (back == value ? "" : " ⚠读回不一致"));
+        }
+        else
+            Plugin.LogInfo($"[NpcSpawn] SoldierConfigInfo 未找到字段 {fieldName}");
     }
 
     /// <summary>

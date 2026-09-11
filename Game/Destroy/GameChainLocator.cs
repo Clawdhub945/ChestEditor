@@ -342,6 +342,25 @@ internal static class GameChainLocator
     }
 
     /// <summary>
+    /// Territory.soldier_helper —— 正规士兵招募（兵营）所用的创建器实例。
+    /// SoldierHelper.CreateSoldier(config, troop, team, Point, race, null) 走游戏原生路径：
+    /// 内部生成人名/成年年龄/随机性别 + Tile.GridIndexToPositionWithRandomOffset 坐标换算，
+    /// is_soldier_summon=0（本地兵，无离场时限）。
+    /// </summary>
+    internal static IntPtr GetSoldierHelper()
+    {
+        try
+        {
+            IntPtr territory = GetTerritory();
+            if (territory == IntPtr.Zero) return IntPtr.Zero;
+            IntPtr territoryClass = Il2CppApi.GetClass(territory);
+            return Il2CppApi.ReadFieldSafe(territory, territoryClass, "soldier_helper");
+        }
+        catch (Exception ex) { Plugin.LogVerbose($"[EntityEditor] GetSoldierHelper error: {ex.Message}"); }
+        return IntPtr.Zero;
+    }
+
+    /// <summary>
     /// 用游戏自己的 <c>NpcNameGenerator</c> 生成一个"本地居民风格"的人名。
     /// 伪 C 证实（SoldierHelper.CreateSoldier = 正规招募士兵入口）：
     ///   family = NpcNameGenerator.GetRandomFamilyName(race_id)
@@ -350,19 +369,22 @@ internal static class GameChainLocator
     /// 所以必须给它"人名"，否则士兵会顶着兵种名（如"骑士"）满地图跑。
     /// 两方法都是静态；返回托管字符串。
     /// </summary>
-    internal static string? GenerateNpcName(int raceId)
+    internal static string? GenerateNpcName(int raceId) => GenerateNpcNameParts(raceId).full;
+
+    /// <summary>同 <see cref="GenerateNpcName"/>，但同时给出 姓 与 全名（Npc.family_name 存姓、npc_name 存全名）。</summary>
+    internal static (string? family, string? full) GenerateNpcNameParts(int raceId)
     {
         try
         {
             IntPtr cls = Il2CppApi.FindClassByName("NpcNameGenerator");
-            if (cls == IntPtr.Zero) { Plugin.LogVerbose("[EntityEditor] 找不到 NpcNameGenerator"); return null; }
+            if (cls == IntPtr.Zero) { Plugin.LogVerbose("[EntityEditor] 找不到 NpcNameGenerator"); return (null, null); }
 
             IntPtr mFamily = Il2CppApi.GetMethodFromName(cls, "GetRandomFamilyName", 1);
             if (mFamily == IntPtr.Zero) mFamily = FindMethodInHierarchy(cls, "GetRandomFamilyName", 1);
-            if (mFamily == IntPtr.Zero) { Plugin.LogVerbose("[EntityEditor] 找不到 GetRandomFamilyName"); return null; }
+            if (mFamily == IntPtr.Zero) { Plugin.LogVerbose("[EntityEditor] 找不到 GetRandomFamilyName"); return (null, null); }
 
             IntPtr family = Invoke(mFamily, IntPtr.Zero, raceId);   // 静态：objPtr 传 0
-            if (family == IntPtr.Zero) return null;
+            if (family == IntPtr.Zero) return (null, null);
 
             // ⚠ family 必须登记 GC 根：它只被本地变量/参数槽（.NET 托管堆）引用，
             //   而 il2cpp 的 Boehm GC 不扫描托管堆 —— 紧接着的调用内部一旦分配
@@ -383,7 +405,7 @@ internal static class GameChainLocator
                         // GetNextXxxName 只返回"名"，完整人名 = 姓 + 名（实测原生士兵即"詹"+"轩宇"）
                         string full = string.IsNullOrEmpty(fam) ? got : fam + got;
                         Plugin.LogInfo($"[NpcName] {mn}() → 名='{got}' 姓='{fam}' ⇒ '{full}'");
-                        return full;
+                        return (fam, full);
                     }
                 }
                 // 路线2：GetName(is_male, race_id, family_name)（3 参）
@@ -393,13 +415,13 @@ internal static class GameChainLocator
                     IntPtr nameObj = Invoke(mName, IntPtr.Zero, 1, raceId, family);
                     string? nm = nameObj != IntPtr.Zero ? Il2CppMemory.ReadStringObject(nameObj) : null;
                     Plugin.LogInfo($"[NpcName] GetName(3) race={raceId} 姓='{fam}' 名='{nm}'");
-                    if (!string.IsNullOrEmpty(nm)) return nm;
+                    if (!string.IsNullOrEmpty(nm)) return (fam, nm);
                 }
-                return null;
+                return (null, null);
             }
             finally { GcHandleFree(root); }
         }
         catch (Exception ex) { Plugin.LogVerbose($"[EntityEditor] GenerateNpcName error: {ex.Message}"); }
-        return null;
+        return (null, null);
     }
 }

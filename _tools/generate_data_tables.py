@@ -174,7 +174,8 @@ def build_spawn_tables():
         if sid == 0:
             continue
         name = soldier_names.get(sid) or stuff_names.get(sid, "") or str(sid)
-        stypes.append([sid, name, r.get("weapon_group", 0), r.get("armor_group", 0), r.get("shield_group", 0)])
+        # 第 6 位 = race_id_limit（兵种种族，SoldierHelper.CreateSoldier 的 race_id 参数同源）
+        stypes.append([sid, name, r.get("weapon_group", 0), r.get("armor_group", 0), r.get("shield_group", 0), r.get("race_id_limit", 0)])
 
     def equip(file, id_key, group_key):
         out = []
