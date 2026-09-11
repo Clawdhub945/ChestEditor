@@ -257,17 +257,16 @@ internal static class EntityHandlers
         // ===== 调试/自动化接口（远程控制游戏生命周期；仅 localhost 可达） =====
 
         // POST /api/editor/debug/load {dir:"2026-09-11_00_xxx"} — 远程"进入存档"。
-        // 走游戏自己的高层入口 UI.ExitAndLoadGame(folderName, "")（移植自 GameMCP 的
-        // 验证机制，配合 SaveLoadPatches 的 UI.ExitGame/UI.Start 补丁）。
-        // ExitAndLoadGame 内部会自己退出当前场景并初始化读档，返回值仅代表"指令已受理"；
-        // 之后游戏重载 UIScene → UI.Start → 延迟 StartGame(folder)，需轮询 state 等 inSave=true。
+        // 主菜单下直接调 UI.StartGame(folder)（游戏自己的"用指定存档开局"入口），
+        // 同时设置 MainScene.auto_load_archive_folder_name 静态字段（与游戏"继续游戏"一致）。
+        // 返回值代表"指令已受理"；读档异步进行，需轮询 state 等 inSave=true。
         Router.Add("POST", "/api/editor/debug/load", ctx =>
         {
             string dir = ctx.Json?["dir"]?.GetValue<string>() ?? "";
             if (string.IsNullOrWhiteSpace(dir)) throw new HttpError(400, "missing dir");
             return MainThread.Run(() =>
             {
-                bool ok = SaveLoadPatches.LoadSaveViaUI(dir);
+                bool ok = SaveLoadPatches.StartGameViaUI(dir);
                 return JsonBuilder.Object(w => { w.WriteBoolean("ok", true); w.WriteBoolean("result", ok); });
             }, 30000);
         });

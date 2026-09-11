@@ -400,4 +400,41 @@ public static class SaveLoadPatches
         Plugin.LogInfo($"[UI读档] UI.ExitAndLoadGame({folderName}) 调用成功");
         return true;
     }
+
+    /// <summary>
+    /// 主菜单直接进入存档（主线程调用）：UI.StartGame(folder)——游戏自己的“用指定存档开局”入口。
+    /// 同时设置 MainScene.auto_load_archive_folder_name 静态字段（与游戏“继续游戏”流程一致）。
+    /// </summary>
+    public static bool StartGameViaUI(string folderName)
+    {
+        var csharpAsm = AppDomain.CurrentDomain.GetAssemblies()
+            .FirstOrDefault(a => a.GetName().Name == "Assembly-CSharp");
+        if (csharpAsm == null) { Plugin.LogError("[UI读档] Assembly-CSharp 不可用"); return false; }
+        Type? uiType = null;
+        try { uiType = csharpAsm.GetTypes().FirstOrDefault(t => t.Name == "UI"); }
+        catch (ReflectionTypeLoadException ex) { uiType = ex.Types?.FirstOrDefault(t => t?.Name == "UI"); }
+        if (uiType == null) { Plugin.LogError("[UI读档] UI 类型不存在"); return false; }
+
+        var insProp = uiType.GetProperty("Ins", BindingFlags.Public | BindingFlags.Static);
+        var uiIns = insProp?.GetValue(null);
+        if (uiIns == null)
+        {
+            var insField = uiType.GetField("Ins", BindingFlags.Public | BindingFlags.Static);
+            uiIns = insField?.GetValue(null);
+        }
+        if (uiIns == null) { Plugin.LogError("[UI读档] UI.Ins 不可用"); return false; }
+
+        var startGame = uiType.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+            .FirstOrDefault(m => m.Name == "StartGame");
+        if (startGame == null) { Plugin.LogError("[UI读档] UI.StartGame 不存在"); return false; }
+
+        SetIl2CppStringField(_autoLoadFieldPtr, folderName);   // 与游戏“继续游戏”流程一致
+        var parms = startGame.GetParameters();
+        Plugin.LogInfo($"[UI读档] UI.StartGame({folderName}) 调用，参数 {parms.Length} 个");
+        if (parms.Length == 2) startGame.Invoke(uiIns, new object[] { folderName, null! });
+        else if (parms.Length == 1) startGame.Invoke(uiIns, new object[] { folderName });
+        else startGame.Invoke(uiIns, null);
+        Plugin.LogInfo($"[UI读档] UI.StartGame({folderName}) 调用完成");
+        return true;
+    }
 }
