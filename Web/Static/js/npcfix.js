@@ -35,14 +35,14 @@ function selectNpcfixView(view) {
   // 盒子2 同理：实体扫描结果也要刷一遍，否则船/怪物是新生成的就看不到
   if (!wasActive && view === 'box2' && npcfixView === 'box2' && entityEditorData.length > 0)
     renderNpcfixBox2(true);
-  // 盒子3（建筑物）同理：数据源也是实体扫描
+  // 盒子3/4/5：切换时不再阻塞式重扫（用户实测每次要等十几秒）——
+  // renderContent 已用缓存秒开列表，这里只触发后台静默刷新（60s 节流），完成后悄悄更新列表
   if (!wasActive && view === 'box3' && npcfixView === 'box3' && entityEditorData.length > 0)
-    renderNpcfixBox3(true);
-  // 盒子4（动物）/ 盒子5（掉落物）同理：数据源也是实体扫描
+    renderNpcfixBox3('auto');
   if (!wasActive && view === 'box4' && npcfixView === 'box4' && entityEditorData.length > 0)
-    renderNpcfixBox4(true);
+    renderNpcfixBox4('auto');
   if (!wasActive && view === 'box5' && npcfixView === 'box5' && entityEditorData.length > 0)
-    renderNpcfixBox5(true);
+    renderNpcfixBox5('auto');
 }
 
 // ===== 盒子1 小人数值修改 =====
@@ -705,11 +705,13 @@ const NPCFIX_SAFE_RESCAN_EVERY = 12; // 每 N 拍重扫一次（拿新刷出来�
 // 这期间让定期清理先别发销毁请求（名单会整体替换，中途发只是白跑一趟）。
 // ⚠ 故意不走 entityEditorScan()：那会 toast + renderContent()，
 //   后台重扫会把整个面板重渲染，展开的字段卡片和滚动位置全丢。
+let npcfixLastScanAt = 0;   // 上次实体扫描成功时间（切视图的后台静默刷新按 60s 节流）
 async function npcfixScan() {
   npcfixScanning = true;
   try {
     await fetch('/api/editor/scan', { method: 'POST' });
     await fetchEntityEditorData();
+    npcfixLastScanAt = Date.now();
   } finally { npcfixScanning = false; }
 }
 
@@ -1210,7 +1212,15 @@ function npcfixFacilityGroupCard(label, color, icon, list, clearSpec, pickupSpec
 
 async function renderNpcfixBox3(forceScan) {
   const el = document.getElementById('content');
-  // 与盒子2 同策略：首次进入（无缓存）或显式刷新才扫描，其余复用已扫描数据
+  // ⚡ 性能：有缓存就立即渲染（切视图秒开），扫描放后台，完成后静默刷新列表。
+  // forceScan === 'auto'  → 切视图触发的后台静默刷新（60s 节流，不重建页面）
+  // forceScan === true    → 重新扫描按钮：同样后台执行，不再阻塞等待
+  // 无缓存                → 必须先扫描才有内容（每次会话仅第一次）
+  if (forceScan === 'auto') {
+    if (Date.now() - npcfixLastScanAt < 60000 || npcfixScanning || entityEditorData.length === 0) return;
+    npcfixScan().then(() => { if (npcfixView === 'box3') npcfixBox3RenderBody(); });
+    return;
+  }
   const needScan = forceScan === true || entityEditorData.length === 0;
   let html = '';
   html += '<div style="padding:20px;height:100%;box-sizing:border-box;display:flex;flex-direction:column;overflow:hidden">';
@@ -1226,27 +1236,35 @@ async function renderNpcfixBox3(forceScan) {
     + ' style="width:300px;padding:6px 10px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px">';
   html += '<span id="npcfixBox3Summary" style="color:var(--text-muted);font-size:12px"></span>';
   html += '</div>';
-  html += '<div id="npcfixBox3Body" style="flex:1;overflow-y:auto;min-height:0;color:var(--text-muted)">' + (needScan ? '扫描中...' : '') + '</div>';
+  html += '<div id="npcfixBox3Body" style="flex:1;overflow-y:auto;min-height:0;color:var(--text-muted)">' + (needScan && entityEditorData.length === 0 ? '扫描中...' : '') + '</div>';
   html += '</div>';
   el.innerHTML = html;
 
+  // 有缓存：先把列表画出来（秒开），再视需要后台扫描
+  if (entityEditorData.length > 0) npcfixBox3RenderBody();
+
   if (needScan) {
+    const sum = document.getElementById('npcfixBox3Summary');
+    if (sum) sum.textContent = '扫描中，完成后列表自动刷新…';
     try {
       await fetch('/api/editor/scan', { method: 'POST' });
       await fetchEntityEditorData();
+      npcfixLastScanAt = Date.now();
     } catch (e) {
       const b = document.getElementById('npcfixBox3Body');
-      if (b) b.innerHTML = '<div style="padding:40px;text-align:center;color:var(--danger)">扫描失败: ' + esc(String((e && e.message) || e)) + '</div>';
+      if (b && entityEditorData.length === 0) b.innerHTML = '<div style="padding:40px;text-align:center;color:var(--danger)">扫描失败: ' + esc(String((e && e.message) || e)) + '</div>';
       return;
     }
+    if (npcfixView !== 'box3') return;   // 扫描期间用户切走了，别覆盖新视图
+    npcfixBox3RenderBody();
   }
-  npcfixBox3RenderBody();
 }
 
-// 分类 + 分组 + 渲染（搜索框输入时只重绘 body，不重新扫描）
+// 分类 + 分组 + 渲染（搜索框输入时只重绘 body，不重新扫描；重绘保持滚动位置）
 function npcfixBox3RenderBody() {
   const body = document.getElementById('npcfixBox3Body');
   if (!body) return;
+  const keepScroll = body.scrollTop;
   const GREEN = 'var(--success-dark, #27ae60)';
   const RED = 'var(--danger, #e74c3c)';
 
@@ -1300,6 +1318,7 @@ function npcfixBox3RenderBody() {
     body.querySelectorAll('details.npcfix-group').forEach(d => {
       if (d.dataset && wasOpen.indexOf(d.dataset.g) >= 0) d.open = true;
     });
+  body.scrollTop = keepScroll;   // 重绘后保持滚动位置（后台扫描刷新不惊动阅读）
 }
 
 // ===== 盒子5 掉落物 =====
@@ -1312,7 +1331,13 @@ function npcfixBox3RenderBody() {
 
 async function renderNpcfixBox5(forceScan) {
   const el = document.getElementById('content');
-  // 与盒子2/3 同策略：首次进入（无缓存）或显式刷新才扫描，其余复用已扫描数据
+  // ⚡ 与盒子3 同款性能模式：有缓存立即渲染（秒开），扫描放后台完成后静默刷新；
+  // 'auto' = 切视图触发的后台静默刷新（60s 节流，不重建页面）
+  if (forceScan === 'auto') {
+    if (Date.now() - npcfixLastScanAt < 60000 || npcfixScanning || entityEditorData.length === 0) return;
+    npcfixScan().then(() => { if (npcfixView === 'box5') npcfixBox5RenderBody(); });
+    return;
+  }
   const needScan = forceScan === true || entityEditorData.length === 0;
   let html = '';
   html += '<div style="padding:20px;height:100%;box-sizing:border-box;display:flex;flex-direction:column;overflow:hidden">';
@@ -1342,21 +1367,28 @@ async function renderNpcfixBox5(forceScan) {
     + ' style="width:300px;padding:6px 10px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px">';
   html += '<span id="npcfixBox5Summary" style="color:var(--text-muted);font-size:12px"></span>';
   html += '</div>';
-  html += '<div id="npcfixBox5Body" style="flex:1;overflow-y:auto;min-height:0;color:var(--text-muted)">' + (needScan ? '扫描中...' : '') + '</div>';
+  html += '<div id="npcfixBox5Body" style="flex:1;overflow-y:auto;min-height:0;color:var(--text-muted)">' + (needScan && entityEditorData.length === 0 ? '扫描中...' : '') + '</div>';
   html += '</div>';
   el.innerHTML = html;
 
+  // 有缓存：先把列表画出来（秒开），再视需要后台扫描
+  if (entityEditorData.length > 0) npcfixBox5RenderBody();
+
   if (needScan) {
+    const sum = document.getElementById('npcfixBox5Summary');
+    if (sum) sum.textContent = '扫描中，完成后列表自动刷新…';
     try {
       await fetch('/api/editor/scan', { method: 'POST' });
       await fetchEntityEditorData();
+      npcfixLastScanAt = Date.now();
     } catch (e) {
       const b = document.getElementById('npcfixBox5Body');
-      if (b) b.innerHTML = '<div style="padding:40px;text-align:center;color:var(--danger)">扫描失败: ' + esc(String((e && e.message) || e)) + '</div>';
+      if (b && entityEditorData.length === 0) b.innerHTML = '<div style="padding:40px;text-align:center;color:var(--danger)">扫描失败: ' + esc(String((e && e.message) || e)) + '</div>';
       return;
     }
+    if (npcfixView !== 'box5') return;
+    npcfixBox5RenderBody();
   }
-  npcfixBox5RenderBody();
 }
 
 let npcfixBox5Query = '';   // 搜索词（纯前端过滤已扫描数据，不触发扫描）
@@ -1364,6 +1396,7 @@ let npcfixBox5Query = '';   // 搜索词（纯前端过滤已扫描数据，不�
 function npcfixBox5RenderBody() {
   const body = document.getElementById('npcfixBox5Body');
   if (!body) return;
+  const keepScroll = body.scrollTop;
 
   // 分组：组名 = 物品中文名（与 :g= 定位共用 npcfixGroupKeyOf，否则清除范围对不上显示）
   const kinds = {};
@@ -1394,6 +1427,7 @@ function npcfixBox5RenderBody() {
       npcfixSpecOf('stuff', 'all', name), npcfixSpecOf('stuff', 'all', name));
   }
   body.innerHTML = h || npcfixEmptyHint('没有匹配的掉落物（共 ' + total + ' 堆）');
+  body.scrollTop = keepScroll;   // 重绘后保持滚动位置
 }
 
 // 拾取进容器（spec = 'stuff:all[:g=组名]'）：按范围收集 → 分批 入库+移除 → 重扫刷新。
@@ -1584,6 +1618,12 @@ async function npcfixAutoPickTick() {
 
 async function renderNpcfixBox4(forceScan) {
   const el = document.getElementById('content');
+  // ⚡ 与盒子3/5 同款性能模式：'auto' = 切视图触发的后台静默刷新（60s 节流）
+  if (forceScan === 'auto') {
+    if (Date.now() - npcfixLastScanAt < 60000 || npcfixScanning || entityEditorData.length === 0) return;
+    npcfixScan().then(() => { if (npcfixView === 'box4') npcfixBox4RenderBody(); });
+    return;
+  }
   const needScan = forceScan === true || entityEditorData.length === 0;
   let html = '';
   html += '<div style="padding:20px;height:100%;box-sizing:border-box;display:flex;flex-direction:column;overflow:hidden">';
@@ -1611,21 +1651,28 @@ async function renderNpcfixBox4(forceScan) {
     + ' style="width:300px;padding:6px 10px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px">';
   html += '<span id="npcfixBox4Summary" style="color:var(--text-muted);font-size:12px"></span>';
   html += '</div>';
-  html += '<div id="npcfixBox4Body" style="flex:1;overflow-y:auto;min-height:0;color:var(--text-muted)">' + (needScan ? '扫描中...' : '') + '</div>';
+  html += '<div id="npcfixBox4Body" style="flex:1;overflow-y:auto;min-height:0;color:var(--text-muted)">' + (needScan && entityEditorData.length === 0 ? '扫描中...' : '') + '</div>';
   html += '</div>';
   el.innerHTML = html;
 
+  // 有缓存：先把列表画出来（秒开），再视需要后台扫描
+  if (entityEditorData.length > 0) npcfixBox4RenderBody();
+
   if (needScan) {
+    const sum = document.getElementById('npcfixBox4Summary');
+    if (sum) sum.textContent = '扫描中，完成后列表自动刷新…';
     try {
       await fetch('/api/editor/scan', { method: 'POST' });
       await fetchEntityEditorData();
+      npcfixLastScanAt = Date.now();
     } catch (e) {
       const b = document.getElementById('npcfixBox4Body');
-      if (b) b.innerHTML = '<div style="padding:40px;text-align:center;color:var(--danger)">扫描失败: ' + esc(String((e && e.message) || e)) + '</div>';
+      if (b && entityEditorData.length === 0) b.innerHTML = '<div style="padding:40px;text-align:center;color:var(--danger)">扫描失败: ' + esc(String((e && e.message) || e)) + '</div>';
       return;
     }
+    if (npcfixView !== 'box4') return;
+    npcfixBox4RenderBody();
   }
-  npcfixBox4RenderBody();
   // 召唤下拉：种类列表只拉一次（后端 animal.json + 官方中文名），每次渲染重填并恢复默认选中
   await npcfixLoadAnimals();
   npcfixBox4FillSpawnSelect();
@@ -1636,6 +1683,7 @@ let npcfixBox4Query = '';   // 搜索词（纯前端过滤已扫描数据，不�
 function npcfixBox4RenderBody() {
   const body = document.getElementById('npcfixBox4Body');
   if (!body) return;
+  const keepScroll = body.scrollTop;
 
   // 分组：组名走 npcfixGroupKeyOf('animal')（活体按种类、尸体统一一组），与 :g= 定位共用
   const kinds = {};
@@ -1667,6 +1715,7 @@ function npcfixBox4RenderBody() {
     h += npcfixFacilityGroupCard(name, color, icon, list, npcfixSpecOf('animal', 'all', name));
   }
   body.innerHTML = h || npcfixEmptyHint('没有匹配的动物（共 ' + total + ' 只/具）');
+  body.scrollTop = keepScroll;   // 重绘后保持滚动位置
 }
 
 // ===== 盒子4 召唤动物 =====

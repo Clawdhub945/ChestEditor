@@ -26,6 +26,12 @@ public class Plugin : BasePlugin
 
         Logger = Log;
 
+        // ⚡ F11 打开的是外部浏览器，焦点会离开游戏窗口——若游戏不允许后台运行，
+        // 主线程 Update 会饿死：分片扫描/所有 HTTP 请求被拖慢几十倍（实测"按 F11 后
+        // 等十几秒才出内容"的主因）。强制允许后台运行，面板期间游戏照常跑。
+        try { UnityEngine.Application.runInBackground = true; }
+        catch (Exception ex) { LogError($"[Plugin] 设置 runInBackground 失败: {ex.Message}"); }
+
         _harmony = new Harmony(PLUGIN_GUID);
         SaveLoadPatches.Apply(_harmony);
         try
