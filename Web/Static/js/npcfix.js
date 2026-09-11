@@ -1212,12 +1212,15 @@ function npcfixFacilityGroupCard(label, color, icon, list, clearSpec, pickupSpec
 
 async function renderNpcfixBox3(forceScan) {
   const el = document.getElementById('content');
-  // ⚡ 性能：有缓存就立即渲染（切视图秒开），扫描放后台，完成后静默刷新列表。
+  // ⚡ 性能：'auto'（切视图触发的静默刷新）也必须先保证列表渲染出来——
+  // renderContent 现在虽然会分发到本函数，但节流命中时仍要靠这里兜底显示缓存。
   // forceScan === 'auto'  → 切视图触发的后台静默刷新（60s 节流，不重建页面）
   // forceScan === true    → 重新扫描按钮：同样后台执行，不再阻塞等待
   // 无缓存                → 必须先扫描才有内容（每次会话仅第一次）
   if (forceScan === 'auto') {
-    if (Date.now() - npcfixLastScanAt < 60000 || npcfixScanning || entityEditorData.length === 0) return;
+    if (entityEditorData.length === 0) return renderNpcfixBox3(true);   // 无缓存走完整流程
+    npcfixBox3RenderBody();                                            // 先保证列表在（秒开）
+    if (Date.now() - npcfixLastScanAt < 60000 || npcfixScanning) return;
     npcfixScan().then(() => { if (npcfixView === 'box3') npcfixBox3RenderBody(); });
     return;
   }
@@ -1337,10 +1340,11 @@ function npcfixBox3RenderBody() {
 
 async function renderNpcfixBox5(forceScan) {
   const el = document.getElementById('content');
-  // ⚡ 与盒子3 同款性能模式：有缓存立即渲染（秒开），扫描放后台完成后静默刷新；
-  // 'auto' = 切视图触发的后台静默刷新（60s 节流，不重建页面）
+  // ⚡ 性能：'auto'（切视图触发的静默刷新）也必须先保证列表渲染出来（兜底显示缓存）
   if (forceScan === 'auto') {
-    if (Date.now() - npcfixLastScanAt < 60000 || npcfixScanning || entityEditorData.length === 0) return;
+    if (entityEditorData.length === 0) return renderNpcfixBox5(true);
+    npcfixBox5RenderBody();
+    if (Date.now() - npcfixLastScanAt < 60000 || npcfixScanning) return;
     npcfixScan().then(() => { if (npcfixView === 'box5') npcfixBox5RenderBody(); });
     return;
   }
@@ -1629,9 +1633,11 @@ async function npcfixAutoPickTick() {
 
 async function renderNpcfixBox4(forceScan) {
   const el = document.getElementById('content');
-  // ⚡ 与盒子3/5 同款性能模式：'auto' = 切视图触发的后台静默刷新（60s 节流）
+  // ⚡ 性能：'auto'（切视图触发的静默刷新）也必须先保证列表渲染出来（兜底显示缓存）
   if (forceScan === 'auto') {
-    if (Date.now() - npcfixLastScanAt < 60000 || npcfixScanning || entityEditorData.length === 0) return;
+    if (entityEditorData.length === 0) return renderNpcfixBox4(true);
+    npcfixBox4RenderBody();
+    if (Date.now() - npcfixLastScanAt < 60000 || npcfixScanning) return;
     npcfixScan().then(() => { if (npcfixView === 'box4') npcfixBox4RenderBody(); });
     return;
   }
