@@ -1244,6 +1244,12 @@ async function renderNpcfixBox3(forceScan) {
   if (entityEditorData.length > 0) npcfixBox3RenderBody();
 
   if (needScan) {
+    // 可见的"扫描中"提示（有缓存时列表先显示旧数据 + 顶部横幅；无缓存时 body 整页扫描中）
+    if (entityEditorData.length > 0) {
+      const b = document.getElementById('npcfixBox3Body');
+      if (b && b.insertAdjacentHTML) b.insertAdjacentHTML('afterbegin',
+        '<div style="padding:6px 12px;margin-bottom:8px;background:var(--bg-input);border:1px dashed var(--border);border-radius:6px;font-size:12px;color:var(--text-muted)">⏳ 扫描中，完成后列表自动更新…</div>');
+    }
     const sum = document.getElementById('npcfixBox3Summary');
     if (sum) sum.textContent = '扫描中，完成后列表自动刷新…';
     try {
@@ -1375,6 +1381,11 @@ async function renderNpcfixBox5(forceScan) {
   if (entityEditorData.length > 0) npcfixBox5RenderBody();
 
   if (needScan) {
+    if (entityEditorData.length > 0) {
+      const b = document.getElementById('npcfixBox5Body');
+      if (b && b.insertAdjacentHTML) b.insertAdjacentHTML('afterbegin',
+        '<div style="padding:6px 12px;margin-bottom:8px;background:var(--bg-input);border:1px dashed var(--border);border-radius:6px;font-size:12px;color:var(--text-muted)">⏳ 扫描中，完成后列表自动更新…</div>');
+    }
     const sum = document.getElementById('npcfixBox5Summary');
     if (sum) sum.textContent = '扫描中，完成后列表自动刷新…';
     try {
@@ -1659,6 +1670,11 @@ async function renderNpcfixBox4(forceScan) {
   if (entityEditorData.length > 0) npcfixBox4RenderBody();
 
   if (needScan) {
+    if (entityEditorData.length > 0) {
+      const b = document.getElementById('npcfixBox4Body');
+      if (b && b.insertAdjacentHTML) b.insertAdjacentHTML('afterbegin',
+        '<div style="padding:6px 12px;margin-bottom:8px;background:var(--bg-input);border:1px dashed var(--border);border-radius:6px;font-size:12px;color:var(--text-muted)">⏳ 扫描中，完成后列表自动更新…</div>');
+    }
     const sum = document.getElementById('npcfixBox4Summary');
     if (sum) sum.textContent = '扫描中，完成后列表自动刷新…';
     try {

@@ -20,6 +20,16 @@ internal static class EntityHandlers
     /// </summary>
     private const int FrameBudgetMs = 4;
 
+    /// <summary>
+    /// 当前实际可用的每帧预算。
+    /// <para>⚠ 游戏失焦时 Unity 把帧率压到 ~4fps（Interaction Mode），分片任务若仍按
+    /// 6ms/帧推进，220 步扫描要拖一分多钟——用户在浏览器里等"扫描中"等到的就是它。
+    /// 失焦时游戏画面没人看，直接放开预算（1 秒/帧），扫描 1~2 帧内跑完；
+    /// 有焦点时维持小预算避免游戏卡顿。</para>
+    /// </summary>
+    internal static double FrameBudgetNow
+        => UnityEngine.Application.isFocused ? FrameBudgetMs : 1000;
+
     internal static void Register()
     {
         // 游戏/存档状态：网页端据此判断"现在能不能开安全发展模式"
@@ -41,7 +51,7 @@ internal static class EntityHandlers
             MainThread.RunPaced(() =>
             {
                 if (!begun) { begun = true; EntityScan.BeginScan(); }
-                return EntityScan.StepScan(int.MaxValue, ScanFrameBudgetMs);
+                return EntityScan.StepScan(int.MaxValue, FrameBudgetNow);
             }, 120000);
             return MainThread.Run(() =>
             {
@@ -95,7 +105,7 @@ internal static class EntityHandlers
             {
                 frames++;
                 var sw = System.Diagnostics.Stopwatch.StartNew();
-                while (i < hashes.Count && sw.ElapsedMilliseconds < FrameBudgetMs)
+                while (i < hashes.Count && sw.ElapsedMilliseconds < FrameBudgetNow)
                 {
                     if (EntityDestroyer.DestroyEntity(hashes[i++]) == "ok") ok++; else fail++;
                 }
@@ -133,7 +143,7 @@ internal static class EntityHandlers
                 frames++;
                 if (!resolved) { resolved = true; StuffOnMapService.Resolve(); }
                 var sw = System.Diagnostics.Stopwatch.StartNew();
-                while (i < guids.Count && sw.ElapsedMilliseconds < FrameBudgetMs)
+                while (i < guids.Count && sw.ElapsedMilliseconds < FrameBudgetNow)
                 {
                     if (StuffOnMapService.DestroyOne(guids[i++])) deleted++; else missing++;
                 }
@@ -169,7 +179,7 @@ internal static class EntityHandlers
             {
                 frames++;
                 var sw = System.Diagnostics.Stopwatch.StartNew();
-                while (i < hashes.Count && sw.ElapsedMilliseconds < FrameBudgetMs)
+                while (i < hashes.Count && sw.ElapsedMilliseconds < FrameBudgetNow)
                 {
                     int end = Math.Min(i + 64, hashes.Count);
                     var seg = hashes.GetRange(i, end - i);
@@ -212,7 +222,7 @@ internal static class EntityHandlers
                 frames++;
                 if (!resolved) { resolved = true; AnimalService.Resolve(); }
                 var sw = System.Diagnostics.Stopwatch.StartNew();
-                while (i < hashes.Count && sw.ElapsedMilliseconds < FrameBudgetMs)
+                while (i < hashes.Count && sw.ElapsedMilliseconds < FrameBudgetNow)
                 {
                     var e = EntityScan.FindByPtrHash(hashes[i++]);
                     if (e != null && AnimalService.DestroyOne(e, mode)) ok++; else fail++;
@@ -280,7 +290,7 @@ internal static class EntityHandlers
             {
                 frames++;
                 var sw = System.Diagnostics.Stopwatch.StartNew();
-                while (i < hashes.Count && sw.ElapsedMilliseconds < FrameBudgetMs)
+                while (i < hashes.Count && sw.ElapsedMilliseconds < FrameBudgetNow)
                 {
                     int n = EntityScan.ScaleCombatStats(hashes[i++], factor);
                     if (n > 0) { entities++; fields += n; }
