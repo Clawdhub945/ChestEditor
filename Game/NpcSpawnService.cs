@@ -72,43 +72,16 @@ internal static class NpcSpawnService
                 throw new InvalidOperationException($"未知种族 raceId={raceId}");
             string raceName = RaceNames[raceId];
 
-            // ===== 尝试 A：CreateNpc 直调（真居民 + 精确坐标）=====
-            // 历史失败均在挂有 Harmony 捕获补丁的构建上（NRE 来自补丁桥嫌疑）；
-            // 当前构建无补丁，重新验证。成功 = 最优解。
-            IntPtr createNpc = FindMethodInHierarchy(helperClass, "CreateNpc", 15);
-            if (createNpc != IntPtr.Zero)
-            {
-                int spawned = 0;
-                for (int i = 0; i < count; i++)
-                {
-                    int familyGuid = NextGuid();
-                    if (familyGuid == 0) break;
-                    float px = wx + (float)(rnd.NextDouble() * 4.0 - 2.0);
-                    float py = wy + (float)(rnd.NextDouble() * 4.0 - 2.0);
-                    IntPtr vec = Marshal.AllocHGlobal(12);
-                    try
-                    {
-                        Marshal.WriteInt32(vec, 0, BitConverter.SingleToInt32Bits(px));
-                        Marshal.WriteInt32(vec, 4, BitConverter.SingleToInt32Bits(py));
-                        Marshal.WriteInt32(vec, 8, 0);
-                        if (Invoke(createNpc, helper, "召唤", raceName + "·" + seq(i), new RawArg(vec),
-                            20 + rnd.Next(21), rnd.Next(2) == 0, familyGuid, true,
-                            0, raceId, "npc", null, false, 0, 0, false) != IntPtr.Zero) spawned++;
-                    }
-                    finally { Marshal.FreeHGlobal(vec); }
-                }
-                if (spawned > 0)
-                {
-                    Plugin.LogInfo($"[NpcSpawn] 居民({raceName}) ×{spawned}（CreateNpc 直调，参考 {wx:F1},{wy:F1}）");
-                    return (spawned, wx, wy);
-                }
-                Plugin.LogInfo("[NpcSpawn] CreateNpc 直调失败 → 回落雇工洗白");
-            }
+            // ⚠ 不再尝试 CreateNpc 直调（15 参）：实测每次必在方法体内抛 IL2CPP 异常
+            //  （消息解不出），而且**失败路径会留下半成品对象/注册状态**——游戏随后
+            //  在主 tick 处理这些残留 → 随机时刻原生 AV（实测：召唤后约 3 分钟崩，
+            //  崩溃日志断点无任何前缀行）。这类"部分成功再抛异常"的调用一律禁止。
+            //  正确路径：游戏自己的 CreateHireWorker（见下），一次成功、无残留。
 
-            // ===== 尝试 B：CreateHireWorker 造人 + 洗成居民 =====
-            // 雇工会无视 start_pos 从地图边缘走进来（入口状态机每帧驱动），因此：
-            // ① is_hire_worker=false ② leave_time_days=0 ③ 传送到参考点旁。
-            // 传送可能与行走状态竞争（实测一次不生效）→ 传送后读回 position 验证并记录。
+            // ===== CreateHireWorker 造人 + 洗成居民（唯一的村民创建路径）=====
+            // 雇工出生在 start_pos（该入口本身接受坐标），只需清掉 is_hire_worker 标记
+            // 让它变成普通居民。⚠ 不做传送/逐帧钉位置（长持 Transform 指针 = 原生 AV），
+            //   ⚠ 也不动 leave_time_days（CreateHireWorker 已写 天数+99999；清 0 会触发离场链 AV）。
             IntPtr hire = FindMethodInHierarchy(helperClass, "CreateHireWorker", 7);
             if (hire == IntPtr.Zero)
                 throw new InvalidOperationException("找不到 NpcHelper.CreateHireWorker(7 参)");
@@ -163,50 +136,12 @@ internal static class NpcSpawnService
     }
 
     // ===== 召唤士兵离场时间修复（存量 + 兜底） =====
-    // 我们用 CreateSoldierBySummon(existDay=0) 造过的士兵 leave_time_days=0：
-    // is_soldier_summon=1 的 NPC 每日结算必进 Clock.Days > leave → is_time_to_leave=1 →
-    // 离场处理链原生 AV（三次闪退同偏移）。这里把召唤兵的 leave 统一改成 99999 并清标记。
-    // 字段直读直写（不走 invoke），全量一遍 <5ms；节流 5s，只在存档世界内跑。
-
-    private static long _lastLeaveFix;
-    private static IntPtr _fixClass;
-    private static int _offSummon, _offLeave, _offTimeToLeave;
-    private static bool _fixOffsetsReady;
-
-    internal static void FixSummonedLeaveTime()
-    {
-        if (!GameChainLocator.IsWorldReady()) return;
-        long now = Environment.TickCount64;
-        if (now - _lastLeaveFix < 5000) return;
-        _lastLeaveFix = now;
-        try
-        {
-            foreach (var e in EntityScan.Snapshot())
-            {
-                if (e.ClassName != "Npc" || e.Ptr == IntPtr.Zero) continue;
-                IntPtr cls = GetClass(e.Ptr);
-                if (cls != _fixClass)
-                {
-                    _fixClass = cls; _fixOffsetsReady = false;
-                    // ⚠ is_soldier_summon/leave_time_days 等声明在基类 BattleUnit 上，
-                    //   il2cpp_class_get_fields 只枚举本类声明字段 → 必须沿父类链查
-                    _offSummon = _offLeave = _offTimeToLeave = 0;
-                    TryFindFieldOffset(cls, "is_soldier_summon", out _offSummon);
-                    TryFindFieldOffset(cls, "leave_time_days", out _offLeave);
-                    TryFindFieldOffset(cls, "is_time_to_leave", out _offTimeToLeave);
-                    _fixOffsetsReady = _offSummon > 0 && _offLeave > 0;
-                    Plugin.LogInfo($"[NpcSpawn] 离场修复字段偏移: summon={_offSummon} leave={_offLeave} ttl={_offTimeToLeave}");
-                }
-                if (!_fixOffsetsReady) return;
-                if (ReadIl2CppByte(e.Ptr, _offSummon) == 0) continue;          // 非召唤士兵不管
-                if (ReadIl2CppInt(e.Ptr, _offLeave) >= 99999) continue;        // 已修复
-                WriteIl2CppInt(e.Ptr, _offLeave, 99999);
-                if (_offTimeToLeave > 0) WriteIl2CppByte(e.Ptr, _offTimeToLeave, 0);
-                Plugin.LogInfo($"[NpcSpawn] 修复召唤士兵离场时间 ptrHash={e.PtrHash}");
-            }
-        }
-        catch (Exception ex) { Plugin.LogInfo($"[NpcSpawn] FixSummonedLeaveTime: {ex.Message}"); }
-    }
+    // ⚠ 这里原有 FixSummonedLeaveTime 存量修复泵（每 5s 遍历实体快照的裸指针改 leave），已移除。
+    // 原因（崩溃实锤）：EntityScan 快照里的 Ptr / GoRef 是**扫描瞬间**的缓存值，
+    // NPC 阵亡或被销毁后即悬垂；GetClass(e.Ptr) / ReadIl2CppByte(e.Ptr,..) 走裸指针，
+    // 绕过 Unity 的销毁保护（GoRef 访问会抛可捕获的托管异常，Ptr 直读则是裸 AV，catch 不住），
+    // 于是每 5s 的一次全量遍历就成了随机时刻的原生崩溃点。
+    // 新建士兵已在源头用 exist_day_count=99999 修好，无需存量泵；长周期写游戏对象一律禁止。
 
     /// <summary>召唤士兵（上帝模式同款：兵种 + 武器/盔甲/盾牌，0 = 默认）。</summary>
     internal static (int spawned, float x, float y) SpawnSoldier(
@@ -227,37 +162,37 @@ internal static class NpcSpawnService
         var (wx, wy) = PickReferencePosition();
         var rnd = new Random();
         int spawned = 0;
-        for (int i = 0; i < count; i++)
-        {
-            float px = wx + (float)(rnd.NextDouble() * 4.0 - 2.0);
-            float py = wy + (float)(rnd.NextDouble() * 4.0 - 2.0);
-            // Vector2 是 8 字节 struct：槽里塞 {x, y} 两个 float 的位模式（x 低 32 / y 高 32）
-            long packed = (long)(uint)BitConverter.SingleToInt32Bits(px)
-                        | ((long)(uint)BitConverter.SingleToInt32Bits(py) << 32);
-            // exist_day_count 传 99999 → leave_time_days = 当前天数+99999，永不触发离场链。
-            // ⚠ 传 0 会得到 leave_time_days=0 的士兵：is_soldier_summon=1 的 NPC 每日结算
-            //   (NpcDoOnNewDay) 必进 Clock.Days > leave_time_days → is_time_to_leave=1 →
-            //   离场处理链原生 AV（实测三次闪退同一偏移 GameAssembly+0x445291）。
-            if (Invoke(m, helper, soldierTypeId, typeName, weaponId, armorId, shieldId,
-                       0, packed, 99999) != IntPtr.Zero) spawned++;
-        }
-        Plugin.LogInfo($"[NpcSpawn] 士兵({typeName}) ×{spawned} 武器{weaponId} 盔甲{armorId} 盾牌{shieldId}（参考 {wx:F1},{wy:F1}）");
-        return (spawned, wx, wy);
-    }
 
-    private static int NextGuid()
-    {
+        // ⚠⚠ 字符串参数必须登记 il2cpp GC 根，否则名字字段必成垃圾（崩溃根因）：
+        //   CreateSoldierBySummon 的第 2 参（兵种名 → 游戏存进 Npc.npc_name）是托管字符串，
+        //   经 StringToIl2Cpp 复制成 il2cpp 字符串后**只被 .NET 参数数组引用**；
+        //   而 il2cpp 的 Boehm GC 不扫描 .NET 托管堆 —— CreateNpc 内部大量分配一旦触发 GC，
+        //   这个字符串就被回收，游戏把它存进 npc_name 就是悬垂指针（实测立刻回读即乱码），
+        //   之后任何访问（UI 悬停显示名字/属性）都是裸 AV GameAssembly+0x445291。
+        //   GcHandleNew 让 il2cpp GC 看见它，调用结束（游戏已持有）后释放。
+        IntPtr namePtr = StringToIl2Cpp(typeName);
+        IntPtr nameRoot = GcHandleNew(namePtr, false);
         try
         {
-            var w = GameContext.GetGame();
-            if (w == null) return 0;
-            IntPtr wPtr = GetIl2CppPtr(w);
-            if (wPtr == IntPtr.Zero) return 0;
-            IntPtr m = FindMethodInHierarchy(GetClass(wPtr), "NextGuid", 0);
-            if (m == IntPtr.Zero) return 0;
-            return InvokeInt(m, wPtr);
+            Plugin.LogInfo($"[NpcSpawn] name 封送校验: '{typeName}' ptr=0x{namePtr:X} 回读='{ReadStringObject(namePtr) ?? "(null)"}'");
+            for (int i = 0; i < count; i++)
+            {
+                float px = wx + (float)(rnd.NextDouble() * 4.0 - 2.0);
+                float py = wy + (float)(rnd.NextDouble() * 4.0 - 2.0);
+                // Vector2 是 8 字节 struct：槽里塞 {x, y} 两个 float 的位模式（x 低 32 / y 高 32）
+                long packed = (long)(uint)BitConverter.SingleToInt32Bits(px)
+                            | ((long)(uint)BitConverter.SingleToInt32Bits(py) << 32);
+                // exist_day_count 传 99999 → leave_time_days = 当前天数+99999，永不触发离场链。
+                // ⚠ 传 0 会得到 leave_time_days=0 的士兵：is_soldier_summon=1 的 NPC 每日结算
+                //   (NpcDoOnNewDay) 必进 Clock.Days > leave_time_days → is_time_to_leave=1 →
+                //   离场处理链原生 AV（实测三次闪退同一偏移 GameAssembly+0x445291）。
+                if (Invoke(m, helper, soldierTypeId, namePtr, weaponId, armorId, shieldId,
+                           0, packed, 99999) != IntPtr.Zero) spawned++;
+            }
         }
-        catch { return 0; }
+        finally { GcHandleFree(nameRoot); }
+        Plugin.LogInfo($"[NpcSpawn] 士兵({typeName}) ×{spawned} 武器{weaponId} 盔甲{armorId} 盾牌{shieldId}（参考 {wx:F1},{wy:F1}）");
+        return (spawned, wx, wy);
     }
 
     /// <summary>

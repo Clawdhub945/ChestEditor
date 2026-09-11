@@ -47,9 +47,8 @@ public class ChestEditorComponent : MonoBehaviour
         // 记录主线程 id：给 MainThread.IsMainThread 用（防止有调用点在 HTTP 线程上碰 Unity 对象）
         MainThread.MarkMainThread();
 
-        // 召唤士兵离场时间修复（内部 5s 节流，字段直读，全量一遍 <5ms）
-        try { NpcSpawnService.FixSummonedLeaveTime(); }
-        catch (Exception ex) { Plugin.LogError($"[Plugin] FixSummonedLeaveTime 失败: {ex.Message}"); }
+        // ⚠ 不要再在 Update 里遍历实体快照的裸指针（Ptr）——快照是扫描瞬间的缓存，
+        //   NPC 阵亡后指针悬垂，裸读绕过 Unity 销毁保护 → 随机时刻原生 AV。见 NpcSpawnService 注释。
 
         if (Input.GetKeyDown(KeyCode.F11))
         {

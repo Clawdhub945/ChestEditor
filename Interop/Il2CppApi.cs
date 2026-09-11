@@ -380,7 +380,22 @@ internal static class Il2CppApi
     /// <summary>
     /// 托管字符串 → IL2CPP 字符串对象（生命周期归 il2cpp GC，无需手动释放）。
     /// 供 Invoke 的 string 参数封送与静态字段写入（SaveLoadPatches 同款机制，这里收进门面）。
+    /// ⚠ 必须配合 <see cref="GcHandleNew"/> 使用：新字符串只被 .NET 托管数组（参数槽）引用，
+    ///   而 il2cpp 的 Boehm GC **不扫描 .NET 托管堆** —— 被调方法内部一旦分配触发 GC，
+    ///   这个字符串就会被回收，游戏若把它存进字段（如 Npc.npc_name）就留下悬垂指针，
+    ///   之后任何访问（UI 悬停显示名字）都是裸 AV。
     /// </summary>
     internal static IntPtr StringToIl2Cpp(string s)
         => Il2CppInterop.Runtime.IL2CPP.ManagedStringToIl2Cpp(s);
+
+    /// <summary>
+    /// 给 IL2CPP 对象登记 GC 根（il2cpp 侧可见），返回 handle；用完必须 GcHandleFree。
+    /// 用于跨 runtime_invoke 边界保住临时对象（字符串参数等）不被 il2cpp GC 回收。
+    /// </summary>
+    internal static IntPtr GcHandleNew(IntPtr obj, bool pinned)
+        => Il2CppInterop.Runtime.IL2CPP.il2cpp_gchandle_new(obj, pinned);
+
+    /// <summary>释放 GcHandleNew 登记的 GC 根。</summary>
+    internal static void GcHandleFree(IntPtr handle)
+        => Il2CppInterop.Runtime.IL2CPP.il2cpp_gchandle_free(handle);
 }
