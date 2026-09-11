@@ -193,9 +193,33 @@ async function renderNpcfixBox1(forceScan) {
   html += '<span style="color:var(--text-muted);font-size:13px">我方NPC · 字段按职业定制（敌方单位在「战斗单位」）</span>';
   html += '<button onclick="renderNpcfixBox1(true)" style="padding:6px 16px;background:var(--accent);color:#fff;border:none;border-radius:var(--radius-sm);cursor:pointer;font-size:13px;margin-left:auto">重新扫描</button>';
   html += '</div>';
+  // ===== 召唤区（游戏内置"上帝模式"同款创建路径，见 NpcSpawnService） =====
+  html += '<div style="margin-bottom:12px;padding:10px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);flex-shrink:0;display:flex;flex-direction:column;gap:8px">';
+  html += '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">';
+  html += '<span style="font-size:13px;color:var(--text-secondary);font-weight:700">&#x2728; 召唤小人</span>';
+  html += '<select id="npcfixSpawnKind" style="padding:5px 8px;background:var(--bg-secondary);color:var(--text);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px"></select>';
+  html += '<span style="font-size:13px;color:var(--text-muted)">×</span>';
+  html += '<input type="number" id="npcfixSpawnNpcCount" min="1" max="10" value="1" style="width:56px;padding:5px 8px;background:var(--bg-secondary);color:var(--text);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px">';
+  html += '<button onclick="npcfixBox1SpawnNpc()" style="padding:5px 14px;background:var(--accent);color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:700">召唤</button>';
+  html += '<span style="font-size:11px;color:var(--text-muted)">小精灵/石头人有离场天数（游戏规则） · 出现在随机我方建筑旁 · 视角自动跟随</span>';
+  html += '</div>';
+  html += '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">';
+  html += '<span style="font-size:13px;color:var(--text-secondary);font-weight:700">&#x2694; 召唤士兵</span>';
+  html += '<select id="npcfixSpawnSoldierType" onchange="npcfixSpawnSoldierTypeChange(this)" style="min-width:130px;padding:5px 8px;background:var(--bg-secondary);color:var(--text);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px"></select>';
+  html += '<select id="npcfixSpawnWeapon" style="min-width:120px;padding:5px 8px;background:var(--bg-secondary);color:var(--text);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px"></select>';
+  html += '<select id="npcfixSpawnArmor" style="min-width:120px;padding:5px 8px;background:var(--bg-secondary);color:var(--text);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px"></select>';
+  html += '<select id="npcfixSpawnShield" style="min-width:110px;padding:5px 8px;background:var(--bg-secondary);color:var(--text);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px"></select>';
+  html += '<span style="font-size:13px;color:var(--text-muted)">×</span>';
+  html += '<input type="number" id="npcfixSpawnSoldierCount" min="1" max="10" value="1" style="width:56px;padding:5px 8px;background:var(--bg-secondary);color:var(--text);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px">';
+  html += '<button onclick="npcfixBox1SpawnSoldier()" style="padding:5px 14px;background:var(--accent);color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:700">召唤</button>';
+  html += '<span style="font-size:11px;color:var(--text-muted)">装备下拉按兵种分组过滤 · 默认(0)=徒手/无 · 永久存在</span>';
+  html += '</div>';
+  html += '</div>';
   html += '<div id="npcfixBox1Body" style="flex:1;overflow-y:auto;min-height:0;color:var(--text-muted)">' + (needScan ? '扫描中...' : '') + '</div>';
   html += '</div>';
   el.innerHTML = html;
+  // 召唤区下拉：选项只拉一次（spawn_tables.json），异步填充不阻塞列表渲染
+  npcfixLoadSpawnOptions().then(() => npcfixBox1FillSpawnSelects());
 
   if (needScan) {
     try {
@@ -1810,4 +1834,120 @@ async function npcfixBox4Spawn() {
     } catch (e) { /* 定位失败不影响结果 */ }
   }
   npcfixRefreshView();
+}
+
+// ===== 盒子1 召唤小人/士兵 =====
+// 数据来自 /api/npcspawn/options（Data/spawn_tables.json：10 种族 / 兵种+装备组 / 装备名）。
+// 创建走游戏内置"上帝模式"同款路径（NpcHelper.CreateElf / CreateStoneMan / CreateNpc /
+// CreateSoldierBySummon），位置 = 随机我方在场实体旁，服务端召唤后直接把相机飞到落点。
+let npcfixSpawnOptions = null;
+
+async function npcfixLoadSpawnOptions() {
+  if (npcfixSpawnOptions) return npcfixSpawnOptions;
+  try {
+    npcfixSpawnOptions = await fetch('/api/npcspawn/options').then(x => x.json());
+  } catch (e) { npcfixSpawnOptions = {}; }
+  return npcfixSpawnOptions;
+}
+
+function npcfixBox1FillSpawnSelects() {
+  const kind = document.getElementById('npcfixSpawnKind');
+  if (!kind || !npcfixSpawnOptions) return;
+  if (kind.options.length === 0) {
+    const races = npcfixSpawnOptions.races || [];
+    kind.innerHTML = '<option value="sprite">小精灵</option><option value="stoneman">石头人</option>'
+      + races.map(r => '<option value="race:' + r[0] + '">' + esc(r[1]) + '村民</option>').join('');
+  }
+  const st = document.getElementById('npcfixSpawnSoldierType');
+  if (st && st.options.length === 0) {
+    st.innerHTML = (npcfixSpawnOptions.soldierTypes || [])
+      .map(t => '<option value="' + t[0] + '">' + esc(t[1]) + '</option>').join('');
+    npcfixSpawnSoldierTypeChange(st);
+  }
+}
+
+// 兵种切换 → 按兵种的 weapon/armor/shield_group 过滤三个装备下拉（0 = 默认，游戏按兵种缺省）
+function npcfixSpawnSoldierTypeChange(sel) {
+  if (!npcfixSpawnOptions) return;
+  const typeId = parseInt(sel.value, 10);
+  const t = (npcfixSpawnOptions.soldierTypes || []).find(x => x[0] === typeId);
+  const groups = { npcfixSpawnWeapon: ['weapons', t ? t[2] : 0], npcfixSpawnArmor: ['armors', t ? t[3] : 0], npcfixSpawnShield: ['shields', t ? t[4] : 0] };
+  for (const id in groups) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    const listName = groups[id][0], group = groups[id][1];
+    el.innerHTML = ['<option value="0">默认（0）</option>']
+      .concat((npcfixSpawnOptions[listName] || [])
+        .filter(e => e[2] === group)
+        .map(e => '<option value="' + e[0] + '">' + esc(e[1]) + '</option>'))
+      .join('');
+    el.value = '0';
+  }
+}
+
+async function npcfixBox1SpawnNpc() {
+  const kind = document.getElementById('npcfixSpawnKind');
+  const cnt = document.getElementById('npcfixSpawnNpcCount');
+  if (!kind || !cnt) return;
+  let count = parseInt(cnt.value, 10);
+  if (isNaN(count)) count = 1;
+  count = Math.min(10, Math.max(1, count));
+  cnt.value = count;
+  let body, name;
+  const v = kind.value;
+  if (v === 'sprite' || v === 'stoneman') {
+    body = { kind: v, raceId: 0, count: count };
+    name = v === 'sprite' ? '小精灵' : '石头人';
+  } else if (v.indexOf('race:') === 0) {
+    const raceId = parseInt(v.slice(5), 10);
+    name = (kind.options[kind.selectedIndex] ? kind.options[kind.selectedIndex].text : '村民');
+    body = { kind: 'race', raceId: raceId, count: count };
+  } else { toast('请选择要召唤的小人', true); return; }
+  if (!confirm('确定召唤 ' + count + ' 个「' + name + '」？\n会出现在随机我方建筑/单位旁边，视角自动跟过去')) return;
+  toast('召唤中...', false);
+  let r = null;
+  try {
+    r = await fetch('/api/npcspawn/npc', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+    }).then(x => x.json());
+  } catch (e) { toast('召唤失败: ' + esc(String((e && e.message) || e)), true); return; }
+  if (r && r.error) { toast('召唤失败: ' + esc(String(r.error)), true); return; }
+  toast('召唤完成: ' + ((r && r.spawned) || 0) + ' 个「' + name + '」（视角已跟随）');
+  await renderNpcfixBox1(true);
+}
+
+async function npcfixBox1SpawnSoldier() {
+  const st = document.getElementById('npcfixSpawnSoldierType');
+  const w = document.getElementById('npcfixSpawnWeapon');
+  const a = document.getElementById('npcfixSpawnArmor');
+  const s = document.getElementById('npcfixSpawnShield');
+  const cnt = document.getElementById('npcfixSpawnSoldierCount');
+  if (!st || !cnt) return;
+  let count = parseInt(cnt.value, 10);
+  if (isNaN(count)) count = 1;
+  count = Math.min(10, Math.max(1, count));
+  cnt.value = count;
+  const soldierTypeId = parseInt(st.value, 10);
+  if (isNaN(soldierTypeId) || soldierTypeId <= 0) { toast('请选择士兵类型', true); return; }
+  const name = st.options[st.selectedIndex] ? st.options[st.selectedIndex].text : ('#' + soldierTypeId);
+  const equipName = (el) => (el && el.selectedIndex >= 0 ? el.options[el.selectedIndex].text : '');
+  if (!confirm('确定召唤 ' + count + ' 个「' + name + '」？\n武器: ' + equipName(w) + ' / 盔甲: ' + equipName(a) + ' / 盾牌: ' + equipName(s)
+    + '\n会出现在随机我方建筑/单位旁边，视角自动跟过去')) return;
+  toast('召唤中...', false);
+  let r = null;
+  try {
+    r = await fetch('/api/npcspawn/soldier', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        soldierTypeId: soldierTypeId,
+        weaponId: parseInt(w ? w.value : '0', 10) || 0,
+        armorId: parseInt(a ? a.value : '0', 10) || 0,
+        shieldId: parseInt(s ? s.value : '0', 10) || 0,
+        count: count
+      })
+    }).then(x => x.json());
+  } catch (e) { toast('召唤失败: ' + esc(String((e && e.message) || e)), true); return; }
+  if (r && r.error) { toast('召唤失败: ' + esc(String(r.error)), true); return; }
+  toast('召唤完成: ' + ((r && r.spawned) || 0) + ' 个「' + name + '」（视角已跟随）');
+  await renderNpcfixBox1(true);
 }

@@ -322,4 +322,22 @@ internal static class GameChainLocator
         catch (Exception ex) { Plugin.LogVerbose($"[EntityEditor] GetAnimalHelper error: {ex.Message}"); }
         return IntPtr.Zero;
     }
+
+    /// <summary>
+    /// 我方领地的 NpcHelper（Territory.npc_helper）—— 创建 NPC/士兵的宿主对象
+    /// （CreateElf / CreateStoneMan / CreateNpc / CreateSoldierBySummon 都挂在它上面，
+    /// 伪 C 证实其内部用 this.area_map / this.territory，取我方的才能把小人归进我方领地）。
+    /// </summary>
+    internal static IntPtr GetNpcHelper()
+    {
+        try
+        {
+            IntPtr territory = GetTerritory();
+            if (territory == IntPtr.Zero) return IntPtr.Zero;
+            IntPtr territoryClass = Il2CppApi.GetClass(territory);
+            return Il2CppApi.ReadFieldSafe(territory, territoryClass, "npc_helper");
+        }
+        catch (Exception ex) { Plugin.LogVerbose($"[EntityEditor] GetNpcHelper error: {ex.Message}"); }
+        return IntPtr.Zero;
+    }
 }

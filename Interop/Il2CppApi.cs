@@ -376,4 +376,11 @@ internal static class Il2CppApi
 
     internal static IntPtr ClassFromName(IntPtr image, string ns, string className)
         => Il2CppInterop.Runtime.IL2CPP.il2cpp_class_from_name(image, ns, className);
+
+    /// <summary>
+    /// 托管字符串 → IL2CPP 字符串对象（生命周期归 il2cpp GC，无需手动释放）。
+    /// 供 Invoke 的 string 参数封送与静态字段写入（SaveLoadPatches 同款机制，这里收进门面）。
+    /// </summary>
+    internal static IntPtr StringToIl2Cpp(string s)
+        => Il2CppInterop.Runtime.IL2CPP.ManagedStringToIl2Cpp(s);
 }

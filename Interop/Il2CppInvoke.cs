@@ -48,13 +48,14 @@ internal static unsafe class Il2CppInvoke
             {
                 IntPtr[] slots = new IntPtr[n];
                 for (int i = 0; i < n; i++)
-                    slots[i] = ToSlot(args[i]);
+                    slots[i] = args[i] is RawArg ? IntPtr.Zero : ToSlot(args[i]);   // RawArg 的槽值无意义（argv 直接指缓冲）
 
                 IntPtr[] argv = new IntPtr[n];
                 fixed (IntPtr* sp = slots)
                 fixed (IntPtr* ap = argv)
                 {
-                    for (int i = 0; i < n; i++) argv[i] = (IntPtr)(&sp[i]);
+                    for (int i = 0; i < n; i++)
+                        argv[i] = (args[i] is RawArg raw) ? raw.Ptr : (IntPtr)(&sp[i]);
                     result = Il2CppInterop.Runtime.IL2CPP.il2cpp_runtime_invoke(method, objPtr, (void**)ap, ref exception);
                 }
             }
@@ -74,6 +75,18 @@ internal static unsafe class Il2CppInvoke
     {
         try { Invoke(method, objPtr, args); return true; }
         catch { return false; }
+    }
+
+    /// <summary>
+    /// 调用 int 返回值的方法。⚠ runtime_invoke 对值类型返回是【装箱对象指针】
+    /// （不能直接 (int)指针，64 位指针转 int32 会 OverflowException）——
+    /// 值在 IL2CPP 对象头（klass 8 + monitor 8）之后的 16 偏移处。
+    /// </summary>
+    internal static int InvokeInt(IntPtr method, IntPtr objPtr, params object?[] args)
+    {
+        IntPtr boxed = Invoke(method, objPtr, args);
+        if (boxed == IntPtr.Zero) return 0;
+        return Il2CppMemory.ReadIl2CppInt(boxed, 16);
     }
 
     /// <summary>调用返回 IL2CPP string 的方法并解码为托管字符串</summary>
@@ -142,7 +155,8 @@ internal static unsafe class Il2CppInvoke
         return exception == IntPtr.Zero;
     }
 
-    // 值类型参数：把值放进 IntPtr 槽的低 4 字节；引用类型：槽里放对象指针
+    // 值类型参数：把值放进 IntPtr 槽的低 4 字节；引用类型：槽里放对象指针。
+    // string → ManagedStringToIl2Cpp（IL2CPP 字符串对象，生命周期由 il2cpp GC 管，无需释放）。
     private static IntPtr ToSlot(object? arg) => arg switch
     {
         null => IntPtr.Zero,
@@ -153,7 +167,19 @@ internal static unsafe class Il2CppInvoke
         float f => new IntPtr(BitConverter.SingleToInt32Bits(f)),
         double d => throw new NotSupportedException("double 参数请先显式转换"),
         bool b => new IntPtr(b ? 1 : 0),
+        string s => Il2CppApi.StringToIl2Cpp(s),
         Il2CppInterop.Runtime.InteropTypes.Il2CppObjectBase o => Il2CppApi.GetIl2CppPtr(o),
         _ => throw new NotSupportedException($"不支持的参数类型: {arg.GetType().Name}")
     };
+
+    /// <summary>
+    /// 原始指针参数：argv[i] 直接用 <see cref="Ptr"/>（不再指向槽）。
+    /// 用于 &gt;8 字节的值类型（如 UnityEngine.Vector3 = 12 字节）——槽只有 8 字节装不下，
+    /// 调用方需自行分配非托管内存写入结构体数据（用完自行 FreeHGlobal）。
+    /// </summary>
+    internal sealed class RawArg
+    {
+        internal IntPtr Ptr;
+        internal RawArg(IntPtr ptr) { Ptr = ptr; }
+    }
 }

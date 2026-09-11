@@ -116,6 +116,27 @@ internal static class DataTables
     internal static string SoldierTypeName(int soldierTypeId)
         => SoldierTypes.TryGetValue(soldierTypeId, out var n) ? n : "";
 
+    // ==================== 召唤小人/士兵选项表 ====================
+
+    private static string? _spawnTablesJson;
+
+    /// <summary>
+    /// spawn_tables.json 原文（{races, soldierTypes, weapons, armors, shields}），
+    /// 由 _tools/generate_data_tables.py 生成，前端下拉直接消费，原样透传。
+    /// </summary>
+    internal static string SpawnTablesJson()
+    {
+        lock (Lock)
+        {
+            if (_spawnTablesJson == null)
+            {
+                using var doc = TryOpen("spawn_tables.json");
+                _spawnTablesJson = doc?.RootElement.GetRawText() ?? "{}";
+            }
+            return _spawnTablesJson;
+        }
+    }
+
     // ==================== 箱子筛选表 ====================
 
     /// <summary>

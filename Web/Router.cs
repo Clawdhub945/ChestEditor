@@ -70,6 +70,7 @@ internal static class Router
         TechHandlers.Register();
         EntityHandlers.Register();
         NpcHandlers.Register();
+        NpcSpawnHandlers.Register();
     }
 
     /// <summary>分发请求并写出响应；无匹配路由时返回 false</summary>

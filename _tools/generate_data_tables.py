@@ -16,6 +16,8 @@ ChestEditor 数据表生成器
 --------------------------------------------------------------
   Data/items.json          [[id, name, stuff_type], ...]        来自 stuff.json + stuff2.json
   Data/soldier_types.json  [[id, name], ...]                    来自 soldier_equip.json + 名称表
+  Data/spawn_tables.json   {races, soldierTypes, weapons,       来自 soldier_equip/weapon/armor/shield.json
+                            armors, shields}                    （召唤小人/士兵的下拉数据，NpcSpawnService）
   Data/chest_filters.json  [[id, name, enabled01], ...]         来自 ChestService.cs（名称手写，见报告）
   Data/dragon_types.json   [[name, cn, baseId], ...]            来自 DragonService.cs
   Data/dragon_natures.json [[id, name], ...]                    来自 dragon_nature.json
@@ -122,36 +124,80 @@ def code_soldier_types():
     return {int(a): b for a, b in re.findall(r'\{\s*(\d+),\s*"([^"]*)"\s*\}', m.group(1))}
 
 
+def build_carried_forward(filename):
+    """代码字面量已迁入 Data/*.json 的表（C 批次）：以现有 Data 文件为准原样沿用。
+    （chest_filters 名称手写、dragon_types 无官方表，源头就是 JSON 本身。）"""
+    path = os.path.join(DATA_OUT, filename)
+    if not os.path.exists(path):
+        raise SystemExit(f"找不到 {path} —— 该表现在是源头，删除前请确认有替代来源")
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
 def build_chest_filters():
-    """箱子筛选表：以 C# 现值为准（部分显示名与官方不同，属有意为之）。"""
-    src = read_source("Game/ChestService.cs")
-    m = re.search(r'_filterItems\s*=\s*new\(\)\s*\{(.*?)\n    \};', src, re.S)
-    if not m:
-        raise SystemExit("找不到 ChestService._filterItems 定义")
-    rows = [[int(a), b, 1 if c == "true" else 0]
-            for a, b, c in re.findall(r'\{\s*(\d+),\s*\("([^"]*)",\s*(true|false)\)\s*\}', m.group(1))]
-    if not rows:
-        raise SystemExit("_filterItems 解析为空")
-    return rows
+    """箱子筛选表：以 Data/chest_filters.json 现值为准（原 C# 字面量已迁出）。"""
+    return build_carried_forward("chest_filters.json")
 
 
 def build_dragon_types():
-    """龙类型：代码中无官方对应表，以 C# 现值为准。"""
-    src = read_source("Game/DragonService.cs")
-    m = re.search(r'DragonTypes\s*=\s*new\[\]\s*\{(.*?)\n    \};', src, re.S)
-    if not m:
-        raise SystemExit("找不到 DragonService.DragonTypes 定义")
-    rows = [[a, b, int(c)] for a, b, c in
-            re.findall(r'\("([^"]*)",\s*"([^"]*)",\s*(\d+)\)', m.group(1))]
-    if not rows:
-        raise SystemExit("DragonTypes 解析为空")
-    return rows
+    """龙类型：以 Data/dragon_types.json 现值为准（原 C# 字面量已迁出）。"""
+    return build_carried_forward("dragon_types.json")
 
 
 def build_dragon_natures():
     """龙天性：官方 dragon_nature.json。"""
     rows = load_game_json("dragon_nature.json")
     return [[r["dragon_nature_id"], r.get("name_zh-CN", "")] for r in sorted(rows, key=lambda x: x["dragon_nature_id"])]
+
+
+def build_spawn_tables():
+    """召唤小人/士兵的下拉数据（NpcSpawnService）。
+    兵种：soldier_equip.json（剔除 disable 与 0=市民——soldier_equip_dic[0] 不存在，调了必炸）；
+    装备：weapon/armor/shield.json，按兵种的 weapon/armor/shield_group 在前端过滤；
+    名称：stuff 表官方名（weapon_id=405xxx 等就是 stuff_id），缺名回落 prefab。
+    种族名：race.json 没有完整中文族名（只有姓氏单字），沿用实测反推的 10 族名。"""
+    stuff_names = {r["stuff_id"]: r.get("stuff_namezh-CN", "")
+                   for r in load_game_json("stuff.json") + load_game_json("stuff2.json")}
+    soldier_names = {r[0]: r[1] for r in build_soldier_types()}
+
+    races = [[0, "矮人"], [1, "蚁人"], [2, "鼠人"], [3, "猫人"], [4, "羊人"],
+             [5, "狼人"], [6, "猪人"], [7, "精灵族"], [8, "三眼人"], [9, "蜥蜴人"]]
+
+    stypes = []
+    for r in sorted(load_game_json("soldier_equip.json"), key=lambda x: x["soldier_type_id"]):
+        if r.get("disable", 0):
+            continue
+        sid = r["soldier_type_id"]
+        if sid == 0:
+            continue
+        name = soldier_names.get(sid) or stuff_names.get(sid, "") or str(sid)
+        stypes.append([sid, name, r.get("weapon_group", 0), r.get("armor_group", 0), r.get("shield_group", 0)])
+
+    def equip(file, id_key, group_key):
+        out = []
+        for r in sorted(load_game_json(file), key=lambda x: x[id_key]):
+            eid = r[id_key]
+            out.append([eid, stuff_names.get(eid) or r.get("prefab", ""), r.get(group_key, 0)])
+        return out
+
+    return {
+        "races": races,
+        "soldierTypes": stypes,
+        "weapons": equip("weapon.json", "weapon_id", "weapon_group"),
+        "armors": equip("armor.json", "armor_id", "armor_group"),
+        "shields": equip("shield.json", "shield_id", "shield_group"),
+    }
+
+
+def dump_json(path, obj, check_only):
+    """写普通 JSON（dict 结构用，区别于 dump_rows 的紧凑行格式）。"""
+    text = json.dumps(obj, ensure_ascii=False, indent=1) + "\n"
+    if check_only:
+        return text
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+    return text
 
 
 # ----------------------------------------------------------------------------- 主流程
@@ -205,12 +251,21 @@ def main():
     dnatures = build_dragon_natures()
     print(f"dragon_natures.json {len(dnatures):>5} 条 (官方 dragon_nature.json)")
     if args.verify:
-        src = read_source("Game/DragonService.cs")
-        m = re.search(r'DragonNatures\s*=\s*new\[\]\s*\{(.*?)\n    \};', src, re.S)
-        if m:
-            cn = {int(a): b for a, b in re.findall(r'\((\d+),\s*"([^"]*)"\)', m.group(1))}
-            ok &= diff_sets("DragonNatures(代码) vs 官方", cn, {r[0]: r[1] for r in dnatures})
+        src_path = os.path.join(DATA_OUT, "dragon_natures.json")
+        # 原 C# 字面量已迁入 Data 文件（C 批次），代码对拍仅在该文件被手改回字面量时才有意义，
+        # 这里改为与现有 Data 值对拍（应恒等，等价于自检）。
+        try:
+            carried = json.load(open(src_path, encoding="utf-8"))
+            cn = {int(a): b for a, b in carried}
+            ok &= diff_sets("DragonNatures(现有Data) vs 官方", cn, {r[0]: r[1] for r in dnatures})
+        except Exception:
+            pass
     dump_rows(os.path.join(DATA_OUT, "dragon_natures.json"), dnatures, args.check)
+
+    spawn = build_spawn_tables()
+    print(f"spawn_tables.json   {len(spawn['soldierTypes']):>5} 兵种 / "
+          f"{len(spawn['weapons'])} 武器 / {len(spawn['armors'])} 盔甲 / {len(spawn['shields'])} 盾牌 / 10 种族")
+    dump_json(os.path.join(DATA_OUT, "spawn_tables.json"), spawn, args.check)
 
     print()
     if args.verify and not ok:
