@@ -34,6 +34,8 @@ public class Plugin : BasePlugin
 
         _harmony = new Harmony(PLUGIN_GUID);
         SaveLoadPatches.Apply(_harmony);
+        try { Interop.HoverProbe.Apply(_harmony); }   // 【诊断·临时】悬停路径日志钩子
+        catch (Exception ex) { LogError($"[Plugin] HoverProbe.Apply 失败: {ex.Message}"); }
         try
         {
             ModificationStore.LoadFromDisk();

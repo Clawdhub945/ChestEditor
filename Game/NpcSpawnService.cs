@@ -60,7 +60,8 @@ internal static class NpcSpawnService
                 int gx = (int)Math.Floor(wx - 0.5f) + rnd.Next(-2, 3);
                 int gy = (int)Math.Floor(wy - 0.5f) + rnd.Next(-2, 3);
                 // Point 是 struct：参数槽直塞 {gx, gy} 8 字节值（x 低 32 / y 高 32）
-                if (Invoke(m, helper, new IntPtr(gx | (gy << 32))) != IntPtr.Zero) spawned++;
+                IntPtr npc = Invoke(m, helper, new IntPtr(gx | (gy << 32)));
+                if (npc != IntPtr.Zero) { spawned++; SanitizeNpcName(npc, kind == "sprite" ? "小精灵" : "石头人"); }
             }
             Plugin.LogInfo($"[NpcSpawn] {methodName} ×{spawned}（参考 {wx:F1},{wy:F1}）");
             return (spawned, wx, wy);
@@ -126,6 +127,8 @@ internal static class NpcSpawnService
     private static int MakeResident(IntPtr npcPtr)
     {
         IntPtr npcClass = GetClass(npcPtr);
+        // 名字兜底：悬停显示时 TMPro 解析损坏名字会崩（见 SanitizeNpcName 注释）
+        SanitizeNpcName(npcPtr, "新人");
         if (TryFindFieldOffset(npcClass, "is_hire_worker", out int offHire) && offHire > 0)
         {
             WriteIl2CppByte(npcPtr, offHire, 0);
@@ -164,35 +167,86 @@ internal static class NpcSpawnService
         int spawned = 0;
 
         // ⚠⚠ 字符串参数必须登记 il2cpp GC 根，否则名字字段必成垃圾（崩溃根因）：
-        //   CreateSoldierBySummon 的第 2 参（兵种名 → 游戏存进 Npc.npc_name）是托管字符串，
+        //   CreateSoldierBySummon 的第 2 参（兵种名 → 游戏写进 Npc.npc_name）是托管字符串，
         //   经 StringToIl2Cpp 复制成 il2cpp 字符串后**只被 .NET 参数数组引用**；
         //   而 il2cpp 的 Boehm GC 不扫描 .NET 托管堆 —— CreateNpc 内部大量分配一旦触发 GC，
-        //   这个字符串就被回收，游戏把它存进 npc_name 就是悬垂指针（实测立刻回读即乱码），
-        //   之后任何访问（UI 悬停显示名字/属性）都是裸 AV GameAssembly+0x445291。
-        //   GcHandleNew 让 il2cpp GC 看见它，调用结束（游戏已持有）后释放。
+        //   这个字符串就被回收，游戏存进 npc_name 的就是悬垂指针（实测回读即乱码/含 \0）。
+        //   后果：鼠标悬停 → Npc.OnPointerEnter → UI.ShowMouseTip(name) → TMPro 解析这个
+        //   损坏字符串时 Array.Resize(newSize<0) → ArgumentOutOfRangeException → 原生 AV。
+        //   ⚠ 这里**故意不释放** GC 根：游戏对名字可能是"先存指针、稍后才规范化"，
+        //   提前释放会让字符串在窗口期被回收（实测仍有部分 NPC 名字为空/乱码）。
+        //   每次召唤泄漏一个短字符串，可忽略。
         IntPtr namePtr = StringToIl2Cpp(typeName);
-        IntPtr nameRoot = GcHandleNew(namePtr, false);
-        try
+        GcHandleNew(namePtr, true);   // pinned：连地址都锁住，最长保护
+        int made = 0;
+        Plugin.LogInfo($"[NpcSpawn] name 封送校验: '{typeName}' ptr=0x{namePtr:X} 回读='{ReadStringObject(namePtr) ?? "(null)"}'");
+        for (int i = 0; i < count; i++)
         {
-            Plugin.LogInfo($"[NpcSpawn] name 封送校验: '{typeName}' ptr=0x{namePtr:X} 回读='{ReadStringObject(namePtr) ?? "(null)"}'");
-            for (int i = 0; i < count; i++)
-            {
-                float px = wx + (float)(rnd.NextDouble() * 4.0 - 2.0);
-                float py = wy + (float)(rnd.NextDouble() * 4.0 - 2.0);
-                // Vector2 是 8 字节 struct：槽里塞 {x, y} 两个 float 的位模式（x 低 32 / y 高 32）
-                long packed = (long)(uint)BitConverter.SingleToInt32Bits(px)
-                            | ((long)(uint)BitConverter.SingleToInt32Bits(py) << 32);
-                // exist_day_count 传 99999 → leave_time_days = 当前天数+99999，永不触发离场链。
-                // ⚠ 传 0 会得到 leave_time_days=0 的士兵：is_soldier_summon=1 的 NPC 每日结算
-                //   (NpcDoOnNewDay) 必进 Clock.Days > leave_time_days → is_time_to_leave=1 →
-                //   离场处理链原生 AV（实测三次闪退同一偏移 GameAssembly+0x445291）。
-                if (Invoke(m, helper, soldierTypeId, namePtr, weaponId, armorId, shieldId,
-                           0, packed, 99999) != IntPtr.Zero) spawned++;
-            }
+            float px = wx + (float)(rnd.NextDouble() * 4.0 - 2.0);
+            float py = wy + (float)(rnd.NextDouble() * 4.0 - 2.0);
+            // Vector2 是 8 字节 struct：槽里塞 {x, y} 两个 float 的位模式（x 低 32 / y 高 32）
+            long packed = (long)(uint)BitConverter.SingleToInt32Bits(px)
+                        | ((long)(uint)BitConverter.SingleToInt32Bits(py) << 32);
+            // exist_day_count 传 99999 → leave_time_days = 当前天数+99999，永不触发离场链。
+            // ⚠ 传 0 会得到 leave_time_days=0 的士兵：is_soldier_summon=1 的 NPC 每日结算
+            //   (NpcDoOnNewDay) 必进 Clock.Days > leave_time_days → is_time_to_leave=1 →
+            //   离场处理链原生 AV。
+            IntPtr npc = Invoke(m, helper, soldierTypeId, namePtr, weaponId, armorId, shieldId,
+                       0, packed, 99999);
+            if (npc != IntPtr.Zero) { spawned++; made++; SanitizeNpcName(npc, typeName); }
         }
-        finally { GcHandleFree(nameRoot); }
         Plugin.LogInfo($"[NpcSpawn] 士兵({typeName}) ×{spawned} 武器{weaponId} 盔甲{armorId} 盾牌{shieldId}（参考 {wx:F1},{wy:F1}）");
         return (spawned, wx, wy);
+    }
+
+    /// <summary>
+    /// 校验并修正 NPC 的显示名（npc_name）。
+    /// 为什么必须做：鼠标悬停到 NPC 时游戏走
+    /// `Npc.OnPointerEnter → UI.ShowMouseTip(npc名) → MyUtil.ForceRebuildLayoutImmediate
+    ///  → TMPro.TMP_Text.ParseInputText`，若名字是空/含 NUL/未配对代理项，
+    /// TMP 计算文本长度会得到负数 → `Array.Resize(newSize)` 抛
+    /// ArgumentOutOfRangeException → 原生 AV（实测崩溃偏移固定 GameAssembly+0x445291）。
+    /// 兜底：名字不合法就写入一个安全中文名（名字重复无副作用，优先保证不崩）。
+    /// </summary>
+    private static void SanitizeNpcName(IntPtr npcPtr, string fallback)
+    {
+        try
+        {
+            IntPtr cls = GetClass(npcPtr);
+            if (!TryFindFieldOffset(cls, "npc_name", out int off) || off <= 0) return;
+            string? nm = ReadIl2CppString(npcPtr, off);
+            if (IsSafeDisplayName(nm)) return;
+
+            IntPtr s = StringToIl2Cpp(fallback);
+            GcHandleNew(s, true);              // 保护到写入完成（NPC 字段持有后即可达）
+            WriteIl2CppPointer(npcPtr, off, s);
+            Plugin.LogInfo($"[NpcSpawn] npc_name 不合法({Describe(nm)}) → 已修正为 '{fallback}'");
+        }
+        catch (Exception ex) { Plugin.LogInfo($"[NpcSpawn] SanitizeNpcName 失败: {ex.Message}"); }
+    }
+
+    /// <summary>名字是否能安全交给 TMPro 渲染：非空、无 NUL/控制字符、无未配对代理项、长度合理。</summary>
+    private static bool IsSafeDisplayName(string? s)
+    {
+        if (string.IsNullOrEmpty(s) || s.Length > 24) return false;
+        foreach (char c in s)
+        {
+            if (c == '\0' || char.IsSurrogate(c) || char.IsControl(c)) return false;
+        }
+        return true;
+    }
+
+    private static string Describe(string? s)
+    {
+        if (s == null) return "null";
+        if (s.Length == 0) return "空串";
+        var sb = new System.Text.StringBuilder();
+        foreach (char c in s)
+        {
+            if (sb.Length >= 12) { sb.Append("…"); break; }
+            sb.Append(c < 0x20 || char.IsSurrogate(c) ? $"\\u{(int)c:X4}" : c.ToString());
+        }
+        return $"len={s.Length} '{sb}'";
     }
 
     /// <summary>
@@ -229,5 +283,103 @@ internal static class NpcSpawnService
         var pick = candidates[rnd.Next(candidates.Count)];
         Plugin.LogInfo($"[NpcSpawn] 参考候选 {candidates.Count} 个，取 ({pick.x:F1},{pick.y:F1})");
         return pick;
+    }
+
+    /// <summary>
+    /// 【诊断·临时】把实体世界坐标转成屏幕坐标 —— 供自动化把鼠标精确移到它上面
+    /// （悬停复现用）。注意 Unity 屏幕坐标原点在左下，Win32 SetCursorPos 在左上，
+    /// 调用方需 y = 屏幕高 - sy。
+    /// </summary>
+    internal static string GetScreenPos(int ptrHash)
+    {
+        UnityEngine.Transform? tr = null;
+        foreach (var e in EntityScan.Snapshot())
+            if (e.PtrHash == ptrHash) { tr = e.GoRef != null ? e.GoRef.transform : null; break; }
+        if (tr == null) throw new InvalidOperationException($"未找到 ptrHash={ptrHash}（或对象已销毁）");
+        var cam = UnityEngine.Camera.main;
+        if (cam == null) throw new InvalidOperationException("Camera.main 为空");
+        var wp = tr.position;
+        var sp = cam.WorldToScreenPoint(wp);
+        int h = UnityEngine.Screen.height;
+        Plugin.LogInfo($"[ScreenPos] world=({wp.x:F2},{wp.y:F2},{wp.z:F2}) screen=({sp.x:F1},{sp.y:F1}) z={sp.z:F1} cam={cam.name} h={h} w={UnityEngine.Screen.width}");
+        return JsonBuilder.Object(w =>
+        {
+            w.WriteNumber("sx", JsonBuilder.Safe(sp.x));
+            w.WriteNumber("sy", JsonBuilder.Safe(sp.y));
+            w.WriteNumber("z", JsonBuilder.Safe(sp.z));
+            w.WriteNumber("screenH", h);
+            w.WriteNumber("screenW", UnityEngine.Screen.width);
+        });
+    }
+
+    /// <summary>
+    /// 【诊断·临时】模拟游戏"鼠标悬停到该 NPC"时执行的读取路径
+    /// （NpcInfoPanel.UpdateSoldierInfo 前半段：读装备字段 → IsSoldier → GetSoldierAttrDesc）。
+    /// 每步调用**前**先写日志 —— 若崩溃，LogOutput.log 最后一行即崩点。定位完可删。
+    /// </summary>
+    internal static string ProbeHover(int ptrHash)
+    {
+        IntPtr npc = IntPtr.Zero;
+        foreach (var e in EntityScan.Snapshot())
+            if (e.PtrHash == ptrHash) { npc = e.Ptr; break; }
+        if (npc == IntPtr.Zero) throw new InvalidOperationException($"未找到 ptrHash={ptrHash}");
+
+        IntPtr cls = GetClass(npc);
+        var sb = new System.Text.StringBuilder();
+        sb.Append($"cls={(cls != IntPtr.Zero ? "ok" : "NULL")} ");
+        TryFindFieldOffset(cls, "soldier_type_id", out int offSid);
+        TryFindFieldOffset(cls, "weapon", out int offW);
+        TryFindFieldOffset(cls, "armor", out int offA);
+        TryFindFieldOffset(cls, "shield", out int offSh);
+        TryFindFieldOffset(cls, "weapon_level_stuff_id", out int offWl);
+        TryFindFieldOffset(cls, "armor_level_stuff_id", out int offAl);
+        TryFindFieldOffset(cls, "shield_level_stuff_id", out int offSl);
+        TryFindFieldOffset(cls, "npc_type", out int offTyp);
+        if (offSid > 0) sb.Append($"sid={ReadIl2CppInt(npc, offSid)} ");
+        if (offTyp > 0) sb.Append($"npc_type={ReadIl2CppInt(npc, offTyp)} ");
+        if (offW > 0) sb.Append($"weapon={ReadIl2CppInt(npc, offW)} ");
+        if (offA > 0) sb.Append($"armor={ReadIl2CppInt(npc, offA)} ");
+        if (offSh > 0) sb.Append($"shield={ReadIl2CppInt(npc, offSh)} ");
+        if (offWl > 0) sb.Append($"wl_stuff={ReadIl2CppInt(npc, offWl)} ");
+        if (offAl > 0) sb.Append($"al_stuff={ReadIl2CppInt(npc, offAl)} ");
+        if (offSl > 0) sb.Append($"sl_stuff={ReadIl2CppInt(npc, offSl)} ");
+        Plugin.LogInfo($"[Probe] ①字段读取: {sb}");
+
+        // 状态对象指针：若为 NULL，悬停时读状态名可能空/崩
+        if (TryFindFieldOffset(cls, "_cur_state", out int offSt) && offSt > 0)
+        {
+            IntPtr st = ReadIl2CppPointer(npc, offSt);
+            Plugin.LogInfo($"[Probe] ②状态指针 _cur_state = {(st != IntPtr.Zero ? "0x" + st.ToString("X") : "NULL")}");
+        }
+        else Plugin.LogInfo("[Probe] ②未找到 _cur_state 字段");
+
+        IntPtr mIs = FindMethodInHierarchy(cls, "IsSoldier", 0);
+        Plugin.LogInfo($"[Probe] ③准备调用 IsSoldier (方法={(mIs != IntPtr.Zero ? "ok" : "NULL")})");
+        if (mIs != IntPtr.Zero)
+            Plugin.LogInfo($"[Probe] ③IsSoldier 返回 {InvokeInt(mIs, npc)}");
+
+        IntPtr mDesc = FindMethodInHierarchy(cls, "GetSoldierAttrDesc", 4);
+        Plugin.LogInfo($"[Probe] ④准备调用 GetSoldierAttrDesc (方法={(mDesc != IntPtr.Zero ? "ok" : "NULL")})");
+        if (mDesc != IntPtr.Zero)
+        {
+            IntPtr buf = Marshal.AllocHGlobal(32);
+            try
+            {
+                for (int i = 0; i < 4; i++) Marshal.WriteIntPtr(buf, i * 8, IntPtr.Zero);
+                Invoke(mDesc, npc, buf, buf + 8, buf + 16, buf + 24);
+                Plugin.LogInfo($"[Probe] ④GetSoldierAttrDesc → hp='{ReadStringObject(Marshal.ReadIntPtr(buf))}' " +
+                    $"weapon='{ReadStringObject(Marshal.ReadIntPtr(buf, 8))}' " +
+                    $"armor='{ReadStringObject(Marshal.ReadIntPtr(buf, 16))}' " +
+                    $"shield='{ReadStringObject(Marshal.ReadIntPtr(buf, 24))}'");
+            }
+            finally { Marshal.FreeHGlobal(buf); }
+        }
+
+        Plugin.LogInfo("[Probe] ⑤全部读取通过（未崩溃）");
+        return JsonBuilder.Object(w =>
+        {
+            w.WriteBoolean("ok", true);
+            w.WriteBoolean("allReadPassed", true);
+        });
     }
 }

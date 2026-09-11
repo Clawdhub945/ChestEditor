@@ -18,11 +18,12 @@ internal static unsafe class Il2CppMemory
     internal static byte ReadIl2CppByte(IntPtr objPtr, int offset) => *(byte*)(objPtr + offset);
     internal static float ReadIl2CppFloat(IntPtr objPtr, int offset) => *(float*)(objPtr + offset);
     internal static IntPtr ReadIl2CppPointer(IntPtr objPtr, int offset) => *(IntPtr*)(objPtr + offset);
-
     internal static void WriteIl2CppInt(IntPtr objPtr, int offset, int value) => *(int*)(objPtr + offset) = value;
     /// <summary>写 1 字节（bool/byte）——勿用 WriteIl2CppInt 代替：bool 只占 1 字节，写 4 字节会改坏后续字段。</summary>
     internal static void WriteIl2CppByte(IntPtr objPtr, int offset, byte value) => *(byte*)(objPtr + offset) = value;
     internal static void WriteIl2CppFloat(IntPtr objPtr, int offset, float value) => *(float*)(objPtr + offset) = value;
+    /// <summary>写对象指针（引用类型字段，如 string 字段）。写入的 IL2CPP 对象须已登记 GC 根或用游戏内部对象。</summary>
+    internal static void WriteIl2CppPointer(IntPtr objPtr, int offset, IntPtr value) => *(IntPtr*)(objPtr + offset) = value;
 
     /// <summary>读取 IL2CPP string 对象指针指向的字符串（长度非法时退化为以 NUL 结尾读取）</summary>
     internal static string? ReadStringObject(IntPtr strObjPtr)
