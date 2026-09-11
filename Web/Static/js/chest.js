@@ -249,8 +249,14 @@ function renderModalList(kind) {
   const cfg = ITEM_MODALS[kind];
   const q = document.getElementById(cfg.searchId).value.toLowerCase();
   const el = document.getElementById(cfg.listId);
+  // 按容器类型过滤可添加物品（stuffType：3=食物 4=材料/装备 6=资源/药 8=尸体）：
+  // 料堆额外收尸体(8)，普通容器/货架只收 3/4/6
+  const _chest = chests[_modalChestIndex];
+  const isPile = _chest && _chest.name && _chest.name.indexOf('料堆') === 0;
+  const allow = isPile ? [3, 4, 6, 8] : [3, 4, 6];
   let html = '';
   for (const it of items) {
+    if (allow.indexOf(it.stuffType) < 0) continue;
     if (q && !it.name.toLowerCase().includes(q)) continue;
     html += '<div class="modal-item" onclick="' + cfg.applyFn + '(' + it.stuffId + ')">';
     html += '<img src="/icon/' + it.stuffId + '" onerror="hideImg(this)">';

@@ -48,9 +48,10 @@ internal static partial class ChestService
         if (System.Environment.TickCount64 - _itemsJsonAt < 500) return _itemsJson;
         if (_allItems == null)
             _allItems = DataTables.AllItems().ToList();
-        // 只保留"能放进容器"的物品类型：3=食物 4=材料/装备 6=资源/药 7=种子 8=尸体。
-        // 排除 1=建筑 2=生物/士兵/龙 5=活体动物 9=技术/信仰（stuff 表是全量表，直接吐出来
-        // 添加物品列表会混入士兵/龙等生物条目——用户反馈）。
+        // 物品类型语义：1=建筑 2=生物/士兵/龙 3=食物 4=材料/装备 5=活体动物
+        // 6=资源/药 7=种子 8=尸体 9=技术/信仰。全量 stuff 表含生物条目，直接吐出来
+        // 添加物品列表会混入士兵/龙等——用户反馈。这里输出**全部可容物类型**并带
+        // stuffType 字段，由前端按容器类型过滤：普通容器 3/4/6，料堆 3/4/6/8（尸体）。
         _itemsJson = JsonBuilder.Build(w =>
         {
             w.WriteStartArray();
@@ -61,6 +62,7 @@ internal static partial class ChestService
                 w.WriteStartObject();
                 w.WriteNumber("stuffId", kvp.Key);
                 w.WriteString("name", kvp.Value);
+                w.WriteNumber("stuffType", t);
                 w.WriteEndObject();
             }
             w.WriteEndArray();
