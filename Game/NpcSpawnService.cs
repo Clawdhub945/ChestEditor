@@ -127,6 +127,12 @@ internal static class NpcSpawnService
     private static int MakeResident(IntPtr npcPtr)
     {
         IntPtr npcClass = GetClass(npcPtr);
+        // 状态机初始化：CreateHireWorker 内核不调 ChangeState → 新 NPC cur_state=null。
+        // 实测后果：**保存存档必崩**（序列化解引用空状态对象；村民/士兵都中招）。
+        // 居民用 ChangeStateToIdle(float)（native 居民状态 NpcStateWanderIdle 由此而来）。
+        IntPtr mIdle = FindMethodInHierarchy(npcClass, "ChangeStateToIdle", 1);
+        if (mIdle != IntPtr.Zero) Invoke(mIdle, npcPtr, 0f);
+        else Plugin.LogInfo("[NpcSpawn] 未找到 ChangeStateToIdle/1（居民状态机未初始化）");
         // 名字兜底：悬停显示时 TMPro 解析损坏名字会崩（见 SanitizeNpcName 注释）
         SanitizeNpcName(npcPtr, "新人");
         if (TryFindFieldOffset(npcClass, "is_hire_worker", out int offHire) && offHire > 0)
@@ -208,7 +214,7 @@ internal static class NpcSpawnService
                 rnd.Next(20, 41), rnd.Next(2) == 0, 0, raceId, false);
             if (npc == IntPtr.Zero) continue;
             spawned++;
-            PostprocessSoldier(npc, raceId, full);
+            PostprocessSoldier(npc, raceId, full, family);
         }
         Plugin.LogInfo($"[NpcSpawn] 本地士兵({typeName}) ×{spawned} 武器{weaponId} 盔甲{armorId} 盾牌{shieldId}（参考 {wx:F1},{wy:F1}→落 {tx:F1},{ty:F1}，race={raceId}）");
         return (spawned, tx, ty);
@@ -243,15 +249,54 @@ internal static class NpcSpawnService
     }
 
     /// <summary>兵营路径的收尾（FacilityBarracks.DoCreateSoldier 同款）：训练度拉满、精灵/三眼人项链、名字兜底。</summary>
-    private static void PostprocessSoldier(IntPtr npc, int raceId, string fallbackName)
+    private static void PostprocessSoldier(IntPtr npc, int raceId, string fallbackName, string family)
     {
         IntPtr npcClass = GetClass(npc);
         if (TryFindFieldOffset(npcClass, "training_progress", out int offTrain) && offTrain > 0)
             WriteIl2CppFloat(npc, offTrain, 1.0f);
         if ((raceId == 7 || raceId == 8) && TryFindFieldOffset(npcClass, "nacklace_stuff_id", out int offNeck) && offNeck > 0)
             WriteIl2CppInt(npc, offNeck, 427001);
+        // 状态机收尾：兵营包装 CreateSoldier 返回前必调虚方法 ChangeStateToIdle，
+        // 13 参内核不调 → 新兵 _cur_state_name 为空（当前状态对象 null）。
+        // 实测后果：**保存存档必崩**（GameAssembly+0x24c2a09 / 0x24c2a56，两次同点）——
+        // 序列化 NPC 时解引用空状态对象。
+        // native 兵状态 = NpcStateSoldier（ChangeStateToSoldier 0 参）；兜底 ChangeStateToIdle(float)
+        IntPtr mState = FindMethodInHierarchy(npcClass, "ChangeStateToSoldier", 0);
+        if (mState != IntPtr.Zero)
+        {
+            Invoke(mState, npc);
+        }
+        else if ((mState = FindMethodInHierarchy(npcClass, "ChangeStateToIdle", 1)) != IntPtr.Zero)
+        {
+            Invoke(mState, npc, 0f);
+        }
+        else
+        {
+            Plugin.LogInfo("[NpcSpawn] 状态机收尾方法都没找到");
+        }
         // 名字兜底：正常情况下游戏内部已生成人名；这里只挡损坏值（TMPro 悬停崩的教训）
         SanitizeNpcName(npc, GameChainLocator.GenerateNpcName(raceId) ?? fallbackName);
+        // family_name 兜底：实测新兵该字段常为垃圾（'DTime'/'mage'/NUL，游戏延迟初始化所致），
+        // 存档序列化同样有风险 → 写入我们生成的姓（原生兵 family_name='詹' 即姓）
+        SanitizeStringField(npc, npcClass, "family_name",
+            string.IsNullOrEmpty(family) ? fallbackName : family);
+    }
+
+    /// <summary>按字段名兜底字符串字段：读回不合法（空/坏字符/超长）就写入 fallback（pinned 根保护）。</summary>
+    private static void SanitizeStringField(IntPtr npcPtr, IntPtr npcClass, string fieldName, string fallback)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(fallback)) return;
+            if (!TryFindFieldOffset(npcClass, fieldName, out int off) || off <= 0) return;
+            string? cur = ReadIl2CppString(npcPtr, off);
+            if (IsSafeDisplayName(cur)) return;
+            IntPtr s = StringToIl2Cpp(fallback);
+            GcHandleNew(s, true);              // 保护到写入完成（NPC 字段持有后即可达）
+            WriteIl2CppPointer(npcPtr, off, s);
+            Plugin.LogInfo($"[NpcSpawn] {fieldName} 不合法({Describe(cur)}) → 已修正为 '{fallback}'");
+        }
+        catch (Exception ex) { Plugin.LogInfo($"[NpcSpawn] SanitizeStringField({fieldName}) 失败: {ex.Message}"); }
     }
 
     /// <summary>
@@ -332,6 +377,69 @@ internal static class NpcSpawnService
     }
 
     private static IntPtr mGetItem2(IntPtr dicClass) => FindMethodInHierarchy(dicClass, "get_Item", 1);
+
+    /// <summary>
+    /// 【诊断·临时】直调 UI.DoSave(folder, null) 触发游戏保存（复现"召唤兵保存崩"用）。
+    /// cb 传 null：保存完成后游戏回调处可能 NRE，但此时存档数据已写完，不影响验证。
+    /// </summary>
+    internal static string ProbeSave(string folderName)
+    {
+        IntPtr uiClass = FindClassByName("UI");
+        if (uiClass == IntPtr.Zero) return "no UI class";
+        IntPtr ui = IntPtr.Zero;
+        foreach (var fh in EnumerateFieldHandles(uiClass))
+        {
+            if (fh.Name == "Ins" && fh.IsStatic) { ui = ReadStaticFieldValue(fh.Field); break; }
+        }
+        if (ui == IntPtr.Zero) return "UI.Ins null";
+        IntPtr mDoSave = FindMethodInHierarchy(uiClass, "DoSave", 2);
+        if (mDoSave == IntPtr.Zero) return "no DoSave/2";
+        IntPtr folder = StringToIl2Cpp(folderName);
+        GcHandleNew(folder, true);
+        // cb 必须是真委托：null 会在保存完成后回调处延迟崩（实测）。托管委托 → il2cpp Action。
+        var managed = new System.Action(() => Plugin.LogInfo("[SaveProbe] ★ 保存完成回调触发"));
+        var cb = Il2CppInterop.Runtime.DelegateSupport.ConvertDelegate<Il2CppSystem.Action>(managed);
+        IntPtr cbPtr = GetIl2CppPtr(cb);
+        Plugin.LogInfo("[SaveProbe] >>> UI.DoSave 开始");
+        IntPtr r = Invoke(mDoSave, ui, folder, cbPtr);
+        Plugin.LogInfo($"[SaveProbe] <<< UI.DoSave 返回 0x{r:X}");
+        return $"DoSave invoked r=0x{r:X}";
+    }
+
+    /// <summary>
+    /// 【诊断·临时】对比两个 NPC 的全部引用类型字段（沿父类链；只读 CLASS/GENERICINST/ARRAY
+    /// 种类的字段——值类型/字符串/位域跳过，否则垃圾指针 GetClass = 裸 AV）。
+    /// </summary>
+    internal static string ProbeRefFields(IntPtr oursPtr, IntPtr nativePtr)
+    {
+        var sb = new System.Text.StringBuilder();
+        foreach (var (ptr, tag) in new[] { (oursPtr, "OURS"), (nativePtr, "NATIVE") })
+        {
+            sb.Append($"== {tag} 0x{ptr:X} ==\n");
+            int depth = 0;
+            for (IntPtr walk = GetClass(ptr); walk != IntPtr.Zero && depth < 10; walk = GetParent(walk), depth++)
+            {
+                foreach (var fh in EnumerateFieldHandles(walk))
+                {
+                    if (fh.IsStatic || fh.Offset <= 0) continue;
+                    IntPtr typePtr = FieldGetType(fh.Field);
+                    if (typePtr == IntPtr.Zero) continue;
+                    int kind = TypeGetType(typePtr);
+                    if (kind != 0x12 && kind != 0x15 && kind != 0x14 && kind != 0x1d) continue;  // 仅引用类型
+                    try
+                    {
+                        IntPtr v = ReadIl2CppPointer(ptr, fh.Offset);
+                        string state = v == IntPtr.Zero
+                            ? "NULL"
+                            : "obj:" + (Il2CppApi.GetClassName(GetClass(v)) ?? "?");
+                        sb.Append($"{fh.Name} = {state}\n");
+                    }
+                    catch { sb.Append($"{fh.Name} = <read err>\n"); }
+                }
+            }
+        }
+        return sb.ToString();
+    }
 
     /// <summary>按字段名写 SoldierConfigInfo 的 int 字段（偏移沿父类链查，找不到记日志跳过）。</summary>
     private static void WriteConfigInt(IntPtr config, IntPtr configClass, string fieldName, int value)

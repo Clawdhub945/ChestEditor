@@ -19,6 +19,14 @@ internal static class NpcSpawnHandlers
         Router.Add("POST", "/api/npcspawn/debug/hover/{ptrHash}", ctx =>
             MainThread.Run(() => Game.NpcSpawnService.ProbeHover(ctx.Int("ptrHash")), 20000));
 
+        // 【诊断·临时】GET /api/npcspawn/debug/reffields/{ptrHash}/{nativeHash} → 引用字段空/非空对比
+        Router.Add("GET", "/api/npcspawn/debug/reffields/{ptrHash}/{nativeHash}", ctx =>
+            MainThread.Run(() => Game.NpcSpawnService.ProbeRefFields((IntPtr)ctx.Int("ptrHash"), (IntPtr)ctx.Int("nativeHash")), 30000));
+
+        // 【诊断·临时】POST /api/npcspawn/debug/save/{folder} → 直调 UI.DoSave 触发游戏保存
+        Router.Add("POST", "/api/npcspawn/debug/save/{folder}", ctx =>
+            MainThread.Run(() => Game.NpcSpawnService.ProbeSave(ctx.Params.GetValueOrDefault("folder") ?? ""), 60000));
+
         // 【诊断·临时】POST /api/npcspawn/debug/probe-soldier/{typeId}
         // 分步执行 SoldierHelper.CreateSoldier 内部逻辑，定位 KeyNotFoundException。
         Router.Add("POST", "/api/npcspawn/debug/probe-soldier/{typeId}", ctx =>
